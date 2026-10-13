@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Health check for the gateway. Usage: sos-gateway-health [--fix]
+# Exit 0 = all OK. With --fix it restarts a failed service (max once per run) and, after 5 consecutive
+# failures of the radio, reboots the Pi (the community-reported WM1302 SPI/reset problem).
+CONF=/etc/sos-gateway.env; [ -f "$CONF" ] && . "$CONF"
+FIX=0; [ "$1" = "--fix" ] && FIX=1
+STATE=/var/lib/sos-gateway; mkdir -p "$STATE"
+bad=0; say() { printf '%-34s %s\n' "$1" "$2"; }
+chk() { if eval "$2" >/dev/null 2>&1; then say "$1" "OK"; else say "$1" "FAIL"; bad=1; return 1; fi; }
+
+chk "SPI device /dev/spidev0.0" "test -e /dev/spidev0.0"
+chk "service concentratord" "systemctl is-active --quiet chirpstack-concentratord"
+chk "service mqtt-forwarder" "systemctl is-active --quiet chirpstack-mqtt-forwarder"
+chk "clock synced (NTP)" "timedatectl show -p NTPSynchronized --value | grep -q yes"
+chk "internet (DNS+TCP 443)" "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/${DOMAIN:-1.1.1.1}/443'"
+chk "VPS MQTT TLS port 8883" "timeout 8 openssl s_client -connect ${DOMAIN:-localhost}:8883 -CAfile /etc/chirpstack-mqtt-forwarder/ca.crt -verify_return_error </dev/null 2>&1 | grep -q 'Verify return code: 0'"
+chk "recent concentrator log" "journalctl -u chirpstack-concentratord --since '-5min' -q | grep -q ."
+say "CPU temp" "$(vcgencmd measure_temp 2>/dev/null || echo n/a)"
+say "undervoltage flags" "$(vcgencmd get_throttled 2>/dev/null || echo n/a)  (0x0 = good)"
+say "disk used" "$(df -h / | awk 'NR==2{print $5}')"
+
+if [ $FIX = 1 ]; then
+  F="$STATE/radio_fail"; n=$(cat "$F" 2>/dev/null || echo 0)
+  if ! systemctl is-active --quiet chirpstack-concentratord || ! test -e /dev/spidev0.0; then
+    n=$((n+1)); echo $n > "$F"; logger -t sos-gateway "radio unhealthy ($n)"
+    systemctl restart chirpstack-concentratord
+    [ "$n" -ge 5 ] && { logger -t sos-gateway "rebooting after $n radio failures"; echo 0 > "$F"; systemctl reboot; }
+  else echo 0 > "$F"; fi
+  systemctl is-active --quiet chirpstack-mqtt-forwarder || systemctl restart chirpstack-mqtt-forwarder
+fi
+exit $bad

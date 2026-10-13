@@ -1,0 +1,82 @@
+# SOS LoRa — VPS stack (DigitalOcean Singapore). Run from this directory:  docker compose up -d
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment: [DOMAIN]
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [backend]
+
+  backend:
+    build: { context: .., dockerfile: backend/Dockerfile }
+    restart: unless-stopped
+    environment:
+      SOS_DATABASE_URL: postgresql+psycopg://sos:${SOS_DB_PASSWORD}@postgres/sos
+      SOS_MQTT_HOST: mosquitto
+      SOS_MQTT_PORT: "1883"
+      SOS_MQTT_TLS: "false"
+      SOS_MQTT_USER: backend
+      SOS_MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD}
+      SOS_APP_ID: ${CHIRPSTACK_APP_ID}
+      SOS_JWT_SECRET: ${JWT_SECRET}
+      SOS_LINE_CHANNEL_TOKEN: ${LINE_CHANNEL_TOKEN}
+      SOS_LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET}
+      SOS_PUBLIC_URL: https://${DOMAIN}
+      SOS_BOOTSTRAP_ADMIN_USER: ${ADMIN_USER}
+      SOS_BOOTSTRAP_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    depends_on: [postgres, mosquitto]
+    # single worker on purpose: MQTT consumer + escalation loop run inside the process
+
+  chirpstack:
+    image: chirpstack/chirpstack:4
+    command: -c /etc/chirpstack
+    restart: unless-stopped
+    volumes: ["./chirpstack:/etc/chirpstack"]
+    environment:
+      CHIRPSTACK_DB_PASSWORD: ${CHIRPSTACK_DB_PASSWORD}
+      CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET}
+      MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD}
+    depends_on: [postgres, redis, mosquitto]
+    ports: ["127.0.0.1:8080:8080"]      # web UI: reach with  ssh -L 8080:localhost:8080 user@vps
+
+  chirpstack-rest-api:
+    image: chirpstack/chirpstack-rest-api:4
+    restart: unless-stopped
+    command: --server chirpstack:8080 --bind 0.0.0.0:8090 --insecure
+    depends_on: [chirpstack]
+    ports: ["127.0.0.1:8090:8090"]      # for tools/provision via SSH tunnel
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports: ["8883:8883"]
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/acl.conf:/mosquitto/config/acl:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./certs:/mosquitto/certs:ro
+      - mosquitto_data:/mosquitto/data
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      CHIRPSTACK_DB_PASSWORD: ${CHIRPSTACK_DB_PASSWORD}
+      SOS_DB_PASSWORD: ${SOS_DB_PASSWORD}
+    volumes:
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 300 1 --save 60 100 --appendonly no
+    volumes: [redisdata:/data]
+
+volumes: { caddy_data: {}, caddy_config: {}, mosquitto_data: {}, pgdata: {}, redisdata: {} }

@@ -1,0 +1,24 @@
+# ChirpStack MQTT Forwarder -> VPS Mosquitto (TLS, per-gateway account)
+[logging]
+  level="info"
+  log_to_syslog=true
+
+[backend]
+  enabled="concentratord"
+  [backend.concentratord]
+    event_url="ipc:///tmp/concentratord_event"
+    command_url="ipc:///tmp/concentratord_command"
+
+[mqtt]
+  topic_prefix="as923"              # must equal topic_prefix in infra/chirpstack/region_as923.toml
+  json=false                        # ChirpStack region backend uses protobuf (default) — keep in sync
+  server="ssl://@DOMAIN@:8883"
+  username="@GATEWAY_ID@"
+  password="@MQTT_PASSWORD@"
+  qos=0
+  clean_session=false
+  client_id=""
+  keep_alive_interval="30s"
+  ca_cert="/etc/chirpstack-mqtt-forwarder/ca.crt"
+  tls_cert=""
+  tls_key=""

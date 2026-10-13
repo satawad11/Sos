@@ -1,0 +1,25 @@
+# ChirpStack Concentratord (SX1302) for Seeed WM1302 SPI HAT on Raspberry Pi 4B.
+# Values verified against chirpstack-concentratord source: model "seeed_wm1302"; default pins
+# reset=GPIO17, power_en=GPIO18, sx1261_reset=GPIO5 on /dev/gpiochip0; SPI /dev/spidev0.0.
+[concentratord]
+  log_level="INFO"
+  log_to_syslog=true
+  stats_interval="60s"
+  disable_crc_filter=false
+
+  [concentratord.api]
+    event_bind="ipc:///tmp/concentratord_event"
+    command_bind="ipc:///tmp/concentratord_command"
+
+[gateway]
+  antenna_gain=@ANTENNA_GAIN@
+  lorawan_public=true
+  region="AS923"                    # AS923-1 (Thailand)
+  model="seeed_wm1302"
+  model_flags=[]
+  gateway_id="@GATEWAY_ID@"         # derived from the Pi's eth0 MAC (EUI-64) by install-gateway.sh
+
+  [gateway.location]
+    latitude=@LAT@
+    longitude=@LON@
+    altitude=0

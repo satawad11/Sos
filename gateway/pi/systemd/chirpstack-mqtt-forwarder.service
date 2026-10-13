@@ -1,0 +1,14 @@
+[Unit]
+Description=ChirpStack MQTT Forwarder
+After=network-online.target chirpstack-concentratord.service time-sync.target
+Wants=network-online.target time-sync.target
+
+[Service]
+ExecStart=/usr/local/bin/chirpstack-mqtt-forwarder -c /etc/chirpstack-mqtt-forwarder/chirpstack-mqtt-forwarder.toml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

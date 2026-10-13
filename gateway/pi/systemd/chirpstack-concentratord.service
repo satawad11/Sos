@@ -1,0 +1,15 @@
+[Unit]
+Description=ChirpStack Concentratord (SX1302 / WM1302)
+After=network.target
+Wants=network.target
+
+[Service]
+ExecStart=/usr/local/bin/chirpstack-concentratord-sx1302 -c /etc/chirpstack-concentratord/concentratord.toml -c /etc/chirpstack-concentratord/region_as923.toml -c /etc/chirpstack-concentratord/channels_as923.toml
+Restart=always
+RestartSec=5
+# SPI/GPIO access needs root (or spi/gpio groups); keep it simple and contained
+NoNewPrivileges=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

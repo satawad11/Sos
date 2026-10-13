@@ -1,0 +1,29 @@
+# ChirpStack v4 — Thailand (AS923-1) only. Secrets come from environment ($VAR) set in docker-compose.yml.
+[logging]
+  level="info"
+
+[postgresql]
+  dsn="postgres://chirpstack:$CHIRPSTACK_DB_PASSWORD@postgres/chirpstack?sslmode=disable"
+  max_open_connections=10
+  min_idle_connections=0
+
+[redis]
+  servers=["redis://redis/"]
+  tls_enabled=false
+  cluster=false
+
+[network]
+  net_id="000000"
+  enabled_regions=["as923"]
+
+[api]
+  bind="0.0.0.0:8080"
+  secret="$CHIRPSTACK_API_SECRET"
+
+[integration]
+  enabled=["mqtt"]
+  [integration.mqtt]
+    server="tcp://mosquitto:1883/"
+    username="chirpstack"
+    password="$MQTT_CHIRPSTACK_PASSWORD"
+    json=true

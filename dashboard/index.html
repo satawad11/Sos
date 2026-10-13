@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ระบบแจ้งเหตุฉุกเฉิน รพ.สต.</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#1c2733;--mut:#6b7885;--red:#c62828;--grn:#2e7d32;--amb:#ef6c00;--bd:#dde3e8;--pri:#1565c0}
+@media(prefers-color-scheme:dark){:root{--bg:#10161c;--card:#1a232c;--ink:#e6edf3;--mut:#93a1ad;--bd:#2c3a46}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,"Noto Sans Thai",sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;gap:12px;align-items:center;padding:10px 16px;background:var(--pri);color:#fff;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1}nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button,.btn{border:0;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer;background:var(--card);color:var(--ink);border:1px solid var(--bd)}
+nav button{background:transparent;color:#fff;border-color:transparent}nav button.on{background:#ffffff33}
+.btn.p{background:var(--pri);color:#fff;border-color:var(--pri)}.btn.g{background:var(--grn);color:#fff;border-color:var(--grn)}.btn.r{background:var(--red);color:#fff;border-color:var(--red)}
+main{max-width:1100px;margin:0 auto;padding:16px}.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--bd);font-size:14px;vertical-align:top}th{color:var(--mut);font-weight:600}
+.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;border:1px solid var(--bd)}
+.new{background:var(--red);color:#fff;border-color:var(--red)}.accepted{background:var(--amb);color:#fff;border-color:var(--amb)}.closed{background:var(--grn);color:#fff;border-color:var(--grn)}
+.alarm{border:3px solid var(--red);animation:b 1s infinite}@keyframes b{50%{background:#c6282833}}
+input,select,textarea{font:inherit;padding:7px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--ink);max-width:100%}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}.mut{color:var(--mut)}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:10px;display:none}
+#login{max-width:340px;margin:12vh auto}.warn{background:#fff3cd;color:#664d03;padding:8px 12px;border-radius:8px}
+</style></head>
+<body>
+<div id="app"></div><div id="toast"></div>
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt=iso=>iso?new Date(iso).toLocaleString("th-TH-u-ca-buddhist",{timeZone:"Asia/Bangkok",dateStyle:"short",timeStyle:"medium"}):"-";
+const ST={new:"รอรับเรื่อง",accepted:"รับเรื่องแล้ว",closed:"ปิดเคส",cancelled:"ยกเลิกโดยผู้ป่วย"};
+let token=sessionStorage.getItem("tk")||"",role=sessionStorage.getItem("role")||"",page="cases",ws=null,timer=null,audioOn=false;
+async function api(path,opt={}){
+  const r=await fetch("/api"+path,{...opt,headers:{"content-type":"application/json",...(token?{authorization:"Bearer "+token}:{}),...(opt.headers||{})},body:opt.body&&JSON.stringify(opt.body)});
+  if(r.status===401&&path!=="/login"){logout();throw new Error("หมดเวลา กรุณาเข้าสู่ระบบใหม่")}
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||("ผิดพลาด "+r.status));return j}
+function toast(m){const t=$("#toast");t.textContent=m;t.style.display="block";setTimeout(()=>t.style.display="none",3500)}
+const guard=f=>async(...a)=>{try{return await f(...a)}catch(e){toast(e.message)}};
+function logout(){token="";sessionStorage.clear();if(ws)ws.close();render()}
+function beep(){if(!audioOn)return;try{const c=new AudioContext(),o=c.createOscillator();o.frequency.value=880;o.connect(c.destination);o.start();setTimeout(()=>{o.stop();c.close()},700)}catch{}}
+function connectWS(){
+  if(ws)ws.close();ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws?token="+encodeURIComponent(token));
+  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==="case_new"){beep();toast("🚨 มีเหตุฉุกเฉินใหม่")}if(page==="cases")loadCases()};
+  ws.onclose=()=>{if(token)setTimeout(connectWS,3000)}}
+
+function render(){
+  if(!token){$("#app").innerHTML=`<div class="card" id="login"><h2>เข้าสู่ระบบ</h2><div class="row"><input id="u" placeholder="ชื่อผู้ใช้" autocomplete="username"></div><div class="row"><input id="p" type="password" placeholder="รหัสผ่าน" autocomplete="current-password"></div><button class="btn p" id="go">เข้าสู่ระบบ</button></div>`;
+    $("#go").onclick=guard(async()=>{const r=await api("/login",{method:"POST",body:{username:$("#u").value,password:$("#p").value}});token=r.token;role=r.role;sessionStorage.setItem("tk",token);sessionStorage.setItem("role",role);render()});
+    $("#p").onkeydown=e=>{if(e.key==="Enter")$("#go").click()};return}
+  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  $("#app").innerHTML=`<header><h1>🚑 ระบบแจ้งเหตุฉุกเฉิน</h1><nav>${tabs.map(t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}">${t[1]}</button>`).join("")}</nav><button class="btn" id="snd">${audioOn?"🔔 เสียงเปิด":"🔕 เปิดเสียงเตือน"}</button><button class="btn" id="out">ออก</button></header><main id="main"></main>`;
+  document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{page=b.dataset.p;render()});
+  $("#out").onclick=logout;$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
+  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,settings:loadSettings,audit:loadAudit})[page])();
+  if(page==="cases"||page==="devices")timer=setInterval(()=>(page==="cases"?loadCases:loadDevices)(),15000);
+  if(!ws||ws.readyState>1)connectWS()}
+
+const canEdit=()=>role==="admin"||role==="staff";
+const loadCases=guard(async()=>{
+  const [open,recent,st,gw]=await Promise.all([api("/cases?state=new,accepted"),api("/cases?limit=30"),api("/stats"),api("/gateways")]);
+  if(page!=="cases")return;
+  const row=c=>`<tr><td>#${c.id}</td><td>${esc(c.patient?c.patient.full_name:"(ไม่ทราบผู้ป่วย) "+c.device.dev_eui)}<div class="mut">${esc(c.patient?.address||"")} ${c.patient?.phone?`📞 ${esc(c.patient.phone)}`:""}</div></td><td><span class="tag ${c.state}">${ST[c.state]}</span>${c.overdue&&c.state==="new"?' <b style="color:var(--red)">เกินเวลา!</b>':""}${c.after_hours?' <span class="tag">นอกเวลา</span>':""}</td><td>${fmt(c.created_at)}</td><td>${esc(c.accepted_by)}</td><td><button class="btn" data-id="${c.id}" data-a="view">รายละเอียด</button></td></tr>`;
+  const gwBad=gw.filter(g=>g.offline);
+  $("#main").innerHTML=`${gwBad.length?`<div class="warn">⚠️ Gateway ขาดการเชื่อมต่อ: ${gwBad.map(g=>esc(g.gateway_id)).join(", ")}</div>`:""}
+  <div class="card ${open.some(c=>c.state==="new")?"alarm":""}"><h3>เคสที่ยังเปิดอยู่ (${open.length})</h3>${open.length?`<table><tr><th>#</th><th>ผู้ป่วย</th><th>สถานะ</th><th>เวลา</th><th>ผู้รับเรื่อง</th><th></th></tr>${open.map(row).join("")}</table>`:'<p class="mut">ไม่มีเคสค้าง</p>'}</div>
+  <div class="card"><b>30 วัน:</b> ${st.cases_30d} เคส · เหตุผิดพลาด ${st.false_alarm} · นอกเวลา ${st.after_hours} · เวลารับเรื่องเฉลี่ย ${st.avg_accept_s??"-"} วินาที</div>
+  <div class="card"><h3>ล่าสุด</h3><table><tr><th>#</th><th>ผู้ป่วย</th><th>สถานะ</th><th>เวลา</th><th>ผู้รับเรื่อง</th><th></th></tr>${recent.map(row).join("")}</table></div>`;
+  document.querySelectorAll("[data-a=view]").forEach(b=>b.onclick=()=>showCase(b.dataset.id))});
+const showCase=guard(async id=>{
+  const c=await api("/cases/"+id);
+  $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h2>เคส #${c.id} <span class="tag ${c.state}">${ST[c.state]}</span></h2>
+  <p><b>${esc(c.patient?.full_name||"ไม่ทราบผู้ป่วย")}</b><br>${esc(c.patient?.address||"")} ${esc(c.patient?.village||"")}<br>${c.patient?.phone?`📞 <a href="tel:${esc(c.patient.phone)}">${esc(c.patient.phone)}</a>`:""} ${c.patient?.lat!=null?`· <a target="_blank" rel="noopener" href="https://maps.google.com/?q=${c.patient.lat},${c.patient.lon}">แผนที่</a>`:""}</p>
+  <p class="mut">${esc(c.patient?.notes||"")}</p>
+  <p>อุปกรณ์ ${esc(c.device.label)} (${c.device.dev_eui}) · แบต ${c.device.battery??"-"}% · ไฟบ้าน ${c.device.mains_ok===false?"ดับ":"ปกติ"}</p>
+  ${canEdit()&&c.state==="new"?`<button class="btn g" id="acc">✅ รับเรื่อง (ส่งสัญญาณกลับอุปกรณ์)</button> `:""}
+  ${canEdit()&&(c.state==="new"||c.state==="accepted")?`<div class="row"><input id="note" placeholder="บันทึก (ถ้ามี)" size="40"><button class="btn p" id="cls">ปิดเคส</button><button class="btn r" id="fal">เหตุผิดพลาด</button></div>`:""}
+  </div><div class="card"><h3>ไทม์ไลน์</h3><table>${c.events.map(e=>`<tr><td>${fmt(e.at)}</td><td>${esc(e.kind)}</td><td>${esc(e.actor)}</td><td class="mut">${esc(JSON.stringify(e.detail))}</td></tr>`).join("")}</table></div>`;
+  $("#back").onclick=()=>render();
+  const act=(url,body)=>guard(async()=>{await api(url,{method:"POST",body});toast("บันทึกแล้ว");showCase(id)});
+  if($("#acc"))$("#acc").onclick=act(`/cases/${id}/accept`);
+  if($("#cls"))$("#cls").onclick=()=>act(`/cases/${id}/close`,{reason:"resolved",note:$("#note").value})();
+  if($("#fal"))$("#fal").onclick=()=>act(`/cases/${id}/close`,{reason:"false_alarm",note:$("#note").value})()});
+
+const loadPatients=guard(async()=>{
+  const [ps,cs]=await Promise.all([api("/patients"),api("/caregivers")]);
+  const opts=cs.filter(c=>c.active).map(c=>`<option value="${c.id}">${esc(c.full_name)}</option>`).join("");
+  $("#main").innerHTML=`${canEdit()?`<div class="card"><h3>เพิ่มผู้ป่วย</h3><div class="row"><input id="n" placeholder="ชื่อ-สกุล"><input id="a" placeholder="ที่อยู่" size="30"><input id="v" placeholder="หมู่บ้าน"><input id="ph" placeholder="โทร"><input id="la" placeholder="ละติจูด" size="9"><input id="lo" placeholder="ลองจิจูด" size="9"><button class="btn p" id="add">เพิ่ม</button></div></div>`:""}
+  <div class="card"><table><tr><th>ชื่อ</th><th>ที่อยู่/โทร</th><th>อุปกรณ์</th><th>ผู้ดูแล (ลำดับแจ้ง)</th><th></th></tr>${ps.map(p=>`<tr><td>${esc(p.full_name)}</td><td>${esc(p.address)}<br>${esc(p.phone)}</td><td>${esc(p.device||"-")}</td><td>${p.assignments.map(a=>a.priority+". "+esc(a.name)).join("<br>")||'<span class="mut">ยังไม่กำหนด</span>'}</td><td>${canEdit()?`<button class="btn" data-id="${p.id}">กำหนดผู้ดูแล</button>`:""}</td></tr>`).join("")}</table></div>`;
+  if($("#add"))$("#add").onclick=guard(async()=>{const num=v=>v===""?null:Number(v);await api("/patients",{method:"POST",body:{full_name:$("#n").value,address:$("#a").value,village:$("#v").value,phone:$("#ph").value,lat:num($("#la").value),lon:num($("#lo").value)}});loadPatients()});
+  document.querySelectorAll("button[data-id]").forEach(b=>b.onclick=()=>{const p=ps.find(x=>x.id==b.dataset.id);
+    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>ผู้ดูแลของ ${esc(p.full_name)}</h3><p class="mut">ลำดับที่ 1 จะได้รับแจ้งก่อน ถ้าไม่ตอบรับภายในเวลาที่ตั้งไว้ จะแจ้งคนถัดไป</p>${[1,2,3].map(i=>`<div class="row">ลำดับ ${i}: <select id="s${i}"><option value="">- ไม่ระบุ -</option>${opts}</select></div>`).join("")}<button class="btn p" id="sv">บันทึก</button></div>`;
+    p.assignments.forEach(a=>{$("#s"+a.priority).value=a.caregiver_id});
+    $("#back").onclick=()=>render();$("#sv").onclick=guard(async()=>{const ids=[1,2,3].map(i=>$("#s"+i).value).filter(Boolean).map(Number);await api(`/patients/${p.id}/assignments`,{method:"PUT",body:{caregiver_ids:ids}});toast("บันทึกแล้ว");render()})})});
+
+const loadCaregivers=guard(async()=>{
+  const cs=await api("/caregivers");
+  $("#main").innerHTML=`${canEdit()?`<div class="card"><h3>เพิ่ม อสม./ผู้ดูแล</h3><div class="row"><input id="n" placeholder="ชื่อ-สกุล"><input id="r" value="อสม."><input id="ph" placeholder="โทร"><button class="btn p" id="add">เพิ่ม</button></div></div>`:""}
+  <div class="card"><table><tr><th>ชื่อ</th><th>บทบาท</th><th>โทร</th><th>LINE</th><th></th></tr>${cs.map(c=>`<tr><td>${esc(c.full_name)}${c.active?"":" (ปิดใช้งาน)"}</td><td>${esc(c.role)}</td><td>${esc(c.phone)}</td><td>${c.line_bound?"✅ ผูกแล้ว":"❌ ยังไม่ผูก"}</td><td>${canEdit()?`<button class="btn" data-bind="${c.id}">สร้างรหัสผูก LINE</button>${c.line_bound?` <button class="btn" data-un="${c.id}">ยกเลิกผูก</button>`:""}`:""}</td></tr>`).join("")}</table><p class="mut">วิธีผูก: กดสร้างรหัส → ให้ อสม. เพิ่มเพื่อนบัญชี LINE ของ รพ.สต. แล้วพิมพ์รหัสนั้นส่งไป (รหัสใช้ได้ 30 นาที ครั้งเดียว)</p></div>`;
+  if($("#add"))$("#add").onclick=guard(async()=>{await api("/caregivers",{method:"POST",body:{full_name:$("#n").value,role:$("#r").value,phone:$("#ph").value}});loadCaregivers()});
+  document.querySelectorAll("[data-bind]").forEach(b=>b.onclick=guard(async()=>{const r=await api(`/caregivers/${b.dataset.bind}/bind-code`,{method:"POST"});alert("รหัสผูก LINE: "+r.code+"\nหมดอายุใน "+r.expires_minutes+" นาที")}));
+  document.querySelectorAll("[data-un]").forEach(b=>b.onclick=guard(async()=>{if(confirm("ยกเลิกการผูก LINE?")){await api(`/caregivers/${b.dataset.un}/unbind`,{method:"POST"});loadCaregivers()}}))});
+
+const loadDevices=guard(async()=>{
+  const [ds,ps]=await Promise.all([api("/devices"),api("/patients")]);if(page!=="devices")return;
+  const LC=["ready","active","repair","retired","lost"];
+  $("#main").innerHTML=`<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr><td>${esc(d.label)}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}${d.offline?' <b style="color:var(--red)">ออฟไลน์</b>':""}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${fmt(d.last_seen)}</td><td>${esc(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
+  document.querySelectorAll("button[data-id]").forEach(b=>b.onclick=()=>{const d=ds.find(x=>x.id==b.dataset.id);
+    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}</option>`).join("")}</select></div><button class="btn p" id="sv">บันทึก</button></div>`;
+    $("#back").onclick=()=>render();$("#sv").onclick=guard(async()=>{await api("/devices/"+d.id,{method:"PUT",body:{dev_eui:d.dev_eui,label:$("#l").value,lifecycle:$("#lc").value,patient_id:$("#pt").value?Number($("#pt").value):null}});toast("บันทึกแล้ว");render()})})});
+
+const loadSettings=guard(async()=>{
+  const [s,hs]=await Promise.all([api("/settings"),api("/holidays")]);const adm=role==="admin";const cgs=await api("/caregivers");
+  const oh=s.office_hours,es=s.escalation,dd=s.device_defaults,of=s.offline;
+  const DAYS=["จ","อ","พ","พฤ","ศ","ส","อา"];
+  $("#main").innerHTML=`${adm?"":'<div class="warn">เฉพาะผู้ดูแลระบบแก้ไขได้</div>'}
+  <div class="card"><h3>เวลาทำการ</h3><div class="row">${DAYS.map((d,i)=>`<label><input type="checkbox" class="dy" value="${i}" ${oh.days.includes(i)?"checked":""}>${d}</label>`).join(" ")}</div><div class="row">เริ่ม <input id="st" type="time" value="${oh.start}"> ถึง <input id="en" type="time" value="${oh.end}"><button class="btn p" id="s1">บันทึก</button></div></div>
+  <div class="card"><h3>การแจ้งต่อ (escalation)</h3><div class="row">ถ้าไม่ตอบรับใน <input id="ea" type="number" size="4" value="${es.escalate_after_s}"> วินาที → แจ้งคนถัดไป</div><div class="row">ถือว่า "เกินเวลา" เมื่อผ่าน <input id="ov" type="number" value="${es.overdue_after_s}"> วินาที</div><div class="row">ผู้รับสุดท้าย <select id="fin"><option value="">- ไม่ระบุ -</option>${cgs.map(c=>`<option value="${c.id}" ${c.id===es.final_caregiver_id?"selected":""}>${esc(c.full_name)}</option>`).join("")}</select><button class="btn p" id="s2">บันทึก</button></div></div>
+  <div class="card"><h3>ค่าเริ่มต้นอุปกรณ์ (ส่งลงอุปกรณ์ทุกเครื่องอัตโนมัติ)</h3><div class="row">Heartbeat ทุก <input id="hb" type="number" value="${dd.heartbeat_min}"> นาที · Poll ทุก <input id="po" type="number" value="${dd.poll_s}"> วินาที · เสียง(0-3) <input id="bz" type="number" value="${dd.buzzer}" min="0" max="3"> · กดค้าง <input id="ho" type="number" value="${dd.hold_ms}"> ms <button class="btn p" id="s3">บันทึก</button></div></div>
+  <div class="card"><h3>ออฟไลน์</h3><div class="row">อุปกรณ์เงียบเกิน <input id="do" type="number" value="${of.device_offline_min}"> นาที · Gateway เงียบเกิน <input id="go" type="number" value="${of.gateway_offline_min}"> นาที <button class="btn p" id="s4">บันทึก</button></div></div>
+  <div class="card"><h3>วันหยุดราชการ</h3>${hs.map(h=>`<div class="row">${h.day} ${esc(h.name)} ${adm?`<button class="btn" data-h="${h.id}">ลบ</button>`:""}</div>`).join("")}${adm?`<div class="row"><input id="hd" type="date"><input id="hn" placeholder="ชื่อวันหยุด"><button class="btn p" id="ha">เพิ่ม</button></div>`:""}</div>`;
+  if(!adm)return;const put=(k,v)=>guard(async()=>{await api("/settings/"+k,{method:"PUT",body:v});toast("บันทึกแล้ว")})();
+  $("#s1").onclick=()=>put("office_hours",{days:[...document.querySelectorAll(".dy:checked")].map(x=>+x.value),start:$("#st").value,end:$("#en").value});
+  $("#s2").onclick=()=>put("escalation",{escalate_after_s:+$("#ea").value,overdue_after_s:+$("#ov").value,final_caregiver_id:$("#fin").value?+$("#fin").value:null,max_rounds:1});
+  $("#s3").onclick=()=>put("device_defaults",{heartbeat_min:+$("#hb").value,poll_s:+$("#po").value,buzzer:+$("#bz").value,hold_ms:+$("#ho").value});
+  $("#s4").onclick=()=>put("offline",{device_offline_min:+$("#do").value,gateway_offline_min:+$("#go").value});
+  $("#ha").onclick=guard(async()=>{await api("/holidays",{method:"POST",body:{day:$("#hd").value,name:$("#hn").value}});loadSettings()});
+  document.querySelectorAll("[data-h]").forEach(b=>b.onclick=guard(async()=>{await api("/holidays/"+b.dataset.h,{method:"DELETE"});loadSettings()}))});
+
+const loadAudit=guard(async()=>{
+  if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
+  const [a,us]=await Promise.all([api("/audit"),api("/users")]);
+  $("#main").innerHTML=`<div class="card"><h3>ผู้ใช้งานระบบ</h3><table>${us.map(u=>`<tr><td>${esc(u.username)}</td><td>${esc(u.display_name)}</td><td>${u.role}</td></tr>`).join("")}</table><div class="row"><input id="nu" placeholder="username"><input id="nd" placeholder="ชื่อแสดง"><input id="np" type="password" placeholder="รหัสผ่าน ≥10 ตัว"><select id="nr"><option>staff</option><option>viewer</option><option>admin</option></select><button class="btn p" id="au">เพิ่มผู้ใช้</button></div></div>
+  <div class="card"><h3>Audit log</h3><table>${a.map(r=>`<tr><td>${fmt(r.at)}</td><td>${esc(r.actor)}</td><td>${esc(r.action)}</td><td>${esc(r.target)}</td></tr>`).join("")}</table></div>`;
+  $("#au").onclick=guard(async()=>{await api("/users",{method:"POST",body:{username:$("#nu").value,display_name:$("#nd").value,password:$("#np").value,role:$("#nr").value}});toast("เพิ่มแล้ว");loadAudit()})});
+
+render();
+</script></body></html>
