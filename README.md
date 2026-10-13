@@ -9,17 +9,18 @@
 | 1 | VPS (DigitalOcean SGP) | `infra/`, `backend/`, `dashboard/` | `docs/INSTALL-1-vps.md` |
 | 2 | Gateway Pi 4B + WM1302 | `gateway/pi/` (สคริปต์ติดตั้ง+config+systemd+health) | `docs/INSTALL-2-gateway.md` |
 | 3 | อุปกรณ์ผู้ป่วย Heltec V3 | `firmware/` | `docs/INSTALL-3-device-firmware.md` |
-| 4 | เครื่องมือ provision (คอมพิวเตอร์ของคุณ) | `tools/provision/` | `docs/INSTALL-4-provision.md` |
+| 4 | ติดตั้งอุปกรณ์ (หน้าเว็บ USB ในแดชบอร์ด หรือสคริปต์) | `dashboard/` เมนู "ติดตั้งอุปกรณ์", `backend/app/provision.py`, `tools/provision/` | `docs/INSTALL-4-provision.md` |
 | 5 | แดชบอร์ด + LINE OA | `dashboard/`, `backend/app/line.py` | `docs/INSTALL-5-dashboard-line.md` |
 | – | ตัวจำลองอุปกรณ์ (ทดสอบโดยไม่มีวิทยุ) | `simulator/sim.py` | ท้าย INSTALL-5 |
 
 ## สถานะการทดสอบ (ตรงไปตรงมา)
 | ส่วน | สถานะ |
 |---|---|
-| backend (case engine, ACK_L2, escalation, after-hours, LINE webhook, auth/role/lockout, settings→CONFIG) | ✅ เทสต์อัตโนมัติ 24 ข้อ + end-to-end จริงกับ Mosquitto (กด→รับ→ได้ ACK) |
+| backend (case engine, ACK_L2, escalation, after-hours, LINE webhook, auth/role/lockout, settings→CONFIG) | ✅ เทสต์อัตโนมัติ 31 ข้อ (รวมตั้งค่ารายเครื่อง, provision API, QR) + end-to-end จริงกับ Mosquitto (กด→รับ→ได้ ACK) |
 | dashboard | ✅ ทดสอบใน Chromium (login, ทุกหน้า, เคสขึ้นสีแดง) · ❗ ยังไม่ทดสอบบนมือถือ/จอเล็กและเสียงเตือนจริง |
 | Mosquitto TLS + ACL ต่อ gateway | ✅ ทดสอบด้วย mosquitto 2.0.18 (gateway ปลอมหัวข้อของตัวอื่นไม่ได้) |
 | gateway installer | ⚠️ ตรวจ syntax + render config + TOML parse ผ่าน · ❗ ยังไม่เคยรันบน Pi/WM1302 จริง |
+| หน้าเว็บ "ติดตั้งอุปกรณ์" (Web Serial) + ตั้งค่ารายเครื่อง | ✅ ทดสอบใน Chromium กับเฟิร์มแวร์จำลอง (สำเร็จ/ล้มแล้ว rollback/ตั้งค่า/รีเซ็ต) · ❗ ยังไม่ทดสอบกับบอร์ด Heltec จริง (พฤติกรรม DTR/RTS ตอนเปิดพอร์ต) และ ChirpStack จริง |
 | provision tool | ✅ ยูนิตเทสต์ 5 ข้อ (serial/HTTP จำลอง) · ❗ ยังไม่ได้ลองกับ ChirpStack/บอร์ดจริง |
 | docker-compose / ChirpStack config | ⚠️ `docker compose config` ผ่านเท่านั้น **ยังไม่เคยรัน stack จริง** (ไม่มี Docker daemon/เครือข่ายในที่เขียน) — ข้อเสี่ยงที่รู้: การแทน `$ตัวแปร` ใน toml ของ ChirpStack (มีวิธีแก้ใน INSTALL-1) |
 | **firmware** | ⚠️ **ยังไม่เคยคอมไพล์/รันบนบอร์ด** — ตรวจ API กับซอร์ส RadioLib 7.2.1 แล้ว (beginOTAA/activateOTAA/sendReceive/NONCES buffer/`LoRaWANEvent_t.confirming,fPort`/AS923) |

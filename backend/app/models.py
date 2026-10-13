@@ -53,7 +53,11 @@ class Device(Base):
     lifecycle: Mapped[str] = mapped_column(String(16), default="ready")  # ready|active|repair|retired|lost
     patient_id: Mapped[int | None] = mapped_column(ForeignKey("sos_patients.id"), nullable=True)
     fw_version: Mapped[str] = mapped_column(String(16), default="")
-    config_ver: Mapped[int] = mapped_column(Integer, default=1)  # desired config version
+    config_ver: Mapped[int] = mapped_column(Integer, default=1)  # desired config version (1..255)
+    config_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # per-device overrides of device_defaults
+    reported_config_ver: Mapped[int | None] = mapped_column(Integer, nullable=True)  # last cfg ver the device reported
+    config_changed_at: Mapped[datetime | None] = _dt(nullable=True)
+    config_applied_at: Mapped[datetime | None] = _dt(nullable=True)
     last_seen: Mapped[datetime | None] = _dt(nullable=True)
     battery: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mains_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

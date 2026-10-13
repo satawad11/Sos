@@ -55,6 +55,10 @@ class Engine:
         now = utcnow()
         dev.last_seen, dev.battery, dev.mains_ok = now, up.battery, up.mains_ok
         dev.fw_version = up.fw
+        if dev.reported_config_ver != up.config_ver:
+            dev.reported_config_ver = up.config_ver
+            if up.config_ver == (dev.config_ver & 0xFF):
+                dev.config_applied_at = now
         if "rssi" in meta: dev.last_rssi = meta["rssi"]
         if "snr" in meta: dev.last_snr = meta["snr"]
         if meta.get("gateway_id"):
@@ -154,7 +158,7 @@ class Engine:
         self._event(db, case, "ack_l2_queued", result=res)
 
     def _send_config(self, db, dev):
-        d = settings_store.get(db, "device_defaults")
+        d = settings_store.effective_device_cfg(db, dev)
         self.downlink(dev.dev_eui, codec.FPORT_CONFIG,
                       codec.encode_config(dev.config_ver, d["heartbeat_min"], d["poll_s"], d["buzzer"], d["hold_ms"]))
 

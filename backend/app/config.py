@@ -11,6 +11,9 @@ class Env(BaseSettings):
     mqtt_tls: bool = True
     mqtt_ca: str = ""
     app_id: str = ""              # ChirpStack application id (uuid)
+    cs_rest_url: str = "http://chirpstack-rest-api:8090"   # ChirpStack REST proxy (docker network)
+    cs_api_key: str = ""          # tenant API key named "provision"
+    cs_profile_id: str = ""       # ChirpStack device profile id (SOS-button)
     jwt_secret: str = "CHANGE_ME"
     jwt_hours: int = 12
     line_channel_token: str = ""

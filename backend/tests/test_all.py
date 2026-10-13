@@ -289,3 +289,142 @@ def test_line_empty_secret_rejected(monkeypatch):
     monkeypatch.setattr(line.env, "line_channel_secret", "")
     forged = base64.b64encode(hmac.new(b"", b"{}", hashlib.sha256).digest()).decode()
     assert line.verify_signature(b"{}", forged) is False
+
+
+# ---------- per-device config ----------
+def test_device_config_override_flow(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client)
+    did = client.get("/api/devices", headers=h).json()[0]["id"]
+    d0 = client.get("/api/devices", headers=h).json()[0]
+    assert d0["config"] == {"heartbeat_min": 30, "poll_s": 10, "buzzer": 2, "hold_ms": 1500} and not d0["config_pending"]
+    # validation
+    for bad in ({"poll_s": 1}, {"buzzer": 9}, {"x": 1}, {"hold_ms": "a"}, {"heartbeat_min": 120}, {"poll_s": True}):
+        assert client.put(f"/api/devices/{did}/config", json={"override": bad}, headers=h).status_code == 422
+    assert client.put(f"/api/devices/{did}/config", json={"override": {"buzzer": 0}},
+                      headers=login(client, "viewer")).status_code == 403
+    r = client.put(f"/api/devices/{did}/config", json={"override": {"buzzer": 3, "hold_ms": 2000}}, headers=h)
+    assert r.status_code == 200 and r.json()["changed"] and r.json()["effective"]["buzzer"] == 3
+    d1 = client.get("/api/devices", headers=h).json()[0]
+    assert d1["config"]["hold_ms"] == 2000 and d1["config"]["heartbeat_min"] == 30 and d1["config_ver"] == 2
+    # same value again = no change, no version bump
+    assert client.put(f"/api/devices/{did}/config", json={"override": {"buzzer": 3, "hold_ms": 2000}},
+                      headers=h).json()["changed"] is False
+    with SessionLocal() as db:
+        # device still reports old ver -> pending, and CONFIG downlink carries the merged values
+        eng.handle_uplink(db, EUI, up(codec.T_HEARTBEAT, cfg=1))
+        assert downs[-1][1] == 11 and downs[-1][2] == codec.encode_config(2, 30, 10, 3, 2000)
+    assert client.get("/api/devices", headers=h).json()[0]["config_pending"] is True
+    with SessionLocal() as db:
+        eng.handle_uplink(db, EUI, up(codec.T_HEARTBEAT, cfg=2))
+    d2 = client.get("/api/devices", headers=h).json()[0]
+    assert d2["config_pending"] is False and d2["config_applied_at"]
+    # reset to shared defaults
+    client.put(f"/api/devices/{did}/config", json={"override": {}}, headers=h)
+    assert client.get("/api/devices", headers=h).json()[0]["config"]["buzzer"] == 2
+    acts = [a["action"] for a in client.get("/api/audit", headers=h).json()]
+    assert acts.count("device_config") == 2
+
+
+def test_default_settings_validated(env_):
+    *_, client, ids = env_
+    h = login(client)
+    assert client.put("/api/settings/device_defaults", json={"heartbeat_min": 15, "poll_s": 2, "buzzer": 2, "hold_ms": 1500},
+                      headers=h).status_code == 422
+    assert client.put("/api/settings/device_defaults", json={"heartbeat_min": 15}, headers=h).status_code == 422
+
+
+def test_ensure_columns_adds_missing():
+    from sqlalchemy import text
+    from app.db import engine as e, ensure_columns
+    with e.begin() as cx:
+        cx.execute(text("DROP TABLE IF EXISTS sos_devices_old"))
+        cx.execute(text("CREATE TABLE sos_devices_old (id INTEGER PRIMARY KEY)"))
+    from app.db import Base
+    # simulate: drop a column-bearing table, recreate old shape, then migrate
+    with e.begin() as cx:
+        cx.execute(text("DROP TABLE IF EXISTS sos_devices"))
+        cx.execute(text("CREATE TABLE sos_devices (id INTEGER PRIMARY KEY, dev_eui VARCHAR(16), label VARCHAR(64), "
+                        "lifecycle VARCHAR(16), patient_id INTEGER, fw_version VARCHAR(16), config_ver INTEGER)"))
+    ensure_columns()
+    from sqlalchemy import inspect
+    cols = {c["name"] for c in inspect(e).get_columns("sos_devices")}
+    assert {"config_override", "reported_config_ver", "last_rssi"} <= cols
+
+
+# ---------- provisioning API ----------
+class FakeCS:
+    configured = True
+    def __init__(self): self.reg = []; self.deleted = []; self.fail = False
+    def register(self, eui, key, name, desc=""):
+        if self.fail:
+            from app.provision import ProvisionError
+            raise ProvisionError("ChirpStack: down")
+        self.reg.append((eui, key, name))
+    def delete(self, eui): self.deleted.append(eui)
+
+
+def test_provision_flow(env_, monkeypatch):
+    *_, client, ids = env_
+    cs = FakeCS(); monkeypatch.setattr("app.provision.get_cs", lambda: cs)
+    h = login(client)
+    assert client.post("/api/provision/start", json={"label": "SOS-9"}, headers=login(client, "viewer")).status_code == 403
+    r = client.post("/api/provision/start", json={"label": "SOS-9"}, headers=h)
+    assert r.status_code == 200
+    j = r.json(); eui = j["dev_eui"]
+    assert len(eui) == 16 and eui.startswith("02") and len(j["app_key"]) == 32 and cs.reg == [(eui, j["app_key"], "SOS-9")]
+    with SessionLocal() as db:
+        d = db.query(Device).filter_by(dev_eui=eui).one()
+        assert d.lifecycle == "ready" and d.label == "SOS-9"
+    assert j["app_key"] not in str(client.get("/api/audit", headers=h).json())
+    assert client.post("/api/provision/start", json={"label": "SOS-9"}, headers=h).status_code == 409
+    # confirm checks readback
+    assert client.post(f"/api/provision/{eui}/confirm", json={"info": "INFO deveui=0000 provisioned=1"}, headers=h).status_code == 422
+    ok = client.post(f"/api/provision/{eui}/confirm", json={"info": f"INFO fw=0.2 provisioned=1 deveui={eui} cfg_ver=1"}, headers=h)
+    assert ok.status_code == 200
+    # abort refused once the device was seen
+    with SessionLocal() as db:
+        from app.models import utcnow
+        db.query(Device).filter_by(dev_eui=eui).update({"last_seen": utcnow()}); db.commit()
+    assert client.post(f"/api/provision/{eui}/abort", headers=h).status_code == 409
+
+
+def test_provision_abort_and_failures(env_, monkeypatch):
+    *_, client, ids = env_
+    cs = FakeCS(); monkeypatch.setattr("app.provision.get_cs", lambda: cs)
+    h = login(client)
+    eui = client.post("/api/provision/start", json={"label": "SOS-A"}, headers=h).json()["dev_eui"]
+    assert client.post(f"/api/provision/{eui}/abort", headers=h).status_code == 200
+    assert cs.deleted == [eui]
+    with SessionLocal() as db:
+        assert db.query(Device).filter_by(dev_eui=eui).first() is None
+    cs.fail = True
+    assert client.post("/api/provision/start", json={"label": "SOS-B"}, headers=h).status_code == 502
+    with SessionLocal() as db:
+        assert db.query(Device).filter_by(label="SOS-B").first() is None
+    cs.configured = False
+    assert client.post("/api/provision/start", json={"label": "SOS-C"}, headers=h).status_code == 503
+    assert client.get("/api/provision/status", headers=h).json() == {"configured": False}
+
+
+def test_chirpstack_rest_client_rollback():
+    import httpx
+    from app.provision import ChirpStackRest, ProvisionError
+    calls = []
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/keys"): return httpx.Response(500)
+        return httpx.Response(200, json={})
+    c = ChirpStackRest("http://cs", "k", "app", "prof", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    import pytest
+    with pytest.raises(ProvisionError): c.register("02" + "ab" * 7, "00" * 16, "x")
+    assert calls[-1][0] == "DELETE"
+
+
+def test_label_svg(env_):
+    *_, client, ids = env_
+    h = login(client)
+    r = client.get(f"/api/provision/{EUI}/label.svg", headers=h)
+    assert r.status_code == 200 and b"<svg" in r.content and r.headers["content-type"].startswith("image/svg")
+    assert client.get("/api/provision/ffffffffffffffff/label.svg", headers=h).status_code == 404
+    assert client.get(f"/api/provision/{EUI}/label.svg").status_code in (401, 403)

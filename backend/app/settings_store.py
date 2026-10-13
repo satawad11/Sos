@@ -2,6 +2,10 @@
 from sqlalchemy.orm import Session
 from .models import Setting, utcnow
 
+CFG_FIELDS = ("heartbeat_min", "poll_s", "buzzer", "hold_ms")
+# limits match what the firmware accepts (CONFIG downlink is clamped there too)
+CFG_LIMITS = {"heartbeat_min": (5, 1275), "poll_s": (5, 120), "buzzer": (0, 3), "hold_ms": (500, 5000)}
+
 DEFAULTS: dict[str, dict] = {
     "office_hours": {"days": [0, 1, 2, 3, 4], "start": "08:30", "end": "16:30"},  # Mon=0
     "escalation": {"escalate_after_s": 120, "overdue_after_s": 300, "final_caregiver_id": None,
@@ -30,3 +34,30 @@ def put(db: Session, key: str, value: dict, actor: str) -> dict:
         db.add(Setting(key=key, value=value, updated_by=actor))
     db.commit()
     return get(db, key)
+
+
+def validate_device_cfg(value: dict, partial: bool, offline_min: int | None = None) -> dict:
+    """Validate device config values. partial=True allows a subset (per-device override). Raises ValueError."""
+    if not isinstance(value, dict):
+        raise ValueError("config must be an object")
+    out = {}
+    for k, v in value.items():
+        if k not in CFG_LIMITS:
+            raise ValueError(f"unknown field {k}")
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"{k} must be an integer")
+        lo, hi = CFG_LIMITS[k]
+        if not lo <= v <= hi:
+            raise ValueError(f"{k} must be {lo}-{hi}")
+        out[k] = v
+    if not partial and set(out) != set(CFG_FIELDS):
+        raise ValueError("all fields required: " + ", ".join(CFG_FIELDS))
+    if offline_min is not None and "heartbeat_min" in out and out["heartbeat_min"] * 1.5 > offline_min:
+        raise ValueError(f"heartbeat_min too long for offline threshold ({offline_min} min): device would show offline")
+    return out
+
+
+def effective_device_cfg(db: Session, dev) -> dict:
+    cfg = {k: get(db, "device_defaults")[k] for k in CFG_FIELDS}
+    cfg.update(dev.config_override or {})
+    return cfg

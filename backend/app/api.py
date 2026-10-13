@@ -11,6 +11,7 @@ from .engine import aware
 from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, Holiday, Notification,
                      Patient, User, utcnow)
 from .config import env
+from . import provision as prov
 
 router = APIRouter(prefix="/api")
 _engine = {"engine": None}          # set in main.py (dependency-injected so tests can swap)
@@ -241,7 +242,12 @@ def devices(db: Session = Depends(get_db), u=Depends(current_user)):
     for d in db.query(Device).order_by(Device.id).all():
         ls = aware(d.last_seen)
         offline = d.lifecycle == "active" and (ls is None or (now - ls).total_seconds() > off * 60)
-        out.append({"id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,
+        pending = (d.reported_config_ver is not None and d.reported_config_ver != (d.config_ver & 0xFF)) \
+            or (d.reported_config_ver is None and bool(d.config_override))
+        out.append({"config": settings_store.effective_device_cfg(db, d), "config_override": d.config_override or {},
+                    "config_pending": pending, "config_ver": d.config_ver, "config_reported_ver": d.reported_config_ver,
+                    "config_applied_at": iso(d.config_applied_at), "config_changed_at": iso(d.config_changed_at),
+                    "id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,
                     "patient_id": d.patient_id, "patient": d.patient.full_name if d.patient else None,
                     "fw": d.fw_version, "battery": d.battery, "mains_ok": d.mains_ok, "rssi": d.last_rssi,
                     "snr": d.last_snr, "last_seen": iso(d.last_seen), "offline": offline})
@@ -272,6 +278,33 @@ def edit_device(did: int, b: DeviceIn, db: Session = Depends(get_db), u=Depends(
     return {"ok": True}
 
 
+class DeviceConfigIn(BaseModel):
+    override: dict | None = None      # {} or None = back to the shared defaults
+
+
+def bump_ver(d: Device) -> None:
+    d.config_ver = (d.config_ver % 255) + 1
+    d.config_changed_at = utcnow()
+
+
+@router.put("/devices/{did}/config")
+def set_device_config(did: int, b: DeviceConfigIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    d = db.get(Device, did)
+    if not d: raise HTTPException(404)
+    off = settings_store.get(db, "offline")["device_offline_min"]
+    try:
+        ov = settings_store.validate_device_cfg(b.override or {}, partial=True, offline_min=off)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    if (d.config_override or {}) == ov:
+        return {"ok": True, "changed": False}
+    d.config_override = ov or None
+    bump_ver(d)
+    audit(db, u.username, "device_config", d.dev_eui, override=ov, config_ver=d.config_ver); db.commit()
+    return {"ok": True, "changed": True, "config_ver": d.config_ver,
+            "effective": settings_store.effective_device_cfg(db, d)}
+
+
 @router.get("/gateways")
 def gateways(db: Session = Depends(get_db), u=Depends(current_user)):
     off = settings_store.get(db, "offline")["gateway_offline_min"]
@@ -294,10 +327,13 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
         if not re.match(r"^\d\d:\d\d$", str(value.get("start", ""))) or not re.match(r"^\d\d:\d\d$", str(value.get("end", ""))):
             raise HTTPException(422, "start/end must be HH:MM")
     if key == "device_defaults":
-        for f in ("heartbeat_min", "poll_s", "buzzer", "hold_ms"):
-            if not isinstance(value.get(f), int) or value[f] < 0: raise HTTPException(422, f"{f} invalid")
+        try:
+            value = settings_store.validate_device_cfg(
+                value, partial=False, offline_min=settings_store.get(db, "offline")["device_offline_min"])
+        except ValueError as e:
+            raise HTTPException(422, str(e))
         # bump desired config version on all devices so they pick it up on next heartbeat
-        for d in db.query(Device).all(): d.config_ver = (d.config_ver % 255) + 1
+        for d in db.query(Device).all(): bump_ver(d)
     res = settings_store.put(db, key, value, u.username)
     audit(db, u.username, "setting_update", key, value=value); db.commit()
     return res
@@ -404,3 +440,79 @@ async def line_webhook(request: Request, db: Session = Depends(get_db), eng=Depe
                 elif case:
                     reply(f"เคสนี้ถูกรับโดย {case.accepted_by or 'ผู้อื่น'} แล้ว" if case.state == "accepted" else "เคสนี้ปิดแล้ว")
     return {"ok": True}
+
+
+# ---------------- provisioning (web page, Web Serial) ----------------
+class ProvStart(BaseModel):
+    label: str = Field(min_length=1, max_length=64)
+
+
+class ProvConfirm(BaseModel):
+    info: str = Field(max_length=400)
+
+
+@router.get("/provision/status")
+def prov_status(u=Depends(admin_only)):
+    return {"configured": prov.get_cs().configured}
+
+
+@router.post("/provision/start")
+def prov_start(b: ProvStart, db: Session = Depends(get_db), u=Depends(admin_only)):
+    cs = prov.get_cs()
+    if not cs.configured: raise HTTPException(503, "ChirpStack provisioning is not configured (CS API key / profile id)")
+    label = b.label.strip()
+    if not label: raise HTTPException(422, "label required")
+    if db.query(Device).filter_by(label=label).first(): raise HTTPException(409, "label already used")
+    eui, key = prov.gen_identity()
+    try:
+        cs.register(eui, key, label, "provisioned by " + u.username)
+    except prov.ProvisionError as e:
+        raise HTTPException(502, str(e))
+    try:
+        db.add(Device(dev_eui=eui, label=label, lifecycle="ready")); audit(db, u.username, "provision_start", eui, label=label)
+        db.commit()
+    except Exception:
+        db.rollback()
+        try: cs.delete(eui)
+        except Exception: pass
+        raise HTTPException(500, "could not save device")
+    return {"dev_eui": eui, "app_key": key, "join_eui": "0000000000000000", "label": label}
+
+
+def _fresh_device(db, eui):
+    d = db.query(Device).filter_by(dev_eui=eui.lower()).first()
+    if not d: raise HTTPException(404)
+    return d
+
+
+@router.post("/provision/{eui}/confirm")
+def prov_confirm(eui: str, b: ProvConfirm, db: Session = Depends(get_db), u=Depends(admin_only)):
+    d = _fresh_device(db, eui)
+    if f"deveui={d.dev_eui}" not in b.info.lower() or "provisioned=1" not in b.info:
+        raise HTTPException(422, "device readback does not match")
+    audit(db, u.username, "provision_confirmed", d.dev_eui, info=b.info[:200]); db.commit()
+    return {"ok": True, "dev_eui": d.dev_eui, "label": d.label}
+
+
+@router.post("/provision/{eui}/abort")
+def prov_abort(eui: str, db: Session = Depends(get_db), u=Depends(admin_only)):
+    d = _fresh_device(db, eui)
+    if d.lifecycle != "ready" or d.last_seen is not None or d.patient_id:
+        raise HTTPException(409, "device already in use; retire it instead")
+    try: prov.get_cs().delete(d.dev_eui)
+    except Exception as e: audit(db, u.username, "provision_abort_cs_failed", d.dev_eui, err=str(e)[:100])
+    audit(db, u.username, "provision_abort", d.dev_eui); db.delete(d); db.commit()
+    return {"ok": True}
+
+
+@router.get("/provision/{eui}/label.svg")
+def prov_label(eui: str, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    """QR (DevEUI) as SVG for the sticker on the box/device. Contains no secrets."""
+    import io
+    import qrcode
+    import qrcode.image.svg
+    from fastapi.responses import Response
+    d = _fresh_device(db, eui)
+    img = qrcode.make(d.dev_eui, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
+    buf = io.BytesIO(); img.save(buf)
+    return Response(buf.getvalue(), media_type="image/svg+xml")
