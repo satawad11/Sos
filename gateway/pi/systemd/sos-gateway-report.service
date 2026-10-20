@@ -1,0 +1,7 @@
+[Unit]
+Description=SOS gateway health report to the VPS
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sos-gateway-report

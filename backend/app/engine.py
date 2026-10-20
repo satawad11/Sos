@@ -6,7 +6,8 @@ from typing import Callable, Protocol
 from sqlalchemy.orm import Session
 from . import codec, settings_store
 from .hours import is_office_hours
-from .models import (Case, CaseEvent, Device, Assignment, Caregiver, Notification, Gateway, utcnow)
+from .gateways import GatewayMonitor
+from .models import (Case, CaseEvent, Device, Assignment, Caregiver, Notification, utcnow)
 
 log = logging.getLogger("sos.engine")
 OPEN_STATES = ("new", "accepted")
@@ -31,6 +32,8 @@ class Engine:
         self.downlink = downlink
         self.notifier = notifier
         self.publish = publish or (lambda e: None)
+        self.gw = GatewayMonitor(notifier, self.publish)
+        self.mqtt_ok: Callable[[], bool] = lambda: True      # main.py plugs in the MQTT worker's connection state
 
     # ---------- helpers ----------
     def _event(self, db: Session, case: Case, kind: str, actor="system", **detail):
@@ -63,10 +66,7 @@ class Engine:
         if "snr" in meta: dev.last_snr = meta["snr"]
         if meta.get("gateway_id"):
             dev.last_gateway = meta["gateway_id"]
-            gw = db.query(Gateway).filter_by(gateway_id=meta["gateway_id"]).first()
-            if gw is None:
-                gw = Gateway(gateway_id=meta["gateway_id"]); db.add(gw)
-            gw.last_seen = now
+            self.gw.on_uplink(db, meta["gateway_id"], now)
         result = "ok"
         if dev.lifecycle not in ("active", "ready"):
             result = "inactive_device"          # repair/retired/lost: record health only
@@ -85,6 +85,9 @@ class Engine:
             self._send_config(db, dev)
         db.commit()
         return result
+
+    def handle_gateway_report(self, db: Session, gateway_id: str, raw) -> str:
+        return self.gw.on_report(db, gateway_id.lower(), raw, utcnow())
 
     def _open_case(self, db: Session, dev: Device) -> Case | None:
         return (db.query(Case).filter(Case.device_id == dev.id, Case.state.in_(OPEN_STATES),
@@ -241,4 +244,5 @@ class Engine:
                     case.next_escalation_at = now + timedelta(seconds=max(esc["escalate_after_s"], 60) * 2)
                     self._event(db, case, "chain_exhausted")
         db.commit()
+        self.gw.tick(db, now, self.mqtt_ok())
         return n

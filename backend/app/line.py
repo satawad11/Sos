@@ -63,5 +63,11 @@ class LineNotifier:
             return False, "no line_user_id"
         return self._post(PUSH_URL, {"to": cg.line_user_id, "messages": [flex_for_case(case, reminder)]})
 
+    def notify_system(self, db: Session, cg: Caregiver, text: str) -> tuple[bool, str]:
+        """Plain-text system message (e.g. gateway offline)."""
+        if not cg.line_user_id:
+            return False, "no line_user_id"
+        return self._post(PUSH_URL, {"to": cg.line_user_id, "messages": [{"type": "text", "text": text[:4900]}]})
+
     def reply_text(self, reply_token: str, text: str):
         self._post(REPLY_URL, {"replyToken": reply_token, "messages": [{"type": "text", "text": text}]})

@@ -11,7 +11,8 @@ DEFAULTS: dict[str, dict] = {
     "escalation": {"escalate_after_s": 120, "overdue_after_s": 300, "final_caregiver_id": None,
                    "max_rounds": 1},
     "device_defaults": {"heartbeat_min": 30, "poll_s": 10, "buzzer": 2, "hold_ms": 1500},
-    "offline": {"device_offline_min": 90, "gateway_offline_min": 15},
+    "offline": {"device_offline_min": 90, "gateway_offline_min": 5},
+    "system_alert": {"caregiver_ids": [], "repeat_min": 60},   # who gets "gateway offline" LINE alerts; 0 = no reminders
     "message": {"afterhours_text": "นอกเวลาราชการ กรุณาโทร 1669"},
 }
 

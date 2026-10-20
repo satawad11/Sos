@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Publish a small JSON health report to the VPS:  <prefix>/gateway/<gateway-id>/sos/health   (run every minute by a systemd timer)
+# The dashboard uses it to tell "gateway is down" from "no device pressed anything", and to warn about a dead radio,
+# undervoltage, heat, full SD card. Usage:  sos-gateway-report [--print]     (--print: show the JSON, do not publish)
+set -u
+CONF=/etc/sos-gateway.env; [ -f "$CONF" ] && . "$CONF"
+GATEWAY_ID="${GATEWAY_ID:-}"; TOPIC_PREFIX="${TOPIC_PREFIX:-as923}"
+export XDG_CONFIG_HOME="${SOS_PUB_CONF_DIR:-/etc/sos-gateway}"     # holds the 'mosquitto_pub' options file (host, TLS, credentials; mode 600)
+
+num()  { [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]] && echo "$1" || echo null; }
+bool() { if "$@" >/dev/null 2>&1; then echo true; else echo false; fi; }
+
+uptime_s="$(num "$(cut -d. -f1 /proc/uptime 2>/dev/null)")"
+temp_raw="$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)"
+cpu_temp="$( [ -n "$temp_raw" ] && awk -v t="$temp_raw" 'BEGIN{printf "%.1f", t/1000}' || echo null )"
+throttled="$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2)"
+[[ "$throttled" =~ ^0x[0-9a-fA-F]+$ ]] && throttled="\"$throttled\"" || throttled=null
+disk_pct="$(num "$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc 0-9)")"
+mem_pct="$(num "$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{if(t>0)printf "%d", (t-a)*100/t}' /proc/meminfo 2>/dev/null)")"
+load1="$(num "$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)")"
+radio_fail="$(num "$(cat /var/lib/sos-gateway/radio_fail 2>/dev/null || echo 0)")"
+ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+
+json="$(jq -cn \
+  --argjson uptime_s "$uptime_s" --argjson cpu_temp_c "$cpu_temp" --argjson throttled "$throttled" \
+  --argjson disk_pct "$disk_pct" --argjson mem_pct "$mem_pct" --argjson load1 "$load1" --argjson radio_fail "$radio_fail" \
+  --argjson conc "$(bool systemctl is-active --quiet chirpstack-concentratord)" \
+  --argjson fwd  "$(bool systemctl is-active --quiet chirpstack-mqtt-forwarder)" \
+  --argjson spi  "$(bool test -e /dev/spidev0.0)" \
+  --argjson ntp  "$(bool bash -c 'timedatectl show -p NTPSynchronized --value | grep -q yes')" \
+  --arg ip "$ip" --arg sw "sos-gw-report 1" \
+  '{uptime_s:$uptime_s, cpu_temp_c:$cpu_temp_c, throttled:$throttled, disk_pct:$disk_pct, mem_pct:$mem_pct, load1:$load1,
+    radio_fail:$radio_fail, services:{concentratord:$conc, forwarder:$fwd}, spi:$spi, ntp:$ntp, ip:$ip, sw:$sw}')" || { echo "jq failed" >&2; exit 1; }
+
+if [ "${1:-}" = "--print" ]; then echo "$json"; exit 0; fi
+[[ "$GATEWAY_ID" =~ ^[0-9a-f]{16}$ ]] || { echo "GATEWAY_ID missing in $CONF" >&2; exit 1; }
+exec timeout 25 mosquitto_pub -q 1 -i "sos-report-$GATEWAY_ID" -t "$TOPIC_PREFIX/gateway/$GATEWAY_ID/sos/health" -m "$json"

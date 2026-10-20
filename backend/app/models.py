@@ -174,4 +174,13 @@ class Gateway(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     gateway_id: Mapped[str] = mapped_column(String(16), unique=True)
     label: Mapped[str] = mapped_column(String(64), default="")
-    last_seen: Mapped[datetime | None] = _dt(nullable=True)
+    last_seen: Mapped[datetime | None] = _dt(nullable=True)        # last time we heard from it by ANY route (report or device uplink)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)    # False = retired / do not alert
+    state: Mapped[str] = mapped_column(String(8), default="unknown")  # unknown|online|offline (what we last told people)
+    state_changed_at: Mapped[datetime | None] = _dt(nullable=True)
+    offline_reason: Mapped[str] = mapped_column(String(8), default="")  # silent|radio
+    offline_notified_at: Mapped[datetime | None] = _dt(nullable=True)
+    last_report_at: Mapped[datetime | None] = _dt(nullable=True)   # last health report from the gateway itself
+    report: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # sanitized last health report
+    degraded_since: Mapped[datetime | None] = _dt(nullable=True)   # radio/forwarder reported down since...
+    uplinks_total: Mapped[int] = mapped_column(Integer, default=0)

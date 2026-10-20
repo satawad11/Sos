@@ -428,3 +428,190 @@ def test_label_svg(env_):
     assert r.status_code == 200 and b"<svg" in r.content and r.headers["content-type"].startswith("image/svg")
     assert client.get("/api/provision/ffffffffffffffff/label.svg", headers=h).status_code == 404
     assert client.get(f"/api/provision/{EUI}/label.svg").status_code in (401, 403)
+
+
+# ---------- gateways: health reports, offline detection, LINE alerts ----------
+GW = "0016c001f1500001"
+GOOD = {"uptime_s": 5000, "cpu_temp_c": 51.2, "throttled": "0x0", "disk_pct": 31, "mem_pct": 22, "load1": 0.2,
+        "radio_fail": 0, "services": {"concentratord": True, "forwarder": True}, "spi": True, "ntp": True,
+        "ip": "192.168.1.50", "sw": "sos-gw-report 1"}
+
+
+def _gw(db):
+    from app.models import Gateway
+    return db.query(Gateway).filter_by(gateway_id=GW).one()
+
+
+def test_sanitize_report_and_topic():
+    from app import gateways as g
+    bad = {"uptime_s": "x", "cpu_temp_c": 9999, "evil": "<script>", "ip": "<b>", "throttled": "zz", "spi": "yes",
+           "services": {"concentratord": "no", "other": True}}
+    assert g.sanitize_report(bad) is None or "evil" not in g.sanitize_report(bad)
+    assert g.sanitize_report("nope") is None and g.sanitize_report({}) is None
+    clean = g.sanitize_report({**GOOD, "evil": 1, "cpu_temp_c": None, "ip": "10.0.0.2"})
+    assert "evil" not in clean and "cpu_temp_c" not in clean and clean["ip"] == "10.0.0.2" and clean["spi"] is True
+    from app.mqtt_worker import parse_gw_health
+    ok = parse_gw_health(f"as923/gateway/{GW.upper()}/sos/health", json.dumps(GOOD).encode(), "as923")
+    assert ok and ok[0] == GW
+    for t in (f"as923/gateway/{GW}/event/up", f"x/gateway/{GW}/sos/health", "as923/gateway/zz/sos/health",
+              f"as923/gateway/{GW}/sos/health/extra"):
+        assert parse_gw_health(t, b"{}", "as923") is None
+    assert parse_gw_health(f"as923/gateway/{GW}/sos/health", b"not json", "as923") is None
+    assert parse_gw_health(f"as923/gateway/{GW}/sos/health", b"[1]", "as923") is None
+    assert parse_gw_health(f"as923/gateway/{GW}/sos/health", b"{" + b" " * 5000 + b"}", "as923") is None
+
+
+def test_gateway_offline_alert_repeat_and_recovery(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 30}, "t")
+        assert eng.gw.on_report(db, GW, GOOD, t0) == "ok"
+        eng.gw.tick(db, t0 + timedelta(minutes=1))
+        assert _gw(db).state == "online" and notif.system == []
+        # silent 4 min < 5 min threshold: still fine
+        eng.gw.tick(db, t0 + timedelta(minutes=4)); assert notif.system == []
+        # silent > 5 min: one alert only, even if tick runs many times
+        for m in (6, 6.1, 7, 20):
+            eng.gw.tick(db, t0 + timedelta(minutes=m))
+        assert len(notif.system) == 1 and "ขาดการเชื่อมต่อ" in notif.system[0][1] and GW in notif.system[0][1]
+        assert _gw(db).state == "offline"
+        # reminder after repeat_min (30), not before
+        eng.gw.tick(db, t0 + timedelta(minutes=35)); assert len(notif.system) == 1
+        eng.gw.tick(db, t0 + timedelta(minutes=37)); assert len(notif.system) == 2 and "เตือนซ้ำ" in notif.system[1][1]
+        # it comes back: one recovery message, no more alerts
+        eng.gw.on_report(db, GW, GOOD, t0 + timedelta(minutes=40))
+        eng.gw.tick(db, t0 + timedelta(minutes=41))
+        assert len(notif.system) == 3 and "กลับมาออนไลน์" in notif.system[2][1] and _gw(db).state == "online"
+        eng.gw.tick(db, t0 + timedelta(minutes=42)); assert len(notif.system) == 3
+        from app.models import AuditLog
+        acts = [a.action for a in db.query(AuditLog).order_by(AuditLog.id)]
+        assert acts == ["gateway_offline", "gateway_offline_repeat", "gateway_online"]
+
+
+def test_gateway_device_uplink_counts_as_alive_and_never_seen_is_silent(env_, monkeypatch):
+    eng, downs, notif, client, ids = env_
+    patch_now(monkeypatch, NOON_TUE)
+    with SessionLocal() as db:
+        from app.models import Gateway
+        db.add(Gateway(gateway_id=GW, enabled=True)); db.commit()       # registered, never connected
+        eng.gw.tick(db, NOON_TUE + timedelta(hours=5)); assert notif.system == [] and _gw(db).state == "unknown"
+        eng.handle_uplink(db, EUI, up(codec.T_HEARTBEAT), {"gateway_id": GW, "rssi": -80, "snr": 5})
+        g = _gw(db); assert g.uplinks_total == 1 and g.last_seen is not None and g.last_report_at is None
+        eng.gw.tick(db, NOON_TUE + timedelta(minutes=3)); assert _gw(db).state == "online"
+
+
+def test_gateway_radio_dead_counts_as_offline_until_a_frame_arrives(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    dead = {**GOOD, "services": {"concentratord": False, "forwarder": True}}
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 0}, "t")
+        eng.gw.on_report(db, GW, GOOD, t0); eng.gw.tick(db, t0)
+        for m in (1, 2, 3):                                   # keeps reporting, but radio is dead
+            eng.gw.on_report(db, GW, dead, t0 + timedelta(minutes=m))
+        eng.gw.tick(db, t0 + timedelta(minutes=3)); assert notif.system == []     # < 3 min since it first reported dead (t0+1)
+        eng.gw.on_report(db, GW, dead, t0 + timedelta(minutes=4)); eng.gw.tick(db, t0 + timedelta(minutes=4.5))
+        assert len(notif.system) == 1 and "ตัวรับสัญญาณ LoRa" in notif.system[0][1]
+        assert _gw(db).offline_reason == "radio"
+        eng.gw.on_report(db, GW, GOOD, t0 + timedelta(minutes=6)); eng.gw.tick(db, t0 + timedelta(minutes=6.5))
+        assert len(notif.system) == 2 and "กลับมาออนไลน์" in notif.system[1][1]
+
+
+def test_gateway_no_judging_while_our_mqtt_is_down_or_just_reconnected(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 0}, "t")
+        eng.gw.on_report(db, GW, GOOD, t0)
+        eng.gw.tick(db, t0 + timedelta(minutes=30), mqtt_ok=False); assert notif.system == []     # our link is down
+        eng.gw.mqtt_connected(t0 + timedelta(minutes=30))
+        eng.gw.tick(db, t0 + timedelta(minutes=31)); assert notif.system == []                    # grace after reconnect
+        eng.gw.tick(db, t0 + timedelta(minutes=33)); assert len(notif.system) == 1                # grace over, still silent
+
+
+def test_gateway_recipients_fallback_disabled_and_engine_tick(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        # nobody configured -> falls back to the final caregiver of the escalation setting
+        settings_store.put(db, "escalation", {**settings_store.get(db, "escalation"), "final_caregiver_id": ids["c"]}, "t")
+        eng.gw.on_report(db, GW, GOOD, t0)
+        eng.tick(db, t0 + timedelta(minutes=10))                     # Engine.tick drives the gateway state machine too
+        assert [n for n, _ in notif.system] == ["ผอ.รพ.สต."]
+        # retired gateway: no more alerts
+        g = _gw(db); g.enabled = False; g.state = "unknown"; db.commit()
+        n = len(notif.system); eng.tick(db, t0 + timedelta(hours=3)); assert len(notif.system) == n
+
+
+def test_gateway_no_recipients_is_logged_not_crash(env_):
+    eng, downs, notif, client, ids = env_
+    with SessionLocal() as db:
+        eng.gw.on_report(db, GW, GOOD, NOON_TUE); eng.gw.tick(db, NOON_TUE + timedelta(minutes=10))
+        from app.models import AuditLog
+        a = db.query(AuditLog).filter_by(action="gateway_offline").one()
+        assert a.detail["no_recipients"] is True and notif.system == []
+
+
+def test_gateway_api(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer")
+    with SessionLocal() as db:
+        eng.gw.on_report(db, GW, {**GOOD, "throttled": "0x50005"}, utcnow_())
+    j = client.get("/api/gateways", headers=h).json()
+    assert len(j) == 1 and j[0]["status"] == "warning" and j[0]["report"]["ip"] == "192.168.1.50"
+    assert any("ไฟเลี้ยงต่ำ" in w for w in j[0]["warnings"])
+    gid = j[0]["id"]
+    # add: admin only, validated, unique
+    assert client.post("/api/gateways", json={"gateway_id": "0016c001f1500002", "label": "x"}, headers=hv).status_code == 403
+    assert client.post("/api/gateways", json={"gateway_id": "nothex"}, headers=h).status_code == 422
+    assert client.post("/api/gateways", json={"gateway_id": "0016C001F1500002", "label": "ม.3"}, headers=h).status_code == 200
+    assert client.post("/api/gateways", json={"gateway_id": "0016c001f1500002"}, headers=h).status_code == 409
+    new = [g for g in client.get("/api/gateways", headers=h).json() if g["gateway_id"].endswith("02")][0]
+    assert new["status"] == "unknown" and new["label"] == "ม.3"
+    # label: staff/admin; viewer cannot; enabled: admin only
+    assert client.put(f"/api/gateways/{gid}", json={"label": "รพ.สต."}, headers=hv).status_code == 403
+    assert client.put(f"/api/gateways/{gid}", json={"label": "รพ.สต."}, headers=h).status_code == 200
+    assert client.put(f"/api/gateways/{gid}", json={"enabled": False}, headers=h).status_code == 200
+    g = [x for x in client.get("/api/gateways", headers=h).json() if x["id"] == gid][0]
+    assert g["label"] == "รพ.สต." and g["status"] == "disabled" and g["enabled"] is False
+    assert client.put("/api/gateways/999", json={"label": "z"}, headers=h).status_code == 404
+
+
+def utcnow_():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
+
+
+def test_system_alert_settings_and_test_button(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer")
+    assert client.post("/api/system-alert/test", headers=h).status_code == 422          # nobody configured
+    P = lambda k, v, hh=h: client.put(f"/api/settings/{k}", json=v, headers=hh)
+    assert P("system_alert", {"caregiver_ids": [9999], "repeat_min": 60}).status_code == 422
+    assert P("system_alert", {"caregiver_ids": "x", "repeat_min": 60}).status_code == 422
+    assert P("system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 5}).status_code == 422
+    assert P("system_alert", {"caregiver_ids": [ids["a"], ids["a"]], "repeat_min": 0}).json()["caregiver_ids"] == [ids["a"]]
+    assert P("system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 60}, hv).status_code == 403
+    P("system_alert", {"caregiver_ids": [ids["a"], ids["c"]], "repeat_min": 60})
+    r = client.post("/api/system-alert/test", headers=h).json()
+    assert [x["caregiver"] for x in r["results"]] == ["อสม.หนึ่ง", "ผอ.รพ.สต."] and all(x["ok"] for x in r["results"])
+    assert len(notif.system) == 2
+    # offline thresholds validated
+    assert P("offline", {"device_offline_min": 90, "gateway_offline_min": 1}).status_code == 422
+    assert P("offline", {"device_offline_min": 90, "gateway_offline_min": "5"}).status_code == 422
+    assert P("offline", {"device_offline_min": 3, "gateway_offline_min": 5}).status_code == 422
+    assert P("offline", {"device_offline_min": 90, "gateway_offline_min": 7}).json()["gateway_offline_min"] == 7
+
+
+def test_ensure_columns_backfills_defaults_for_existing_rows():
+    from sqlalchemy import text
+    from app.db import engine as e, ensure_columns
+    with e.begin() as cx:
+        cx.execute(text("DROP TABLE IF EXISTS sos_gateways"))
+        cx.execute(text("CREATE TABLE sos_gateways (id INTEGER PRIMARY KEY, gateway_id VARCHAR(16), label VARCHAR(64), last_seen DATETIME)"))
+        cx.execute(text("INSERT INTO sos_gateways (gateway_id, label) VALUES ('aaaaaaaaaaaaaaaa', 'old')"))
+    ensure_columns()
+    with e.begin() as cx:
+        row = cx.execute(text("SELECT enabled, state, uplinks_total FROM sos_gateways")).one()
+    assert tuple(row) == (1, "unknown", 0)

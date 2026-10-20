@@ -16,9 +16,10 @@
 ## สถานะการทดสอบ (ตรงไปตรงมา)
 | ส่วน | สถานะ |
 |---|---|
-| backend (case engine, ACK_L2, escalation, after-hours, LINE webhook, auth/role/lockout, settings→CONFIG) | ✅ เทสต์อัตโนมัติ 31 ข้อ (รวมตั้งค่ารายเครื่อง, provision API, QR) + end-to-end จริงกับ Mosquitto (กด→รับ→ได้ ACK) |
+| backend (case engine, ACK_L2, escalation, after-hours, LINE webhook, auth/role/lockout, settings→CONFIG) | ✅ เทสต์อัตโนมัติ 41 ข้อ (รวมตั้งค่ารายเครื่อง, provision API, QR, ตรวจเกตเวย์ออฟไลน์/LINE) + end-to-end จริงกับ Mosquitto (กด→รับ→ได้ ACK) |
 | dashboard | ✅ ทดสอบใน Chromium (login, ทุกหน้า, เคสขึ้นสีแดง) · ❗ ยังไม่ทดสอบบนมือถือ/จอเล็กและเสียงเตือนจริง |
 | Mosquitto TLS + ACL ต่อ gateway | ✅ ทดสอบด้วย mosquitto 2.0.18 (gateway ปลอมหัวข้อของตัวอื่นไม่ได้) |
+| ตรวจสุขภาพเกตเวย์ + แจ้ง LINE เมื่อออฟไลน์ | ✅ เทสต์อัตโนมัติ 10 ข้อ + ทดสอบหน้าเว็บใน Chromium + ทดสอบสคริปต์รายงานจริงผ่าน mosquitto 2.0.18 (TLS+ACL) ไปจนถึงตัวถอดรหัสของ backend · ❗ ยังไม่เคยรันบน Pi จริง (vcgencmd/systemd) และยังไม่ส่ง LINE จริง |
 | gateway installer | ⚠️ ตรวจ syntax + render config + TOML parse ผ่าน · ❗ ยังไม่เคยรันบน Pi/WM1302 จริง |
 | หน้าเว็บ "ติดตั้งอุปกรณ์" (Web Serial) + ตั้งค่ารายเครื่อง | ✅ ทดสอบใน Chromium กับเฟิร์มแวร์จำลอง (สำเร็จ/ล้มแล้ว rollback/ตั้งค่า/รีเซ็ต) · ❗ ยังไม่ทดสอบกับบอร์ด Heltec จริง (พฤติกรรม DTR/RTS ตอนเปิดพอร์ต) และ ChirpStack จริง |
 | provision tool | ✅ ยูนิตเทสต์ 5 ข้อ (serial/HTTP จำลอง) · ❗ ยังไม่ได้ลองกับ ChirpStack/บอร์ดจริง |

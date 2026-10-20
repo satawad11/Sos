@@ -35,7 +35,7 @@ ask ANTENNA_GAIN "Antenna gain dBi (kit antenna ~2)" "2"
 # ---------- packages ----------
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q curl ca-certificates openssl jq chrony ufw fail2ban unattended-upgrades
+apt-get install -y -q curl ca-certificates openssl jq chrony ufw fail2ban unattended-upgrades mosquitto-clients
 
 # ---------- SPI ----------
 CFG=/boot/firmware/config.txt; [ -f "$CFG" ] || CFG=/boot/config.txt
@@ -81,13 +81,19 @@ sed -e "s|@GATEWAY_ID@|$GATEWAY_ID|g" -e "s|@DOMAIN@|$DOMAIN|g" -e "s|@MQTT_PASS
     "$HERE/config/mqtt-forwarder.toml.template" > /etc/chirpstack-mqtt-forwarder/chirpstack-mqtt-forwarder.toml
 install -m644 "$CA_FILE" /etc/chirpstack-mqtt-forwarder/ca.crt
 chmod 600 /etc/chirpstack-mqtt-forwarder/chirpstack-mqtt-forwarder.toml
-printf 'DOMAIN=%s\nGATEWAY_ID=%s\n' "$DOMAIN" "$GATEWAY_ID" > /etc/sos-gateway.env
+printf 'DOMAIN=%s\nGATEWAY_ID=%s\nTOPIC_PREFIX=as923\n' "$DOMAIN" "$GATEWAY_ID" > /etc/sos-gateway.env
+# credentials for the health reporter (mosquitto_pub reads $XDG_CONFIG_HOME/mosquitto_pub); root-only, keeps the password out of `ps`
+install -d -m700 /etc/sos-gateway
+# one option per line: mosquitto_pub does NOT accept several options on one line (verified against a real broker)
+printf -- '-h %s\n-p 8883\n--cafile /etc/chirpstack-mqtt-forwarder/ca.crt\n-u %s\n-P %s\n' "$DOMAIN" "$GATEWAY_ID" "$MQTT_PASSWORD" > /etc/sos-gateway/mosquitto_pub
+chmod 600 /etc/sos-gateway/mosquitto_pub
 
 # ---------- services ----------
 install -m644 "$HERE"/systemd/*.service "$HERE"/systemd/*.timer /etc/systemd/system/
 install -m755 "$HERE/bin/sos-gateway-health" /usr/local/bin/sos-gateway-health
+install -m755 "$HERE/bin/sos-gateway-report" /usr/local/bin/sos-gateway-report
 systemctl daemon-reload
-systemctl enable chirpstack-concentratord chirpstack-mqtt-forwarder sos-gateway-health.timer >/dev/null
+systemctl enable chirpstack-concentratord chirpstack-mqtt-forwarder sos-gateway-health.timer sos-gateway-report.timer >/dev/null
 
 # ---------- basic hardening ----------
 ufw --force reset >/dev/null; ufw default deny incoming >/dev/null; ufw default allow outgoing >/dev/null
@@ -101,6 +107,8 @@ if [ "${NEED_REBOOT:-0}" = 1 ]; then
   echo; echo "SPI was just enabled — reboot now:  sudo reboot   (services start automatically afterwards)"; exit 0
 fi
 systemctl restart chirpstack-concentratord; sleep 5; systemctl restart chirpstack-mqtt-forwarder; sleep 5
+systemctl restart sos-gateway-report.timer
 echo; /usr/local/bin/sos-gateway-health || true
+echo; echo "Health report to VPS (first one now):"; /usr/local/bin/sos-gateway-report && echo "  report sent OK" || echo "  !! report FAILED — check MQTT user/password/CA and that the VPS ACL allows topic as923/gateway/$GATEWAY_ID/sos/health"
 echo; echo "Gateway ID: $GATEWAY_ID   — register it in ChirpStack (Gateways > Add) if you have not yet."
 echo "Logs:  journalctl -u chirpstack-concentratord -u chirpstack-mqtt-forwarder -f"

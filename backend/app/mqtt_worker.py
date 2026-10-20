@@ -6,6 +6,7 @@ from . import codec
 from .config import env
 from .db import SessionLocal
 from .engine import Engine
+from .gateways import GW_RE, MAX_REPORT_BYTES
 
 log = logging.getLogger("sos.mqtt")
 
@@ -27,9 +28,26 @@ def parse_up_event(raw: bytes) -> tuple[str, int, bytes, dict] | None:
     return dev_eui, fport, data, meta
 
 
+def parse_gw_health(topic: str, raw: bytes, prefix: str | None = None) -> tuple[str, dict] | None:
+    """<prefix>/gateway/<gateway_id>/sos/health  ->  (gateway_id, report) or None."""
+    prefix = prefix or env.gw_topic_prefix
+    parts = topic.split("/")
+    if len(parts) != 5 or parts[0] != prefix or parts[1] != "gateway" or parts[3:] != ["sos", "health"]:
+        return None
+    gid = parts[2].lower()
+    if not GW_RE.match(gid) or len(raw) > MAX_REPORT_BYTES:
+        return None
+    try:
+        rep = json.loads(raw)
+    except ValueError:
+        return None
+    return (gid, rep) if isinstance(rep, dict) else None
+
+
 class MqttWorker:
     def __init__(self, engine_factory):
         self.engine: Engine = engine_factory(self.send_downlink)
+        self.engine.mqtt_ok = lambda: self.connected
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sos-backend")
         if env.mqtt_user:
             self.client.username_pw_set(env.mqtt_user, env.mqtt_password)
@@ -37,6 +55,7 @@ class MqttWorker:
             self.client.tls_set(ca_certs=env.mqtt_ca or None, cert_reqs=ssl.CERT_REQUIRED)
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
+        self.client.on_disconnect = self._on_disconnect
         self.client.reconnect_delay_set(1, 30)
         self.connected = False
 
@@ -51,8 +70,24 @@ class MqttWorker:
         self.connected = (rc == 0)
         log.info("MQTT connected rc=%s", rc)
         client.subscribe("application/+/device/+/event/up", qos=1)
+        client.subscribe(f"{env.gw_topic_prefix}/gateway/+/sos/health", qos=1)
+        if self.connected:
+            self.engine.gw.mqtt_connected()      # reports need a moment to arrive before gateways are judged
+
+    def _on_disconnect(self, client, userdata, flags, rc, props=None):
+        self.connected = False
+        log.warning("MQTT disconnected rc=%s", rc)
 
     def _on_message(self, client, userdata, msg):
+        if "/sos/health" in msg.topic:
+            gh = parse_gw_health(msg.topic, msg.payload)
+            if gh:
+                with SessionLocal() as db:
+                    try:
+                        self.engine.handle_gateway_report(db, gh[0], gh[1])
+                    except Exception:
+                        log.exception("gateway report handling failed"); db.rollback()
+            return
         parsed = parse_up_event(msg.payload)
         if not parsed:
             return

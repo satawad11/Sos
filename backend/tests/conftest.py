@@ -13,9 +13,10 @@ from app.models import User, Device, Patient, Caregiver, Assignment
 
 
 class FakeNotifier:
-    def __init__(self): self.sent = []; self.replies = []
+    def __init__(self): self.sent = []; self.replies = []; self.system = []
     def notify_case(self, db, case, cg, reminder):
         self.sent.append((case.id, cg.full_name, reminder)); return True, "ok"
+    def notify_system(self, db, cg, text): self.system.append((cg.full_name, text)); return True, "ok"
     def reply_text(self, tok, text): self.replies.append(text)
 
 

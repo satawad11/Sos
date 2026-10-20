@@ -10,6 +10,7 @@ class Env(BaseSettings):
     mqtt_password: str = ""
     mqtt_tls: bool = True
     mqtt_ca: str = ""
+    gw_topic_prefix: str = "as923"   # region topic prefix used by the gateways
     app_id: str = ""              # ChirpStack application id (uuid)
     cs_rest_url: str = "http://chirpstack-rest-api:8090"   # ChirpStack REST proxy (docker network)
     cs_api_key: str = ""          # tenant API key named "provision"

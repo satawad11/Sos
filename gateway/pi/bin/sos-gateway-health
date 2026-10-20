@@ -14,6 +14,7 @@ chk "service mqtt-forwarder" "systemctl is-active --quiet chirpstack-mqtt-forwar
 chk "clock synced (NTP)" "timedatectl show -p NTPSynchronized --value | grep -q yes"
 chk "internet (DNS+TCP 443)" "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/${DOMAIN:-1.1.1.1}/443'"
 chk "VPS MQTT TLS port 8883" "timeout 8 openssl s_client -connect ${DOMAIN:-localhost}:8883 -CAfile /etc/chirpstack-mqtt-forwarder/ca.crt -verify_return_error </dev/null 2>&1 | grep -q 'Verify return code: 0'"
+chk "health reporter timer" "systemctl is-active --quiet sos-gateway-report.timer"
 chk "recent concentrator log" "journalctl -u chirpstack-concentratord --since '-5min' -q | grep -q ."
 say "CPU temp" "$(vcgencmd measure_temp 2>/dev/null || echo n/a)"
 say "undervoltage flags" "$(vcgencmd get_throttled 2>/dev/null || echo n/a)  (0x0 = good)"

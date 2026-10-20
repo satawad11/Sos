@@ -11,6 +11,7 @@ from .engine import aware
 from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, Holiday, Notification,
                      Patient, User, utcnow)
 from .config import env
+from . import gateways as gwmod
 from . import provision as prov
 
 router = APIRouter(prefix="/api")
@@ -305,13 +306,72 @@ def set_device_config(did: int, b: DeviceConfigIn, db: Session = Depends(get_db)
             "effective": settings_store.effective_device_cfg(db, d)}
 
 
+def gw_dict(g: Gateway, now, off: int, n_dev: dict) -> dict:
+    st, reason = gwmod.classify(g, now, off)
+    crit, warn = gwmod.critical(g.report), gwmod.warnings(g.report)
+    return {"id": g.id, "gateway_id": g.gateway_id, "label": g.label, "enabled": g.enabled is not False,
+            "status": st, "offline": st == "offline", "reason": reason or (g.offline_reason if st == "offline" else ""),
+            "last_seen": iso(g.last_seen), "last_report_at": iso(g.last_report_at),
+            "state_changed_at": iso(g.state_changed_at), "uplinks_total": g.uplinks_total or 0,
+            "devices": n_dev.get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn}
+
+
 @router.get("/gateways")
 def gateways(db: Session = Depends(get_db), u=Depends(current_user)):
     off = settings_store.get(db, "offline")["gateway_offline_min"]
     now = utcnow()
-    return [{"gateway_id": g.gateway_id, "label": g.label, "last_seen": iso(g.last_seen),
-             "offline": g.last_seen is None or (now - aware(g.last_seen)).total_seconds() > off * 60}
-            for g in db.query(Gateway).all()]
+    n_dev: dict[str, int] = {}
+    for d in db.query(Device).filter(Device.lifecycle == "active").all():
+        if d.last_gateway:
+            n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
+    return [gw_dict(g, now, off, n_dev) for g in db.query(Gateway).order_by(Gateway.id).all()]
+
+
+class GatewayIn(BaseModel):
+    gateway_id: str
+    label: str = Field(default="", max_length=64)
+
+
+class GatewayPatch(BaseModel):
+    label: str | None = Field(default=None, max_length=64)
+    enabled: bool | None = None
+
+
+@router.post("/gateways")
+def add_gateway(b: GatewayIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    gid = b.gateway_id.lower().replace(":", "").strip()
+    if not gwmod.GW_RE.match(gid): raise HTTPException(422, "Gateway ID must be 16 hex chars")
+    if db.query(Gateway).filter_by(gateway_id=gid).first(): raise HTTPException(409, "already registered")
+    g = Gateway(gateway_id=gid, label=b.label.strip(), enabled=True, state="unknown", uplinks_total=0)
+    db.add(g); audit(db, u.username, "gateway_add", gid); db.commit()
+    return {"ok": True, "id": g.id}
+
+
+@router.put("/gateways/{gid}")
+def patch_gateway(gid: int, b: GatewayPatch, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    if b.label is not None:
+        g.label = b.label.strip()
+    if b.enabled is not None and b.enabled != (g.enabled is not False):
+        if u.role != "admin": raise HTTPException(403, "only admin can switch monitoring on/off")
+        g.enabled = b.enabled
+        if not b.enabled:
+            g.state, g.offline_notified_at = "unknown", None     # retired: stop alerting and forget the offline episode
+    audit(db, u.username, "gateway_update", g.gateway_id, label=g.label, enabled=g.enabled is not False)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/system-alert/test")
+def system_alert_test(db: Session = Depends(get_db), u=Depends(admin_only)):
+    """Send a test LINE message to the people who receive 'gateway offline' alerts."""
+    mon = get_engine().gw
+    if not mon.recipients(db):
+        raise HTTPException(422, "ยังไม่ได้เลือกผู้รับการแจ้งเตือนระบบ (หรือผู้รับสุดท้ายใน escalation)")
+    res = mon.send_system(db, "✅ ข้อความทดสอบจากระบบแจ้งเหตุฉุกเฉิน: ถ้าคุณเห็นข้อความนี้ แสดงว่าจะได้รับการแจ้งเตือนเมื่อเกตเวย์ขาดการเชื่อมต่อ")
+    audit(db, u.username, "system_alert_test", "", results=res); db.commit()
+    return {"results": res}
 
 
 # ---------------- settings / holidays / users / audit ----------------
@@ -326,6 +386,24 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
     if key == "office_hours":
         if not re.match(r"^\d\d:\d\d$", str(value.get("start", ""))) or not re.match(r"^\d\d:\d\d$", str(value.get("end", ""))):
             raise HTTPException(422, "start/end must be HH:MM")
+    if key == "offline":
+        try:
+            d_, g_ = value.get("device_offline_min"), value.get("gateway_offline_min")
+            if isinstance(d_, bool) or isinstance(g_, bool) or not isinstance(d_, int) or not isinstance(g_, int): raise ValueError
+        except (AttributeError, ValueError):
+            raise HTTPException(422, "device_offline_min and gateway_offline_min must be integers")
+        if not 3 <= g_ <= 240: raise HTTPException(422, "gateway_offline_min must be 3-240 (gateways report every minute)")
+        if not 10 <= d_ <= 10080: raise HTTPException(422, "device_offline_min must be 10-10080")
+        value = {"device_offline_min": d_, "gateway_offline_min": g_}
+    if key == "system_alert":
+        ids, rep = value.get("caregiver_ids"), value.get("repeat_min", 60)
+        if not isinstance(ids, list) or any(isinstance(i, bool) or not isinstance(i, int) for i in ids) or len(ids) > 20:
+            raise HTTPException(422, "caregiver_ids must be a list of caregiver ids")
+        if isinstance(rep, bool) or not isinstance(rep, int) or not (rep == 0 or 10 <= rep <= 1440):
+            raise HTTPException(422, "repeat_min must be 0 (off) or 10-1440")
+        found = {c.id for c in db.query(Caregiver).filter(Caregiver.id.in_(ids)).all()} if ids else set()
+        if set(ids) - found: raise HTTPException(422, "unknown caregiver id")
+        value = {"caregiver_ids": sorted(set(ids)), "repeat_min": rep}
     if key == "device_defaults":
         try:
             value = settings_store.validate_device_cfg(

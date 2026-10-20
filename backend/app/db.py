@@ -35,4 +35,10 @@ def ensure_columns() -> None:
                 if not col.nullable and col.default is None and col.server_default is None:
                     raise RuntimeError(f"cannot auto-add NOT NULL column {table.name}.{col.name}")
                 typ = col.type.compile(dialect=engine.dialect)
-                cx.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {typ}'))
+                dflt = ""
+                if col.default is not None and getattr(col.default, "is_scalar", False):
+                    # give existing rows the model default (otherwise they would read back as NULL)
+                    lit = col.type.literal_processor(dialect=engine.dialect)
+                    if lit is not None:
+                        dflt = f" DEFAULT {lit(col.default.arg)}"
+                cx.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {typ}{dflt}'))
