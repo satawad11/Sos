@@ -615,3 +615,472 @@ def test_ensure_columns_backfills_defaults_for_existing_rows():
     with e.begin() as cx:
         row = cx.execute(text("SELECT enabled, state, uplinks_total FROM sos_gateways")).one()
     assert tuple(row) == (1, "unknown", 0)
+
+
+# ---------- passwords & user management ----------
+def _login_raw(client, user, pw):
+    return client.post("/api/login", json={"username": user, "password": pw})
+
+
+def _hdr(r): return {"authorization": "Bearer " + r.json()["token"]}
+
+
+def test_password_policy_and_forced_change(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client)
+    assert client.post("/api/users", json={"username": "bob", "password": "bob1234567"}, headers=h).status_code == 422   # contains username
+    assert client.post("/api/users", json={"username": "bob", "password": "aaaaaaaaaaaa"}, headers=h).status_code == 422
+    assert client.post("/api/users", json={"username": "bob", "password": "password12345"}, headers=h).status_code == 422
+    assert client.post("/api/users", json={"username": "b o b", "password": "Zx9-long-pass"}, headers=h).status_code == 422
+    assert client.post("/api/users", json={"username": "bob", "password": "Zx9-long-pass"}, headers=h).status_code == 200
+    r = _login_raw(client, "bob", "Zx9-long-pass"); assert r.status_code == 200 and r.json()["must_change"] is True
+    hb = _hdr(r)
+    assert client.get("/api/cases", headers=hb).status_code == 403                  # blocked until the password is changed
+    assert client.get("/api/me", headers=hb).json()["must_change"] is True
+    bad = lambda cur, new: client.post("/api/me/password", json={"current_password": cur, "new_password": new}, headers=hb)
+    assert bad("wrong-current", "Another-Pass-77").status_code == 403
+    assert bad("Zx9-long-pass", "short").status_code == 422
+    assert bad("Zx9-long-pass", "Zx9-long-pass").status_code == 422                 # same as current
+    assert bad("Zx9-long-pass", "bobbob-Pass-1").status_code == 422                 # contains username
+    ok = bad("Zx9-long-pass", "Another-Pass-77"); assert ok.status_code == 200
+    assert client.get("/api/cases", headers=hb).status_code == 401                  # old token revoked
+    hb2 = {"authorization": "Bearer " + ok.json()["token"]}
+    assert client.get("/api/cases", headers=hb2).status_code == 200
+    assert _login_raw(client, "bob", "Zx9-long-pass").status_code == 401
+    assert _login_raw(client, "bob", "Another-Pass-77").json()["must_change"] is False
+    from app.models import AuditLog
+    with SessionLocal() as db:
+        txt = " ".join(str(a.detail) + a.action for a in db.query(AuditLog))
+        assert "Zx9-long-pass" not in txt and "Another-Pass-77" not in txt        # passwords never reach the audit log
+
+
+def test_admin_reset_unlocks_and_revokes(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer")
+    users = {x["username"]: x for x in client.get("/api/users", headers=h).json()}
+    vid, aid = users["viewer"]["id"], users["admin"]["id"]
+    assert client.post(f"/api/users/{vid}/reset-password", headers=hv).status_code == 403
+    assert client.post(f"/api/users/{aid}/reset-password", headers=h).status_code == 422          # not for yourself
+    assert client.post("/api/users/999/reset-password", headers=h).status_code == 404
+    for _ in range(5): _login_raw(client, "viewer", "wrong-password")
+    assert _login_raw(client, "viewer", "password12345").status_code == 429                       # locked
+    assert [x for x in client.get("/api/users", headers=h).json() if x["username"] == "viewer"][0]["locked"] is True
+    r = client.post(f"/api/users/{vid}/reset-password", headers=h); assert r.status_code == 200
+    tmp = r.json()["temp_password"]; assert len(tmp) == 14
+    assert hv and client.get("/api/me", headers=hv).status_code == 401                            # old session killed
+    lr = _login_raw(client, "viewer", tmp); assert lr.status_code == 200 and lr.json()["must_change"] is True
+    assert _login_raw(client, "viewer", "password12345").status_code == 401
+    from app.models import AuditLog
+    with SessionLocal() as db:
+        assert tmp not in " ".join(str(a.detail) for a in db.query(AuditLog))
+    for _ in range(5): _login_raw(client, "viewer", "wrong-password")
+    assert client.post(f"/api/users/{vid}/unlock", headers=h).json()["locked"] is False
+
+
+def test_user_patch_guards(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client)
+    users = {x["username"]: x for x in client.get("/api/users", headers=h).json()}
+    aid, vid = users["admin"]["id"], users["viewer"]["id"]
+    assert client.put(f"/api/users/{aid}", json={"role": "staff"}, headers=h).status_code == 409   # last admin / self
+    assert client.put(f"/api/users/{aid}", json={"active": False}, headers=h).status_code == 409
+    assert client.put(f"/api/users/{vid}", json={"role": "boss"}, headers=h).status_code == 422
+    hv = login(client, "viewer")
+    assert client.put(f"/api/users/{vid}", json={"role": "staff"}, headers=h).json()["role"] == "staff"
+    assert client.get("/api/me", headers=hv).status_code == 401                                    # role change revokes the old token
+    hv = login(client, "viewer"); assert client.get("/api/me", headers=hv).json()["role"] == "staff"
+    assert client.put(f"/api/users/{vid}", json={"role": "admin"}, headers=h).status_code == 200
+    h2 = login(client, "viewer")                                                                   # the second admin
+    assert client.put(f"/api/users/{aid}", json={"role": "staff"}, headers=h2).status_code == 200  # another admin may demote the first
+    assert client.put(f"/api/users/{vid}", json={"active": False}, headers=h2).status_code == 409  # but not itself / the last admin
+    assert client.put(f"/api/users/{aid}", json={"active": False}, headers=h2).status_code == 200
+    assert _login_raw(client, "admin", "password12345").status_code == 401                         # disabled user cannot log in
+    assert client.get("/api/me", headers=h).status_code == 401                                     # and its old token is dead
+
+
+def test_cli_reset(env_, capsys):
+    from app import cli
+    assert cli.main(["reset-password", "viewer"]) == 0
+    out = capsys.readouterr().out; tmp = out.split(": ")[1].split("\n")[0]
+    r = _login_raw(__import__("fastapi.testclient", fromlist=["TestClient"]).TestClient(__import__("app.main", fromlist=["create_app"]).create_app(False)), "viewer", tmp)
+    assert r.status_code == 200 and r.json()["must_change"] is True
+    assert cli.main(["reset-password", "nobody"]) == 1 and cli.main(["list-users"]) == 0 and cli.main([]) == 2
+
+
+# ---------- PDPA ----------
+def _pid(ids): return ids["p"]
+
+
+def test_consent_gate_for_activating_devices(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); p = _pid(ids)
+    r = client.post("/api/patients", json={"full_name": "นายสมชาย", "village": "ม.5", "phone": "0811112222"}, headers=h).json()
+    new = r["id"]; assert r["consent_ok"] is False
+    dev = client.post("/api/devices", json={"dev_eui": "70b3d57ed0000009", "label": "B1"}, headers=h).json()["id"]
+    put = lambda lc: client.put(f"/api/devices/{dev}", json={"dev_eui": "70b3d57ed0000009", "label": "B1", "lifecycle": lc, "patient_id": new}, headers=h)
+    assert put("active").status_code == 409 and "ความยินยอม" in put("active").json()["detail"]
+    assert put("ready").status_code == 200                                    # binding without activating is fine
+    assert client.put(f"/api/patients/{new}/consent", json={"given": True, "note": "แบบ ก-012"}, headers=login(client, "viewer")).status_code == 403
+    c = client.put(f"/api/patients/{new}/consent", json={"given": True, "note": "แบบ ก-012"}, headers=h).json()["patient"]
+    assert c["consent_ok"] is True and c["consent_by"] == "admin" and c["consent_note"] == "แบบ ก-012"
+    assert put("active").status_code == 200
+    # the requirement can be switched off by the admin (e.g. the hospital collects consent on paper elsewhere)
+    s = client.get("/api/settings", headers=h).json()["privacy"]
+    assert client.put("/api/settings/privacy", json={**s, "require_consent": False}, headers=h).status_code == 200
+    assert client.put(f"/api/patients/{new}/consent", json={"given": False}, headers=h).status_code == 200
+    # withdrawal frees the device, deactivates the patient and removes the notification chain
+    pt = [x for x in client.get("/api/patients", headers=h).json() if x["id"] == new][0]
+    assert pt["active"] is False and pt["consent_withdrawn_at"] and pt["device"] is None
+    d = [x for x in client.get("/api/devices", headers=h).json() if x["id"] == dev][0]
+    assert d["lifecycle"] == "ready" and d["patient_id"] is None
+    assert client.put(f"/api/patients/{new}", json={"full_name": "นายสมชาย", "active": True}, headers=h).status_code == 409
+
+
+def test_export_and_anonymize(env_, monkeypatch):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer"); p = _pid(ids)
+    patch_now(monkeypatch, NOON_TUE)
+    with SessionLocal() as db:
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT))
+        cid = db.query(Case).one().id
+    client.post(f"/api/cases/{cid}/accept", headers=h)
+    client.post(f"/api/cases/{cid}/close", json={"reason": "resolved", "note": "ผู้ป่วยหกล้ม ปวดสะโพก โทร 0800000000"}, headers=h)
+    assert client.get(f"/api/patients/{p}/export", headers=hv).status_code == 403
+    ex = client.get(f"/api/patients/{p}/export", headers=h)
+    assert ex.status_code == 200 and "attachment" in ex.headers["content-disposition"]
+    j = ex.json()
+    assert j["patient"]["full_name"] == "นางสมศรี ใจดี" and j["devices"][0]["dev_eui"] == EUI
+    assert j["cases"][0]["note"].startswith("ผู้ป่วยหกล้ม") and [e["kind"] for e in j["cases"][0]["events"]][0] == "created"
+    assert [a["name"] for a in j["caregivers_assigned"]] == ["อสม.หนึ่ง", "อสม.สอง"]
+    # anonymise: guarded
+    assert client.post(f"/api/patients/{p}/anonymize", json={"confirm_id": 999}, headers=h).status_code == 422
+    assert client.post(f"/api/patients/{p}/anonymize", json={"confirm_id": p}, headers=hv).status_code == 403
+    r = client.post(f"/api/patients/{p}/anonymize", json={"confirm_id": p, "keep_village": False}, headers=h)
+    assert r.status_code == 200 and r.json()["cases_scrubbed"] == 1 and r.json()["devices_freed"] == 1
+    assert client.post(f"/api/patients/{p}/anonymize", json={"confirm_id": p}, headers=h).status_code == 409
+    pt = [x for x in client.get("/api/patients", headers=h).json() if x["id"] == p][0]
+    assert pt["full_name"].startswith("(ลบข้อมูลแล้ว") and pt["phone"] == "" and pt["address"] == "" and pt["anonymized_at"]
+    assert pt["lat"] is None and pt["assignments"] == [] and pt["device"] is None and pt["village"] == ""
+    ex2 = client.get(f"/api/patients/{p}/export", headers=h).json()
+    blob = json.dumps(ex2, ensure_ascii=False)
+    assert "นางสมศรี" not in blob and "หกล้ม" not in blob and "0800000000" not in blob
+    assert len(ex2["cases"]) == 1 and ex2["cases"][0]["state"] == "closed"           # the case itself (statistics) remains
+    assert client.put(f"/api/patients/{p}", json={"full_name": "x"}, headers=h).status_code == 409
+    assert client.put(f"/api/patients/{p}/consent", json={"given": True}, headers=h).status_code == 409
+    from app.models import AuditLog
+    with SessionLocal() as db:
+        assert {"patient_export", "patient_anonymize"} <= {a.action for a in db.query(AuditLog)}
+    # an open case blocks anonymisation
+    with SessionLocal() as db:
+        from app.models import Patient
+        p2 = Patient(full_name="คนใหม่", active=True); db.add(p2); db.flush()
+        dv = Device(dev_eui="70b3d57ed0000077", lifecycle="active", patient_id=p2.id); db.add(dv); db.commit()
+        eng.handle_uplink(db, "70b3d57ed0000077", up(codec.T_ALERT, alert=9)); p2id = p2.id
+    assert client.post(f"/api/patients/{p2id}/anonymize", json={"confirm_id": p2id}, headers=h).status_code == 409
+
+
+def test_viewer_sees_masked_patient_data(env_, monkeypatch):
+    eng, downs, notif, client, ids = env_
+    hv = login(client, "viewer"); h = login(client)
+    patch_now(monkeypatch, NOON_TUE)
+    with SessionLocal() as db:
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT))
+    pv = client.get("/api/patients", headers=hv).json()[0]
+    assert pv["full_name"] == "นางสมศรี ใจดี" and pv["phone"] == "xxx-xxx-0000" and pv["address"] == "" and pv["lat"] is None
+    cv = client.get("/api/cases", headers=hv).json()[0]["patient"]
+    assert cv["phone"].startswith("xxx") and cv["address"] == ""
+    assert client.get("/api/cases/1", headers=hv).json()["patient"]["address"] == ""
+    assert client.get("/api/patients", headers=h).json()[0]["phone"] == "0800000000"            # staff/admin see everything
+
+
+def test_retention_purge(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); now = utcnow_()
+    with SessionLocal() as db:
+        from app.models import Notification, CaseEvent, AuditLog
+        dv = db.query(Device).one()
+        old = Case(device_id=dv.id, patient_id=ids["p"], alert_id=1, state="closed", created_at=now - timedelta(days=800))
+        mid = Case(device_id=dv.id, patient_id=ids["p"], alert_id=2, state="closed", created_at=now - timedelta(days=100))
+        openold = Case(device_id=dv.id, patient_id=ids["p"], alert_id=3, state="new", created_at=now - timedelta(days=900))
+        oldtest = Case(device_id=dv.id, patient_id=ids["p"], alert_id=4, state="closed", is_test=True, created_at=now - timedelta(days=40))
+        db.add_all([old, mid, openold, oldtest]); db.flush()
+        db.add_all([CaseEvent(case_id=old.id, kind="created"), Notification(case_id=old.id, caregiver_id=ids["a"])])
+        db.add_all([AuditLog(actor="x", action="login", at=now - timedelta(days=400)),
+                    AuditLog(actor="x", action="login", at=now - timedelta(days=10)),
+                    AuditLog(actor="x", action="patient_anonymize", at=now - timedelta(days=900))])
+        db.commit()
+    assert client.post("/api/privacy/retention", json={"dry_run": True}, headers=login(client, "viewer")).status_code == 403
+    dry = client.post("/api/privacy/retention", json={"dry_run": True}, headers=h).json()
+    assert dry["cases"] == 2 and dry["case_events"] == 1 and dry["notifications"] == 1 and dry["audit_rows"] == 1 and dry["dry_run"] is True
+    with SessionLocal() as db: assert db.query(Case).count() == 4                       # dry run deletes nothing
+    real = client.post("/api/privacy/retention", json={"dry_run": False}, headers=h).json()
+    assert real["cases"] == 2
+    with SessionLocal() as db:
+        assert sorted(c.alert_id for c in db.query(Case)) == [2, 3]                      # recent + the OPEN old case survive
+        acts = [a.action for a in db.query(AuditLog)]
+        assert "patient_anonymize" in acts and acts.count("login") >= 1 and "retention_run" in acts
+        assert db.query(CaseEvent).filter_by(case_id=1).count() == 0 and db.query(Notification).count() == 0
+    # validation
+    s = client.get("/api/settings", headers=h).json()["privacy"]
+    for bad in ({**s, "case_retention_days": 5}, {**s, "audit_retention_days": 10}, {**s, "line_detail": "all"}, {**s, "auto_purge": "yes"}):
+        assert client.put("/api/settings/privacy", json=bad, headers=h).status_code == 422, bad
+    ov = client.get("/api/privacy/overview", headers=h).json()
+    assert ov["active"] == 1 and ov["without_consent"][0]["has_active_device"] is True and ov["retention_preview"]["dry_run"] is True
+
+
+def test_line_minimal_detail():
+    from app.line import flex_for_case
+    p = type("P", (), dict(full_name="นางสมศรี", address="12 ม.3", village="ม.3", phone="0800000000", lat=13.9, lon=100.6))()
+    c = type("C", (), dict(id=7, patient=p))()
+    full = json.dumps(flex_for_case(c), ensure_ascii=False); mini = json.dumps(flex_for_case(c, detail="minimal"), ensure_ascii=False)
+    assert "12 ม.3" in full and "tel:0800000000" in full and "maps.google.com" in full
+    assert "นางสมศรี" in mini and "ม.3" in mini and "12 ม.3" not in mini and "0800000000" not in mini and "maps.google" not in mini and "accept:7" in mini
+
+
+# ---------- reports ----------
+def test_report_range_parsing():
+    from app import reports
+    s, e, d1, d2 = reports.parse_range("2026-12", None, None)
+    assert (d1.isoformat(), d2.isoformat()) == ("2026-12-01", "2026-12-31") and (e - s).days == 31
+    assert s == datetime(2026, 11, 30, 17, 0, tzinfo=timezone.utc)                    # midnight Bangkok = 17:00 UTC the day before
+    s, e, *_ = reports.parse_range(None, "2026-10-05", "2026-10-05"); assert (e - s) == timedelta(days=1)
+    import pytest
+    for args in (("2026-13", None, None), ("26-10", None, None), (None, "2026-10-05", "2026-10-01"), (None, "2026-01-01", "2027-12-31"),
+                 (None, "x", "y"), (None, None, None), (None, "2026-10-01", None)):
+        with pytest.raises(reports.RangeError): reports.parse_range(*args)
+    assert reports.be_date(datetime(2026, 9, 30, 17, 30, tzinfo=timezone.utc)) == "01/10/2569"      # Bangkok date, Buddhist Era
+
+
+def test_monthly_report_and_csv(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer")
+    from app.models import AuditLog, Gateway, Patient, Notification
+    T = lambda d, hh, mm=0: datetime(2026, 10, d, hh, mm, tzinfo=timezone.utc)
+    with SessionLocal() as db:
+        db.get(Patient, ids["p"]).village = "ม.3"
+        p2 = Patient(full_name="=HYPERLINK(\"http://x\")", village="ม.5", active=True); db.add(p2); db.flush()
+        dv = db.query(Device).one(); mk = lambda **k: Case(device_id=dv.id, alert_id=k.pop("alert_id"), **k)
+        db.add_all([
+            mk(alert_id=1, patient_id=ids["p"], state="closed", close_reason="resolved", created_at=T(5, 3), accepted_at=T(5, 3, 1), accepted_by="อสม.หนึ่ง", closed_at=T(5, 3, 31)),
+            mk(alert_id=2, patient_id=ids["p"], state="closed", close_reason="false_alarm", created_at=T(6, 15), accepted_at=T(6, 15, 5), after_hours=True, esc_step=1, overdue=True, closed_at=T(6, 15, 20)),
+            mk(alert_id=3, patient_id=p2.id, state="new", created_at=T(20, 5), note="+cmd|' /C calc'!A0"),
+            mk(alert_id=4, patient_id=ids["p"], state="closed", close_reason="resolved", created_at=datetime(2026, 9, 30, 17, 30, tzinfo=timezone.utc), accepted_at=datetime(2026, 9, 30, 17, 31, tzinfo=timezone.utc)),   # 01/10 00:30 Bangkok
+            mk(alert_id=5, patient_id=ids["p"], state="closed", close_reason="resolved", created_at=datetime(2026, 9, 30, 16, 30, tzinfo=timezone.utc)),    # 30/09 23:30 Bangkok -> September
+            mk(alert_id=6, patient_id=ids["p"], state="closed", is_test=True, close_reason="test", created_at=T(7, 4)),
+        ])
+        db.flush(); db.add(Notification(case_id=1, caregiver_id=ids["a"], status="sent")); db.add(Notification(case_id=2, caregiver_id=ids["a"], status="failed"))
+        db.add(Gateway(gateway_id=GW, label="รพ.สต.", enabled=True))
+        db.add_all([AuditLog(actor="system", action="gateway_offline", target=GW, at=T(10, 1)),
+                    AuditLog(actor="system", action="gateway_offline_repeat", target=GW, at=T(10, 2)),
+                    AuditLog(actor="system", action="gateway_online", target=GW, at=T(10, 1, 30)),
+                    AuditLog(actor="system", action="gateway_offline", target=GW, at=datetime(2026, 9, 30, 23, 0, tzinfo=timezone.utc)),
+                    AuditLog(actor="system", action="gateway_online", target=GW, at=datetime(2026, 10, 1, 1, 0, tzinfo=timezone.utc))])
+        db.commit()
+    r = client.get("/api/reports/summary?month=2026-10", headers=h); assert r.status_code == 200
+    j = r.json()
+    assert j["period"]["from_be"] == "01/10/2569" and j["period"]["to_be"] == "31/10/2569"
+    # October (Bangkok) holds cases 1-4; alert 5 (30/09 23:30 Bangkok) belongs to September; alert 6 is a device self-test
+    c = j["cases"]
+    assert (c["total"], c["resolved"], c["false_alarm"], c["still_open"], c["after_hours"], c["overdue"], c["escalated"], c["cancelled_by_device"], c["tests"]) == (4, 2, 1, 1, 1, 1, 1, 0, 1)
+    r_ = j["response"]                                       # accept times 60 s, 300 s, 60 s against a 120 s target
+    assert (r_["accepted"], r_["accept_avg_s"], r_["accept_median_s"], r_["accept_p90_s"], r_["within_target_pct"], r_["target_s"]) == (3, 140.0, 60.0, 300.0, 66.7, 120)
+    assert r_["close_avg_min"] == 25.5                       # closed after 31 and 20 minutes
+    assert {v["village"]: v["cases"] for v in j["by_village"]} == {"ม.3": 3, "ม.5": 1}
+    assert j["line"] == {"sent": 1, "failed": 1}
+    assert [i for i, n in enumerate(j["by_hour"]) if n] == [0, 10, 12, 22]                   # Bangkok local hours of cases 4, 1, 3, 2
+    assert sum(w["cases"] for w in j["by_weekday"]) == 4
+    g = j["gateways"]
+    assert len(g) == 1 and g[0]["outages"] == 2 and g[0]["label"] == "รพ.สต." and g[0]["ongoing"] is False
+    assert g[0]["downtime_min"] == 150.0                     # 23:00Z-01:00Z (2 h, crosses the month start) + 30 min on the 10th
+    assert [(t["cases"]) for t in j["top_patients"]] == [3, 1] and j["top_patients"][0]["name"] == "นางสมศรี ใจดี"
+    # viewer: aggregates only, no names
+    jv = client.get("/api/reports/summary?month=2026-10", headers=hv).json(); assert jv["top_patients"] == [] and jv["cases"]["total"] == 4
+    assert client.get("/api/reports/summary?month=bad", headers=h).status_code == 422
+    assert client.get("/api/reports/summary", headers=h).status_code == 422
+    # CSV
+    assert client.get("/api/reports/cases.csv?month=2026-10", headers=hv).status_code == 403
+    r = client.get("/api/reports/cases.csv?month=2026-10", headers=h)
+    assert r.status_code == 200 and r.content.startswith(b"\xef\xbb\xbf") and "sos-cases-2569-10.csv" in r.headers["content-disposition"]
+    import csv as _csv, io as _io
+    rows = list(_csv.reader(_io.StringIO(r.content.decode("utf-8-sig"))))
+    assert rows[0][0] == "เลขเคส" and len(rows) == 5 and rows[1][1] == "05/10/2569"
+    flat = [c for row in rows[1:] for c in row]
+    assert "'=HYPERLINK(\"http://x\")" in flat and "'+cmd|' /C calc'!A0" in flat and not any(c.startswith(("=", "+")) for c in flat)
+    with SessionLocal() as db: assert db.query(AuditLog).filter_by(action="report_export").one().detail["rows"] == 4
+
+
+# ---------- GPS / location ----------
+LOC_VECTOR = "180593c906c788d582"        # encode_loc(5, 13.9115, 100.5954, sats=8, hdop=1.2): the same vector is checked in firmware/test
+
+
+def test_loc_codec_vectors_and_rejections():
+    import pytest
+    b = codec.encode_loc(5, 13.9115, 100.5954, 8, 1.2)
+    assert b.hex() == LOC_VECTOR and len(b) == 9
+    l = codec.decode_loc(b); assert (l.alert_id, l.sats, l.hdop) == (5, 8, 1.0) and abs(l.lat - 13.9115) < 2e-5 and abs(l.lon - 100.5954) < 3e-5
+    for lat, lon in ((-33.8688, 151.2093), (89.99, -179.99), (-89.99, 179.99), (13.75, 100.5)):      # extremes survive the round trip
+        d = codec.decode_loc(codec.encode_loc(1, lat, lon, 4, 2.0)); assert abs(d.lat - lat) < 1.2e-5 and abs(d.lon - lon) < 2.2e-5
+    assert codec.decode_loc(codec.encode_loc(1, 1.0, 1.0, 99, 99)).sats == 15 and codec.decode_loc(codec.encode_loc(1, 1.0, 1.0, 5, 99)).hdop == 7.5
+    for bad in (b"", b[:8], b + b"\0", bytes([0x17]) + b[1:], bytes([0x28]) + b[1:],        # length / type / protocol version
+                codec.encode_loc(1, 13.9, 100.5, 0, 1.0),                                      # 0 satellites = no fix
+                codec.encode_loc(1, 0.0, 0.0, 6, 1.0)):                                        # null island
+        with pytest.raises(codec.CodecError): codec.decode_loc(bad)
+
+
+def _loc_case(eng, monkeypatch, state_new=True):
+    patch_now(monkeypatch, NOON_TUE)
+    with SessionLocal() as db:
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5)); return db.query(Case).one().id
+
+
+def test_location_attached_to_case_and_pushed_once(env_, monkeypatch):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer")
+    with SessionLocal() as db:                                                         # patient home ~ 1.1 km from the fix below
+        from app.models import Patient
+        p = db.get(Patient, ids["p"]); p.lat, p.lon = 13.9015, 100.5954; db.commit()
+    cid = _loc_case(eng, monkeypatch)
+    with SessionLocal() as db:
+        assert eng.handle_location(db, EUI, bytes.fromhex(LOC_VECTOR), {"gateway_id": GW, "rssi": -90, "snr": 5}) == "ok"
+        c = db.get(Case, cid); d = db.query(Device).one()
+        assert abs(c.loc_lat - 13.9115) < 2e-5 and c.loc_sats == 8 and abs(d.loc_lon - 100.5954) < 3e-5 and d.last_gateway == GW
+        ev = [e for e in c.events if e.kind == "location"][0]
+        assert ev.detail["sats"] == 8 and 1100 < ev.detail["away_from_home_m"] < 1300 and "lat" not in ev.detail   # no coordinates in the event log
+    assert notif.loc == [(cid, "อสม.หนึ่ง", notif.loc[0][2], notif.loc[0][3], 8, notif.loc[0][5])] and 1100 < notif.loc[0][5] < 1300
+    # the same fix again (retransmission) does not page people a second time
+    with SessionLocal() as db: assert eng.handle_location(db, EUI, bytes.fromhex(LOC_VECTOR), {}) == "ok"
+    assert len(notif.loc) == 1
+    # a clearly different position does
+    with SessionLocal() as db: eng.handle_location(db, EUI, codec.encode_loc(5, 13.9215, 100.5954, 7, 1.0), {})
+    assert len(notif.loc) == 2
+    # API: staff see the position + a map link; viewers do not
+    c = client.get(f"/api/cases/{cid}", headers=h).json()
+    assert c["loc"]["sats"] == 7 and c["loc"]["url"].startswith("https://maps.google.com/?q=13.92") and c["loc"]["home_distance_m"] > 2000
+    assert client.get(f"/api/cases/{cid}", headers=hv).json()["loc"] is None
+    d = client.get("/api/devices", headers=h).json()[0]["loc"]
+    assert d["fresh"] is False                         # the fix is dated "NOON_TUE", days before the real clock the API uses
+    assert d["away"] is True and client.get("/api/devices", headers=hv).json()[0]["loc"] is None
+
+
+def test_location_edge_cases(env_, monkeypatch):
+    eng, downs, notif, client, ids = env_
+    patch_now(monkeypatch, NOON_TUE)
+    with SessionLocal() as db:
+        assert eng.handle_location(db, "70b3d57e00000000", bytes.fromhex(LOC_VECTOR), {}) == "unknown_device"
+        assert eng.handle_location(db, EUI, b"\x18\x05", {}) == "bad_payload"
+        assert eng.handle_location(db, EUI, bytes.fromhex(LOC_VECTOR), {}) == "stored_no_case"        # fix with no matching alert: kept on the device only
+        assert db.query(Device).one().loc_lat is not None and notif.loc == []
+    cid = _loc_case(eng, monkeypatch)
+    with SessionLocal() as db:
+        eng.accept(db, cid, "อสม.หนึ่ง"); eng.close(db, cid, "x")
+        eng.handle_location(db, EUI, bytes.fromhex(LOC_VECTOR), {})              # case closed already: stored, nobody is paged
+        assert db.get(Case, cid).loc_lat is not None
+    assert notif.loc == []
+    # the notifier may decline (minimal privacy mode): recorded as "skipped", not as a failure
+    notif.loc_skip = True
+    with SessionLocal() as db:
+        db.query(Case).delete(); db.commit()
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5)); eng.handle_location(db, EUI, bytes.fromhex(LOC_VECTOR), {})
+        from app.models import Notification
+        assert [n.status for n in db.query(Notification).filter_by(channel="line_loc")] == ["skipped"]
+
+
+def test_line_location_message_respects_privacy_mode():
+    from app.line import LineNotifier
+    from app.models import Caregiver, Patient
+    calls = []
+    class H:
+        def post(self, url, json=None, headers=None):
+            calls.append(json); return type("R", (), {"status_code": 200, "text": ""})()
+    n = LineNotifier(token="t", client=H())
+    cg = Caregiver(full_name="อสม.", line_user_id="U1"); case = type("C", (), {"id": 3, "patient": Patient(full_name="นางสมศรี")})()
+    with SessionLocal() as db:
+        ok, _ = n.notify_location(db, case, cg, 13.9115, 100.5954, 8, 1200)
+        txt = calls[0]["messages"][0]["text"]
+        assert ok and "https://maps.google.com/?q=13.911500,100.595400" in txt and "นางสมศรี" in txt and "8 ดวง" in txt and "1200" in txt
+        settings_store.put(db, "privacy", {**settings_store.get(db, "privacy"), "line_detail": "minimal"}, "t")
+        calls.clear()
+        ok, detail = n.notify_location(db, case, cg, 13.9115, 100.5954, 8, None)
+        assert not ok and detail.startswith("skipped") and calls == []                 # nothing leaves the server
+        ok, detail = n.notify_location(db, case, Caregiver(full_name="x"), 1.0, 1.0, 5, None); assert not ok and "line_user_id" in detail
+
+
+def test_fport4_routed_to_location_handler(env_, monkeypatch):
+    eng, downs, notif, client, ids = env_
+    from app.mqtt_worker import MqttWorker
+    w = MqttWorker(lambda dl: eng)
+    cid = _loc_case(eng, monkeypatch)
+    ev = {"deviceInfo": {"devEui": EUI}, "fPort": 4, "data": codec.b64(bytes.fromhex(LOC_VECTOR)),
+          "rxInfo": [{"gatewayId": GW, "rssi": -80, "snr": 6}]}
+    w._on_message(None, None, type("M", (), {"topic": "application/x/device/" + EUI + "/event/up", "payload": json.dumps(ev).encode()})())
+    with SessionLocal() as db: assert db.get(Case, cid).loc_sats == 8
+    assert len(notif.loc) == 1
+
+
+def test_gateway_gps_and_moved_warning(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer"); now = utcnow_()
+    fix = lambda lat, lon, sats=7: {**GOOD, "gps": {"fix": True, "lat": lat, "lon": lon, "sats": sats, "alt": 12.3}}
+    with SessionLocal() as db:
+        eng.gw.on_report(db, GW, fix(13.9100, 100.5900, sats=3), now)                     # 3 satellites: not trusted
+        assert _gw(db).gps_lat is None
+        eng.gw.on_report(db, GW, {**GOOD, "gps": {"fix": True, "lat": 0, "lon": 0, "sats": 9}}, now)    # null island: dropped
+        assert _gw(db).gps_lat is None and "gps" not in _gw(db).report
+        eng.gw.on_report(db, GW, {**GOOD, "gps": {"fix": False}}, now); assert _gw(db).report["gps"] == {"fix": False}
+        eng.gw.on_report(db, GW, fix(13.9100, 100.5900), now)
+        assert abs(_gw(db).gps_lat - 13.91) < 1e-6 and _gw(db).gps_sats == 7
+    g = client.get("/api/gateways", headers=h).json()[0]; gid = g["id"]
+    assert g["loc"]["gps"]["fresh"] is True and g["loc"]["registered"] is None and g["loc"]["gps_attached"] is True and g["status"] == "online"
+    P = lambda body, hh=h: client.put(f"/api/gateways/{gid}", json=body, headers=hh)
+    assert P({"lat": 13.91}).status_code == 422 and P({"lat": 0, "lon": 0}).status_code == 422 and P({"lat": 200, "lon": 1}).status_code == 422
+    assert P({"lat": 13.91, "lon": 100.59}, hv).status_code == 403
+    assert P({"use_gps": True}).status_code == 200                                        # install day: adopt the GPS position
+    g = client.get("/api/gateways", headers=h).json()[0]
+    assert g["loc"]["registered"] == {"lat": 13.91, "lon": 100.59} and g["loc"]["moved_m"] is None and g["status"] == "online"
+    # the gateway is carried ~1.1 km away
+    with SessionLocal() as db: eng.gw.on_report(db, GW, fix(13.9200, 100.5900), utcnow_())
+    g = client.get("/api/gateways", headers=h).json()[0]
+    assert g["status"] == "warning" and 1100 < g["loc"]["moved_m"] < 1120 and any("ห่างจากที่ลงทะเบียน" in w for w in g["warnings"])
+    # raise the tolerance above the distance -> no warning
+    s = client.get("/api/settings", headers=h).json()["geo"]
+    assert client.put("/api/settings/geo", json={**s, "gateway_move_m": 2000}, headers=h).status_code == 200
+    assert client.get("/api/gateways", headers=h).json()[0]["status"] == "online"
+    assert client.put("/api/settings/geo", json={**s, "gateway_move_m": 5}, headers=h).status_code == 422
+    # a stale GPS fix is not judged
+    with SessionLocal() as db:
+        gg = _gw(db); gg.gps_at = utcnow_() - timedelta(hours=2); db.commit()
+    client.put("/api/settings/geo", json={**s, "gateway_move_m": 200}, headers=h)
+    assert client.get("/api/gateways", headers=h).json()[0]["loc"]["moved_m"] is None
+    assert P({"clear_location": True}).status_code == 200 and client.get("/api/gateways", headers=h).json()[0]["loc"]["registered"] is None
+    assert client.put(f"/api/gateways/{gid}", json={"use_gps": True}, headers=h).status_code == 200
+
+
+def test_use_gps_without_any_fix_is_refused(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client)
+    with SessionLocal() as db: eng.gw.on_report(db, GW, GOOD, utcnow_())
+    gid = client.get("/api/gateways", headers=h).json()[0]["id"]
+    assert client.put(f"/api/gateways/{gid}", json={"use_gps": True}, headers=h).status_code == 409
+
+
+def test_anonymize_and_unbind_clear_locations(env_, monkeypatch):
+    eng, downs, notif, client, ids = env_
+    h = login(client)
+    cid = _loc_case(eng, monkeypatch)
+    with SessionLocal() as db: eng.handle_location(db, EUI, bytes.fromhex(LOC_VECTOR), {}); eng.accept(db, cid, "x"); eng.close(db, cid, "x")
+    assert client.post(f"/api/patients/{ids['p']}/anonymize", json={"confirm_id": ids["p"]}, headers=h).status_code == 200
+    with SessionLocal() as db:
+        assert db.get(Case, cid).loc_lat is None and db.query(Device).one().loc_lat is None
+
+
+def test_loc_vectors_match_firmware_file():
+    """firmware/test/loc_vectors.inc is what the C++ host test checks; it must equal what the backend codec produces."""
+    import re, pathlib
+    from app import codec
+    inc = pathlib.Path(__file__).resolve().parents[2] / "firmware" / "test" / "loc_vectors.inc"
+    rows = re.findall(r'\{(\d+), ([-\d.]+), ([-\d.]+), (\d+), ([-\d.]+), "([0-9a-f]+)"\}', inc.read_text())
+    assert len(rows) >= 7
+    for a, la, lo, s, h, hx in rows:
+        assert codec.encode_loc(int(a), float(la), float(lo), int(s), float(h)).hex() == hx
+        d = codec.decode_loc(bytes.fromhex(hx))
+        assert abs(d.lat - float(la)) < 3e-5 and abs(d.lon - float(lo)) < 3e-5

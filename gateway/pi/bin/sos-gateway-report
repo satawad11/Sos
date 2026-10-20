@@ -21,6 +21,21 @@ load1="$(num "$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)")"
 radio_fail="$(num "$(cat /var/lib/sos-gateway/radio_fail 2>/dev/null || echo 0)")"
 ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
+# Optional GPS (USB/UART module + gpsd, see docs/GPS-kit.md): report the fix so the dashboard can show the position and
+# warn if the gateway is moved. Without gpsd/gpspipe this block does nothing and the field is simply absent.
+gps=null
+if command -v gpspipe >/dev/null 2>&1; then
+  raw="$(timeout 6 gpspipe -w -n 15 2>/dev/null)"
+  tpv="$(printf '%s\n' "$raw" | jq -c 'select(.class=="TPV")' 2>/dev/null | tail -1)"
+  sky="$(printf '%s\n' "$raw" | jq -c 'select(.class=="SKY" and .uSat!=null)' 2>/dev/null | tail -1)"
+  if [ -n "$tpv" ]; then
+    gps="$(jq -cn --argjson t "$tpv" --argjson k "${sky:-null}" \
+      'if ($t.mode // 0) >= 2 and $t.lat != null and $t.lon != null
+       then {fix:true, lat:$t.lat, lon:$t.lon, alt:($t.altHAE // $t.alt), sats:($k.uSat // null)}
+       else {fix:false} end' 2>/dev/null || echo null)"
+  fi
+fi
+
 json="$(jq -cn \
   --argjson uptime_s "$uptime_s" --argjson cpu_temp_c "$cpu_temp" --argjson throttled "$throttled" \
   --argjson disk_pct "$disk_pct" --argjson mem_pct "$mem_pct" --argjson load1 "$load1" --argjson radio_fail "$radio_fail" \
@@ -28,9 +43,10 @@ json="$(jq -cn \
   --argjson fwd  "$(bool systemctl is-active --quiet chirpstack-mqtt-forwarder)" \
   --argjson spi  "$(bool test -e /dev/spidev0.0)" \
   --argjson ntp  "$(bool bash -c 'timedatectl show -p NTPSynchronized --value | grep -q yes')" \
-  --arg ip "$ip" --arg sw "sos-gw-report 1" \
+  --arg ip "$ip" --arg sw "sos-gw-report 2" --argjson gps "$gps" \
   '{uptime_s:$uptime_s, cpu_temp_c:$cpu_temp_c, throttled:$throttled, disk_pct:$disk_pct, mem_pct:$mem_pct, load1:$load1,
-    radio_fail:$radio_fail, services:{concentratord:$conc, forwarder:$fwd}, spi:$spi, ntp:$ntp, ip:$ip, sw:$sw}')" || { echo "jq failed" >&2; exit 1; }
+    radio_fail:$radio_fail, services:{concentratord:$conc, forwarder:$fwd}, spi:$spi, ntp:$ntp, ip:$ip, sw:$sw}
+    + (if $gps != null then {gps:$gps} else {} end)')" || { echo "jq failed" >&2; exit 1; }
 
 if [ "${1:-}" = "--print" ]; then echo "$json"; exit 0; fi
 [[ "$GATEWAY_ID" =~ ^[0-9a-f]{16}$ ]] || { echo "GATEWAY_ID missing in $CONF" >&2; exit 1; }

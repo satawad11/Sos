@@ -1,17 +1,19 @@
 from __future__ import annotations
 import re, secrets
 from datetime import timedelta, datetime
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from . import settings_store
-from .auth import (admin_only, audit, check_pw, current_user, make_token, staff_or_admin)
+from .auth import (admin_only, audit, check_pw, current_user, hash_pw, make_token, password_problem, staff_or_admin)
 from .db import get_db
 from .engine import aware
 from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, Holiday, Notification,
                      Patient, User, utcnow)
 from .config import env
 from . import gateways as gwmod
+from . import geo
+from . import privacy, reports
 from . import provision as prov
 
 router = APIRouter(prefix="/api")
@@ -48,18 +50,38 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
             db.commit()
         audit(db, body.username, "login_failed"); db.commit()
         raise HTTPException(401, "bad credentials")
-    u.failed_logins = 0
+    u.failed_logins, u.locked_until, u.last_login_at = 0, None, now
     audit(db, u.username, "login"); db.commit()
-    return {"token": make_token(u), "role": u.role, "name": u.display_name or u.username}
+    return {"token": make_token(u), "role": u.role, "name": u.display_name or u.username,
+            "must_change": bool(u.must_change)}
 
 
 @router.get("/me")
 def me(u: User = Depends(current_user)):
-    return {"username": u.username, "role": u.role, "name": u.display_name}
+    return {"username": u.username, "role": u.role, "name": u.display_name, "must_change": bool(u.must_change)}
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str
+    new_password: str = Field(max_length=128)
+
+
+@router.post("/me/password")
+def change_my_password(b: PasswordChangeIn, db: Session = Depends(get_db), u: User = Depends(current_user)):
+    if not check_pw(b.current_password, u.password_hash):
+        audit(db, u.username, "password_change_failed"); db.commit()
+        raise HTTPException(403, "รหัสผ่านปัจจุบันไม่ถูกต้อง")
+    bad = password_problem(b.new_password, u.username)
+    if bad: raise HTTPException(422, bad)
+    if b.new_password == b.current_password: raise HTTPException(422, "รหัสผ่านใหม่ต้องไม่ซ้ำรหัสเดิม")
+    u.password_hash, u.must_change, u.password_changed_at = hash_pw(b.new_password), False, utcnow()
+    u.token_ver = (u.token_ver or 0) + 1                 # every other session of this user is logged out
+    audit(db, u.username, "password_change"); db.commit()
+    return {"ok": True, "token": make_token(u)}
 
 
 # ---------------- cases ----------------
-def case_dict(c: Case, events=False):
+def case_dict(c: Case, events=False, role: str = "staff"):
     d = {"id": c.id, "state": c.state, "overdue": c.overdue, "after_hours": c.after_hours, "is_test": c.is_test,
          "created_at": iso(c.created_at), "accepted_at": iso(c.accepted_at), "accepted_by": c.accepted_by,
          "closed_at": iso(c.closed_at), "close_reason": c.close_reason, "note": c.note,
@@ -70,6 +92,12 @@ def case_dict(c: Case, events=False):
         p = c.patient
         d["patient"] = {"id": p.id, "full_name": p.full_name, "address": p.address, "village": p.village,
                         "phone": p.phone, "lat": p.lat, "lon": p.lon, "notes": p.notes}
+        if role == "viewer": d["patient"] = privacy.mask_patient(d["patient"])
+    d["loc"] = None
+    if c.loc_lat is not None and role != "viewer":
+        home = round(geo.distance_m(c.patient.lat, c.patient.lon, c.loc_lat, c.loc_lon)) if c.patient and c.patient.lat is not None else None
+        d["loc"] = {"lat": c.loc_lat, "lon": c.loc_lon, "at": iso(c.loc_at), "sats": c.loc_sats, "hdop": c.loc_hdop,
+                    "home_distance_m": home, "url": geo.maps_url(c.loc_lat, c.loc_lon)}
     if events:
         d["events"] = [{"at": iso(e.at), "kind": e.kind, "actor": e.actor, "detail": e.detail} for e in c.events]
     return d
@@ -83,14 +111,14 @@ def list_cases(state: str | None = None, include_test: bool = False, limit: int 
         q = q.filter(Case.state.in_(state.split(",")))
     if not include_test:
         q = q.filter(Case.is_test.is_(False))
-    return [case_dict(c) for c in q.order_by(Case.id.desc()).limit(min(limit, 500)).all()]
+    return [case_dict(c, role=u.role) for c in q.order_by(Case.id.desc()).limit(min(limit, 500)).all()]
 
 
 @router.get("/cases/{cid}")
 def get_case(cid: int, db: Session = Depends(get_db), u=Depends(current_user)):
     c = db.get(Case, cid)
     if not c: raise HTTPException(404)
-    return case_dict(c, events=True)
+    return case_dict(c, events=True, role=u.role)
 
 
 @router.post("/cases/{cid}/accept")
@@ -128,19 +156,23 @@ class PatientIn(BaseModel):
     active: bool = True
 
 
-def pat_dict(p: Patient, db: Session):
+def pat_dict(p: Patient, db: Session, role: str = "staff"):
     asg = db.query(Assignment).filter_by(patient_id=p.id).order_by(Assignment.priority).all()
     dev = db.query(Device).filter_by(patient_id=p.id).first()
-    return {"id": p.id, "full_name": p.full_name, "age": p.age, "address": p.address, "village": p.village,
+    out = {"id": p.id, "full_name": p.full_name, "age": p.age, "address": p.address, "village": p.village,
             "lat": p.lat, "lon": p.lon, "phone": p.phone, "notes": p.notes, "active": p.active,
             "device": dev.dev_eui if dev else None,
+            "consent_ok": privacy.consent_ok(p), "consent_at": iso(p.consent_at), "consent_by": p.consent_by,
+            "consent_note": p.consent_note, "consent_withdrawn_at": iso(p.consent_withdrawn_at),
+            "anonymized_at": iso(p.anonymized_at),
             "assignments": [{"priority": a.priority, "caregiver_id": a.caregiver_id,
                              "name": a.caregiver.full_name} for a in asg]}
+    return privacy.mask_patient(out) if role == "viewer" else out
 
 
 @router.get("/patients")
 def patients(db: Session = Depends(get_db), u=Depends(current_user)):
-    return [pat_dict(p, db) for p in db.query(Patient).order_by(Patient.id).all()]
+    return [pat_dict(p, db, u.role) for p in db.query(Patient).order_by(Patient.id).all()]
 
 
 @router.post("/patients")
@@ -154,9 +186,77 @@ def add_patient(b: PatientIn, db: Session = Depends(get_db), u=Depends(staff_or_
 def edit_patient(pid: int, b: PatientIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
     p = db.get(Patient, pid)
     if not p: raise HTTPException(404)
+    if p.anonymized_at: raise HTTPException(409, "ข้อมูลผู้ป่วยรายนี้ถูกลบ (ทำให้ไม่ระบุตัวตน) แล้ว แก้ไขไม่ได้")
+    if b.active and p.consent_withdrawn_at: raise HTTPException(409, "ผู้ป่วยถอนความยินยอมแล้ว — ต้องบันทึกความยินยอมใหม่ก่อนเปิดใช้งาน")
     for k, v in b.model_dump().items(): setattr(p, k, v)
     audit(db, u.username, "patient_update", str(pid)); db.commit()
     return pat_dict(p, db)
+
+
+class ConsentIn(BaseModel):
+    given: bool
+    note: str = Field(default="", max_length=128)      # e.g. consent form no., or "ผู้ดูแล: นางสมหญิง (บุตร)" when a guardian consents
+
+
+@router.put("/patients/{pid}/consent")
+def set_consent(pid: int, b: ConsentIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    p = db.get(Patient, pid)
+    if not p: raise HTTPException(404)
+    if p.anonymized_at: raise HTTPException(409, "ข้อมูลผู้ป่วยรายนี้ถูกลบแล้ว")
+    if b.given:
+        p.consent_at, p.consent_by, p.consent_note, p.consent_withdrawn_at = utcnow(), u.username, b.note.strip(), None
+        audit(db, u.username, "consent_given", str(pid), note=b.note.strip())
+        res = {}
+    else:
+        res = privacy.withdraw(db, p, u.username)
+        audit(db, u.username, "consent_withdrawn", str(pid), **res)
+    db.commit()
+    return {"patient": pat_dict(p, db), **res}
+
+
+@router.get("/patients/{pid}/export")
+def export_patient(pid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    from fastapi.responses import JSONResponse
+    p = db.get(Patient, pid)
+    if not p: raise HTTPException(404)
+    audit(db, u.username, "patient_export", str(pid)); db.commit()
+    return JSONResponse(privacy.export_patient(db, p),
+                        headers={"Content-Disposition": f'attachment; filename="patient-{pid}-export.json"'})
+
+
+class AnonymizeIn(BaseModel):
+    confirm_id: int                  # must equal the patient id — guards against clicking the wrong row
+    keep_village: bool = True
+
+
+@router.post("/patients/{pid}/anonymize")
+def anonymize_patient(pid: int, b: AnonymizeIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    p = db.get(Patient, pid)
+    if not p: raise HTTPException(404)
+    if b.confirm_id != pid: raise HTTPException(422, "confirm_id must equal the patient id")
+    if p.anonymized_at: raise HTTPException(409, "already anonymised")
+    open_case = db.query(Case).filter(Case.patient_id == pid, Case.state.in_(("new", "accepted"))).first()
+    if open_case: raise HTTPException(409, f"มีเคส #{open_case.id} ที่ยังเปิดอยู่ — ปิดเคสก่อน")
+    res = privacy.anonymize(db, p, b.keep_village)
+    audit(db, u.username, "patient_anonymize", str(pid), **res); db.commit()
+    return {"ok": True, **res}
+
+
+@router.get("/privacy/overview")
+def privacy_overview(db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    return privacy.overview(db)
+
+
+class RetentionIn(BaseModel):
+    dry_run: bool = True
+
+
+@router.post("/privacy/retention")
+def privacy_retention(b: RetentionIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    res = privacy.retention(db, dry_run=b.dry_run)
+    audit(db, u.username, "retention_preview" if b.dry_run else "retention_run", "", **{k: v for k, v in res.items() if isinstance(v, int)})
+    db.commit()
+    return res
 
 
 class AssignIn(BaseModel):
@@ -239,13 +339,22 @@ class DeviceIn(BaseModel):
 @router.get("/devices")
 def devices(db: Session = Depends(get_db), u=Depends(current_user)):
     off = settings_store.get(db, "offline")["device_offline_min"]
+    gcfg = settings_store.get(db, "geo")
     now = utcnow(); out = []
     for d in db.query(Device).order_by(Device.id).all():
         ls = aware(d.last_seen)
         offline = d.lifecycle == "active" and (ls is None or (now - ls).total_seconds() > off * 60)
         pending = (d.reported_config_ver is not None and d.reported_config_ver != (d.config_ver & 0xFF)) \
             or (d.reported_config_ver is None and bool(d.config_override))
-        out.append({"config": settings_store.effective_device_cfg(db, d), "config_override": d.config_override or {},
+        loc = None
+        if d.loc_lat is not None and u.role != "viewer":
+            home = (round(geo.distance_m(d.patient.lat, d.patient.lon, d.loc_lat, d.loc_lon))
+                    if d.patient and d.patient.lat is not None and d.patient.lon is not None else None)
+            fresh = (now - aware(d.loc_at)).total_seconds() <= gcfg["gps_fresh_min"] * 60
+            loc = {"lat": d.loc_lat, "lon": d.loc_lon, "at": iso(d.loc_at), "sats": d.loc_sats, "hdop": d.loc_hdop, "fresh": fresh,
+                   "home_distance_m": home, "away": home is not None and home > gcfg["home_radius_m"],
+                   "url": geo.maps_url(d.loc_lat, d.loc_lon)}
+        out.append({"loc": loc, "config": settings_store.effective_device_cfg(db, d), "config_override": d.config_override or {},
                     "config_pending": pending, "config_ver": d.config_ver, "config_reported_ver": d.reported_config_ver,
                     "config_applied_at": iso(d.config_applied_at), "config_changed_at": iso(d.config_changed_at),
                     "id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,
@@ -255,11 +364,23 @@ def devices(db: Session = Depends(get_db), u=Depends(current_user)):
     return out
 
 
+def _require_consent(db: Session, lifecycle: str, patient_id: int | None):
+    """PDPA: do not put a button into service for someone whose consent is not on record."""
+    if lifecycle != "active" or not patient_id or not settings_store.get(db, "privacy")["require_consent"]:
+        return
+    p = db.get(Patient, patient_id)
+    if p is None: raise HTTPException(422, "patient not found")
+    if p.anonymized_at: raise HTTPException(409, "ผู้ป่วยรายนี้ถูกลบข้อมูลแล้ว")
+    if not privacy.consent_ok(p):
+        raise HTTPException(409, "ผู้ป่วยยังไม่มีบันทึกความยินยอม (PDPA) — บันทึกความยินยอมที่หน้าผู้ป่วยก่อนตั้งเป็น active")
+
+
 @router.post("/devices")
 def add_device(b: DeviceIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
     eui = b.dev_eui.lower().replace(":", "")
     if not EUI_RE.match(eui): raise HTTPException(422, "DevEUI must be 16 hex chars")
     if db.query(Device).filter_by(dev_eui=eui).first(): raise HTTPException(409, "already exists")
+    _require_consent(db, b.lifecycle, b.patient_id)
     d = Device(dev_eui=eui, label=b.label, lifecycle=b.lifecycle, patient_id=b.patient_id)
     db.add(d); audit(db, u.username, "device_create", eui); db.commit()
     return {"id": d.id, "dev_eui": eui}
@@ -274,6 +395,9 @@ def edit_device(did: int, b: DeviceIn, db: Session = Depends(get_db), u=Depends(
         other = db.query(Device).filter(Device.patient_id == b.patient_id, Device.id != did,
                                         Device.lifecycle == "active").first()
         if other and b.lifecycle == "active": raise HTTPException(409, "patient already has an active device")
+    _require_consent(db, b.lifecycle, b.patient_id)
+    if d.patient_id != b.patient_id:                      # a fix from the old patient's home says nothing about the new one
+        d.loc_lat = d.loc_lon = d.loc_at = d.loc_sats = d.loc_hdop = None
     d.label, d.lifecycle, d.patient_id = b.label, b.lifecycle, b.patient_id
     audit(db, u.username, "device_update", d.dev_eui, lifecycle=b.lifecycle, patient=b.patient_id); db.commit()
     return {"ok": True}
@@ -306,14 +430,22 @@ def set_device_config(did: int, b: DeviceConfigIn, db: Session = Depends(get_db)
             "effective": settings_store.effective_device_cfg(db, d)}
 
 
-def gw_dict(g: Gateway, now, off: int, n_dev: dict) -> dict:
-    st, reason = gwmod.classify(g, now, off)
+def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str = "staff") -> dict:
+    st, reason = gwmod.classify(g, now, off, move_m)
     crit, warn = gwmod.critical(g.report), gwmod.warnings(g.report)
+    mv = gwmod.moved_m(g, now, move_m)
+    if mv is not None: warn = warn + [f"ตำแหน่ง GPS ห่างจากที่ลงทะเบียน {mv} เมตร (เกตเวย์อาจถูกย้ายหรือถูกนำออกไป)"]
+    gps_fresh = bool(g.gps_at and (now - aware(g.gps_at)).total_seconds() <= gwmod.GPS_FRESH_S)
+    rep = dict(g.report or {})
+    loc = {"registered": {"lat": g.lat, "lon": g.lon} if g.lat is not None else None,
+           "gps": {"lat": g.gps_lat, "lon": g.gps_lon, "at": iso(g.gps_at), "sats": g.gps_sats, "fresh": gps_fresh} if g.gps_lat is not None else None,
+           "gps_attached": "gps" in rep, "moved_m": mv,
+           "url": geo.maps_url(g.lat, g.lon) if g.lat is not None else None}
     return {"id": g.id, "gateway_id": g.gateway_id, "label": g.label, "enabled": g.enabled is not False,
             "status": st, "offline": st == "offline", "reason": reason or (g.offline_reason if st == "offline" else ""),
             "last_seen": iso(g.last_seen), "last_report_at": iso(g.last_report_at),
             "state_changed_at": iso(g.state_changed_at), "uplinks_total": g.uplinks_total or 0,
-            "devices": n_dev.get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn}
+            "devices": n_dev.get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc}
 
 
 @router.get("/gateways")
@@ -324,7 +456,8 @@ def gateways(db: Session = Depends(get_db), u=Depends(current_user)):
     for d in db.query(Device).filter(Device.lifecycle == "active").all():
         if d.last_gateway:
             n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
-    return [gw_dict(g, now, off, n_dev) for g in db.query(Gateway).order_by(Gateway.id).all()]
+    mv = settings_store.get(db, "geo")["gateway_move_m"]
+    return [gw_dict(g, now, off, n_dev, mv, u.role) for g in db.query(Gateway).order_by(Gateway.id).all()]
 
 
 class GatewayIn(BaseModel):
@@ -335,6 +468,10 @@ class GatewayIn(BaseModel):
 class GatewayPatch(BaseModel):
     label: str | None = Field(default=None, max_length=64)
     enabled: bool | None = None
+    lat: float | None = None
+    lon: float | None = None
+    clear_location: bool = False        # forget the registered position
+    use_gps: bool = False               # copy the gateway's own latest GPS fix into the registered position
 
 
 @router.post("/gateways")
@@ -358,7 +495,16 @@ def patch_gateway(gid: int, b: GatewayPatch, db: Session = Depends(get_db), u=De
         g.enabled = b.enabled
         if not b.enabled:
             g.state, g.offline_notified_at = "unknown", None     # retired: stop alerting and forget the offline episode
-    audit(db, u.username, "gateway_update", g.gateway_id, label=g.label, enabled=g.enabled is not False)
+    if b.use_gps:
+        if g.gps_lat is None: raise HTTPException(409, "เกตเวย์นี้ยังไม่เคยส่งพิกัด GPS")
+        g.lat, g.lon = g.gps_lat, g.gps_lon
+    elif b.clear_location:
+        g.lat = g.lon = None
+    elif b.lat is not None or b.lon is not None:
+        if not geo.valid_latlon(b.lat, b.lon): raise HTTPException(422, "lat/lon ไม่ถูกต้อง (ต้องระบุทั้งคู่ และไม่ใช่ 0,0)")
+        g.lat, g.lon = round(b.lat, 6), round(b.lon, 6)
+    audit(db, u.username, "gateway_update", g.gateway_id, label=g.label, enabled=g.enabled is not False,
+          located=g.lat is not None)
     db.commit()
     return {"ok": True}
 
@@ -404,6 +550,23 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
         found = {c.id for c in db.query(Caregiver).filter(Caregiver.id.in_(ids)).all()} if ids else set()
         if set(ids) - found: raise HTTPException(422, "unknown caregiver id")
         value = {"caregiver_ids": sorted(set(ids)), "repeat_min": rep}
+    if key == "privacy":
+        def _int(k, lo, hi):
+            v = value.get(k)
+            if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi: raise HTTPException(422, f"{k} must be {lo}-{hi}")
+            return v
+        if not isinstance(value.get("require_consent"), bool) or not isinstance(value.get("auto_purge"), bool):
+            raise HTTPException(422, "require_consent and auto_purge must be true/false")
+        if value.get("line_detail") not in ("full", "minimal"): raise HTTPException(422, "line_detail must be full or minimal")
+        value = {"require_consent": value["require_consent"], "auto_purge": value["auto_purge"], "line_detail": value["line_detail"],
+                 "case_retention_days": _int("case_retention_days", 30, 3650), "audit_retention_days": _int("audit_retention_days", 90, 3650)}
+    if key == "geo":
+        out = {}
+        for k, lo, hi in (("home_radius_m", 20, 5000), ("gps_fresh_min", 1, 1440), ("gateway_move_m", 20, 100000)):
+            v = value.get(k)
+            if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi: raise HTTPException(422, f"{k} must be {lo}-{hi}")
+            out[k] = v
+        value = out
     if key == "device_defaults":
         try:
             value = settings_store.validate_device_cfg(
@@ -442,32 +605,125 @@ def del_holiday(hid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
 
 
 class UserIn(BaseModel):
-    username: str = Field(min_length=3, max_length=64)
-    password: str = Field(min_length=10)
-    display_name: str = ""
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    password: str = Field(min_length=10, max_length=128)
+    display_name: str = Field(default="", max_length=128)
     role: str = "staff"
+
+
+ROLES = ("admin", "staff", "viewer")
+_PW_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"    # no look-alikes (0/O, 1/l/I)
+
+
+def temp_password() -> str:
+    return "".join(secrets.choice(_PW_ALPHABET) for _ in range(14))
+
+
+def user_dict(x: User) -> dict:
+    return {"id": x.id, "username": x.username, "role": x.role, "display_name": x.display_name, "active": x.active,
+            "must_change": bool(x.must_change), "locked": bool(x.locked_until and aware(x.locked_until) > utcnow()),
+            "last_login_at": iso(x.last_login_at), "password_changed_at": iso(x.password_changed_at)}
+
+
+def _other_active_admin(db: Session, uid: int) -> bool:
+    return db.query(User).filter(User.role == "admin", User.active.is_(True), User.id != uid).count() > 0
 
 
 @router.get("/users")
 def users(db: Session = Depends(get_db), u=Depends(admin_only)):
-    return [{"id": x.id, "username": x.username, "role": x.role, "display_name": x.display_name, "active": x.active}
-            for x in db.query(User).all()]
+    return [user_dict(x) for x in db.query(User).order_by(User.id).all()]
 
 
 @router.post("/users")
 def add_user(b: UserIn, db: Session = Depends(get_db), u=Depends(admin_only)):
-    from .auth import hash_pw
-    if b.role not in ("admin", "staff", "viewer"): raise HTTPException(422, "bad role")
-    if db.query(User).filter_by(username=b.username).first(): raise HTTPException(409)
-    db.add(User(username=b.username, password_hash=hash_pw(b.password), display_name=b.display_name, role=b.role))
+    if b.role not in ROLES: raise HTTPException(422, "bad role")
+    bad = password_problem(b.password, b.username)
+    if bad: raise HTTPException(422, bad)
+    if db.query(User).filter_by(username=b.username).first(): raise HTTPException(409, "username already exists")
+    # the admin chose this password, so the new user must replace it at first login
+    db.add(User(username=b.username, password_hash=hash_pw(b.password), display_name=b.display_name, role=b.role,
+                must_change=True, password_changed_at=utcnow()))
     audit(db, u.username, "user_create", b.username, role=b.role); db.commit()
     return {"ok": True}
+
+
+class UserPatch(BaseModel):
+    display_name: str | None = Field(default=None, max_length=128)
+    role: str | None = None
+    active: bool | None = None
+
+
+@router.put("/users/{uid}")
+def patch_user(uid: int, b: UserPatch, db: Session = Depends(get_db), u=Depends(admin_only)):
+    t = db.get(User, uid)
+    if not t: raise HTTPException(404)
+    if b.role is not None and b.role not in ROLES: raise HTTPException(422, "bad role")
+    losing_admin = t.role == "admin" and t.active and ((b.role is not None and b.role != "admin") or b.active is False)
+    if losing_admin and (t.id == u.id or not _other_active_admin(db, t.id)):
+        raise HTTPException(409, "ต้องมีผู้ดูแลระบบที่ใช้งานอยู่อย่างน้อย 1 คน (และแก้สิทธิ์/ปิดบัญชีตัวเองไม่ได้)")
+    if t.id == u.id and b.active is False: raise HTTPException(409, "ปิดบัญชีตัวเองไม่ได้")
+    changed = {}
+    if b.display_name is not None and b.display_name != t.display_name: t.display_name = b.display_name; changed["display_name"] = b.display_name
+    if b.role is not None and b.role != t.role: t.role = b.role; changed["role"] = b.role; t.token_ver = (t.token_ver or 0) + 1
+    if b.active is not None and b.active != t.active:
+        t.active = b.active; changed["active"] = b.active; t.token_ver = (t.token_ver or 0) + 1
+    if changed: audit(db, u.username, "user_update", t.username, **changed)
+    db.commit()
+    return user_dict(t)
+
+
+@router.post("/users/{uid}/reset-password")
+def reset_password(uid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    """Admin issues a one-time temporary password (shown ONCE). The user must choose a new one at next login."""
+    t = db.get(User, uid)
+    if not t: raise HTTPException(404)
+    if t.id == u.id: raise HTTPException(422, "ใช้เมนู 'เปลี่ยนรหัสผ่าน' สำหรับบัญชีของตัวเอง")
+    pw = temp_password()
+    t.password_hash, t.must_change, t.password_changed_at = hash_pw(pw), True, utcnow()
+    t.failed_logins, t.locked_until = 0, None              # also unlocks the account
+    t.token_ver = (t.token_ver or 0) + 1                   # kills every session of that user
+    audit(db, u.username, "password_reset", t.username); db.commit()    # the password itself is never logged
+    return {"username": t.username, "temp_password": pw}
+
+
+@router.post("/users/{uid}/unlock")
+def unlock_user(uid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    t = db.get(User, uid)
+    if not t: raise HTTPException(404)
+    t.failed_logins, t.locked_until = 0, None
+    audit(db, u.username, "user_unlock", t.username); db.commit()
+    return user_dict(t)
 
 
 @router.get("/audit")
 def audit_log(limit: int = 200, db: Session = Depends(get_db), u=Depends(admin_only)):
     rows = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(min(limit, 1000)).all()
     return [{"at": iso(r.at), "actor": r.actor, "action": r.action, "target": r.target, "detail": r.detail} for r in rows]
+
+
+def _range(month, frm, to):
+    try:
+        return reports.parse_range(month, frm, to)
+    except reports.RangeError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.get("/reports/summary")
+def report_summary(month: str | None = None, frm: str | None = Query(default=None, alias="from"), to: str | None = None,
+                   db: Session = Depends(get_db), u=Depends(current_user)):
+    start, end, d1, d2 = _range(month, frm, to)
+    return reports.summary(db, start, end, d1, d2, names=u.role in ("admin", "staff"))
+
+
+@router.get("/reports/cases.csv")
+def report_cases_csv(month: str | None = None, frm: str | None = Query(default=None, alias="from"), to: str | None = None,
+                     db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    from fastapi.responses import Response
+    start, end, d1, d2 = _range(month, frm, to)
+    text, n = reports.cases_csv(db, start, end)
+    audit(db, u.username, "report_export", f"{d1}..{d2}", rows=n); db.commit()
+    fn = f"sos-cases-{d1.year + 543}-{d1.month:02d}" + ("" if month else f"-to-{d2.year + 543}-{d2.month:02d}-{d2.day:02d}") + ".csv"
+    return Response(text, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 @router.get("/stats")

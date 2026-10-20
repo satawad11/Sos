@@ -21,7 +21,7 @@ input,select,textarea{font:inherit;padding:7px;border:1px solid var(--bd);border
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}.mut{color:var(--mut)}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:10px;display:none}
 #login{max-width:340px;margin:12vh auto}.warn{background:#fff3cd;color:#664d03;padding:8px 12px;border-radius:8px}
-@media print{body *{visibility:hidden}#plabel,#plabel *{visibility:visible}#plabel{position:absolute;left:0;top:0;border:1px solid #000;padding:6px;width:60mm;color:#000;background:#fff}}
+@media print{body.rpt *{visibility:hidden}body.rpt #rpt,body.rpt #rpt *{visibility:visible}body.rpt #rpt{position:absolute;left:0;top:0;width:100%;color:#000}body *{visibility:hidden}#plabel,#plabel *{visibility:visible}#plabel{position:absolute;left:0;top:0;border:1px solid #000;padding:6px;width:60mm;color:#000;background:#fff}}
 .step{display:flex;gap:8px;align-items:flex-start;margin:4px 0}.ok{color:var(--grn)}.bad{color:var(--red)}
 </style></head>
 <body>
@@ -47,14 +47,15 @@ function connectWS(){
   ws.onclose=()=>{if(token)setTimeout(connectWS,3000)}}
 
 function render(){
+  if(token&&sessionStorage.getItem("mc")==="1"){pwScreen(true);return}
   if(!token){$("#app").innerHTML=`<div class="card" id="login"><h2>เข้าสู่ระบบ</h2><div class="row"><input id="u" placeholder="ชื่อผู้ใช้" autocomplete="username"></div><div class="row"><input id="p" type="password" placeholder="รหัสผ่าน" autocomplete="current-password"></div><button class="btn p" id="go">เข้าสู่ระบบ</button></div>`;
-    $("#go").onclick=guard(async()=>{const r=await api("/login",{method:"POST",body:{username:$("#u").value,password:$("#p").value}});token=r.token;role=r.role;sessionStorage.setItem("tk",token);sessionStorage.setItem("role",role);render()});
+    $("#go").onclick=guard(async()=>{const r=await api("/login",{method:"POST",body:{username:$("#u").value,password:$("#p").value}});token=r.token;role=r.role;sessionStorage.setItem("tk",token);sessionStorage.setItem("role",role);if(r.must_change)sessionStorage.setItem("mc","1");else sessionStorage.removeItem("mc");render()});
     $("#p").onkeydown=e=>{if(e.key==="Enter")$("#go").click()};return}
-  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],...(role==="admin"?[["install","ติดตั้งอุปกรณ์"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
-  $("#app").innerHTML=`<header><h1>🚑 ระบบแจ้งเหตุฉุกเฉิน</h1><nav>${tabs.map(t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}">${t[1]}</button>`).join("")}</nav><button class="btn" id="snd">${audioOn?"🔔 เสียงเปิด":"🔕 เปิดเสียงเตือน"}</button><button class="btn" id="out">ออก</button></header><main id="main"></main>`;
+  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["users","ผู้ใช้"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  $("#app").innerHTML=`<header><h1>🚑 ระบบแจ้งเหตุฉุกเฉิน</h1><nav>${tabs.map(t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}">${t[1]}</button>`).join("")}</nav><button class="btn" id="snd">${audioOn?"🔔 เสียงเปิด":"🔕 เปิดเสียงเตือน"}</button><button class="btn" id="pw">🔑 รหัสผ่าน</button><button class="btn" id="out">ออก</button></header><main id="main"></main>`;
   document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{page=b.dataset.p;render()});
-  $("#out").onclick=logout;$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
-  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,install:loadInstall,settings:loadSettings,audit:loadAudit})[page])();
+  $("#out").onclick=logout;$("#pw").onclick=()=>pwScreen(false);$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
+  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,settings:loadSettings,audit:loadAudit})[page])();
   if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
   if(!ws||ws.readyState>1)connectWS()}
 
@@ -75,6 +76,7 @@ const showCase=guard(async id=>{
   $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h2>เคส #${c.id} <span class="tag ${c.state}">${ST[c.state]}</span></h2>
   <p><b>${esc(c.patient?.full_name||"ไม่ทราบผู้ป่วย")}</b><br>${esc(c.patient?.address||"")} ${esc(c.patient?.village||"")}<br>${c.patient?.phone?`📞 <a href="tel:${esc(c.patient.phone)}">${esc(c.patient.phone)}</a>`:""} ${c.patient?.lat!=null?`· <a target="_blank" rel="noopener" href="https://maps.google.com/?q=${c.patient.lat},${c.patient.lon}">แผนที่</a>`:""}</p>
   <p class="mut">${esc(c.patient?.notes||"")}</p>
+  ${c.loc?`<p>📍 <b>ตำแหน่งอุปกรณ์ขณะแจ้งเหตุ:</b> ${gmap(c.loc.lat,c.loc.lon,"เปิดแผนที่")} <span class="mut">(${ago(c.loc.at)} · ดาวเทียม ${c.loc.sats} · HDOP ${c.loc.hdop})</span>${c.loc.home_distance_m!=null?` · ห่างจากที่อยู่ที่ลงทะเบียน <b>${dist(c.loc.home_distance_m)}</b>`:""}<br><span class="mut">GPS ในอาคารคลาดเคลื่อนได้หลายสิบเมตร — ใช้เป็นแนวทางประกอบ ไม่ใช่ตำแหน่งที่แน่นอน</span></p>`:""}
   <p>อุปกรณ์ ${esc(c.device.label)} (${c.device.dev_eui}) · แบต ${c.device.battery??"-"}% · ไฟบ้าน ${c.device.mains_ok===false?"ดับ":"ปกติ"}</p>
   ${canEdit()&&c.state==="new"?`<button class="btn g" id="acc">✅ รับเรื่อง (ส่งสัญญาณกลับอุปกรณ์)</button> `:""}
   ${canEdit()&&(c.state==="new"||c.state==="accepted")?`<div class="row"><input id="note" placeholder="บันทึก (ถ้ามี)" size="40"><button class="btn p" id="cls">ปิดเคส</button><button class="btn r" id="fal">เหตุผิดพลาด</button></div>`:""}
@@ -89,8 +91,9 @@ const loadPatients=guard(async()=>{
   const [ps,cs]=await Promise.all([api("/patients"),api("/caregivers")]);
   const opts=cs.filter(c=>c.active).map(c=>`<option value="${c.id}">${esc(c.full_name)}</option>`).join("");
   $("#main").innerHTML=`${canEdit()?`<div class="card"><h3>เพิ่มผู้ป่วย</h3><div class="row"><input id="n" placeholder="ชื่อ-สกุล"><input id="a" placeholder="ที่อยู่" size="30"><input id="v" placeholder="หมู่บ้าน"><input id="ph" placeholder="โทร"><input id="la" placeholder="ละติจูด" size="9"><input id="lo" placeholder="ลองจิจูด" size="9"><button class="btn p" id="add">เพิ่ม</button></div></div>`:""}
-  <div class="card"><table><tr><th>ชื่อ</th><th>ที่อยู่/โทร</th><th>อุปกรณ์</th><th>ผู้ดูแล (ลำดับแจ้ง)</th><th></th></tr>${ps.map(p=>`<tr><td>${esc(p.full_name)}</td><td>${esc(p.address)}<br>${esc(p.phone)}</td><td>${esc(p.device||"-")}</td><td>${p.assignments.map(a=>a.priority+". "+esc(a.name)).join("<br>")||'<span class="mut">ยังไม่กำหนด</span>'}</td><td>${canEdit()?`<button class="btn" data-id="${p.id}">กำหนดผู้ดูแล</button>`:""}</td></tr>`).join("")}</table></div>`;
+  <div class="card"><table><tr><th>ชื่อ</th><th>ที่อยู่/โทร</th><th>อุปกรณ์</th><th>ผู้ดูแล (ลำดับแจ้ง)</th><th>PDPA</th><th></th></tr>${ps.map(p=>`<tr><td>${esc(p.full_name)}</td><td>${esc(p.address)}<br>${esc(p.phone)}</td><td>${esc(p.device||"-")}</td><td>${p.assignments.map(a=>a.priority+". "+esc(a.name)).join("<br>")||'<span class="mut">ยังไม่กำหนด</span>'}</td><td>${p.anonymized_at?'<span class="bad">ลบแล้ว</span>':p.consent_ok?'<span class="ok">✔ ยินยอม</span>':'<span class="bad">ไม่มีบันทึก</span>'}</td><td style="white-space:nowrap">${canEdit()&&!p.anonymized_at?`<button class="btn" data-id="${p.id}">กำหนดผู้ดูแล</button> `:""}${canEdit()?`<button class="btn" data-pv="${p.id}">ข้อมูล/PDPA</button>`:""}</td></tr>`).join("")}</table></div>`;
   if($("#add"))$("#add").onclick=guard(async()=>{const num=v=>v===""?null:Number(v);await api("/patients",{method:"POST",body:{full_name:$("#n").value,address:$("#a").value,village:$("#v").value,phone:$("#ph").value,lat:num($("#la").value),lon:num($("#lo").value)}});loadPatients()});
+  document.querySelectorAll("button[data-pv]").forEach(b=>b.onclick=()=>patientPrivacy(ps.find(x=>x.id==b.dataset.pv)));
   document.querySelectorAll("button[data-id]").forEach(b=>b.onclick=()=>{const p=ps.find(x=>x.id==b.dataset.id);
     $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>ผู้ดูแลของ ${esc(p.full_name)}</h3><p class="mut">ลำดับที่ 1 จะได้รับแจ้งก่อน ถ้าไม่ตอบรับภายในเวลาที่ตั้งไว้ จะแจ้งคนถัดไป</p>${[1,2,3].map(i=>`<div class="row">ลำดับ ${i}: <select id="s${i}"><option value="">- ไม่ระบุ -</option>${opts}</select></div>`).join("")}<button class="btn p" id="sv">บันทึก</button></div>`;
     p.assignments.forEach(a=>{$("#s"+a.priority).value=a.caregiver_id});
@@ -113,7 +116,7 @@ const loadGateways=guard(async()=>{
   const gs=await api("/gateways");if(page!=="gateways")return;
   const why=g=>g.status==="offline"?(g.reason==="radio"?(g.critical.join("; ")||"ตัวรับสัญญาณ LoRa ใช้ไม่ได้"):"ไม่ได้รับสัญญาณเกินเวลาที่กำหนด"):g.critical.concat(g.warnings).join("; ");
   $("#main").innerHTML=`${role==="admin"?`<div class="card"><h3>เพิ่มเกตเวย์</h3><div class="row"><input id="gi" placeholder="Gateway ID 16 หลัก" size="24" title="ได้จาก sudo ./install-gateway.sh --show-id"><input id="gl" placeholder="ป้าย เช่น รพ.สต. ม.3"><button class="btn p" id="ga">เพิ่ม</button></div><p class="mut">ไม่ต้องเพิ่มเองก็ได้ ระบบจะเพิ่มให้เองเมื่อเกตเวย์เชื่อมต่อครั้งแรก — เพิ่มล่วงหน้าเพื่อตั้งป้ายชื่อ</p></div>`:""}
-  <div class="card">${gs.length?`<table><tr><th>สถานะ</th><th>ป้าย / ID</th><th>เห็นล่าสุด</th><th>รายงานล่าสุด</th><th>อุปกรณ์ active</th><th>เฟรมสะสม</th><th>CPU / ทำงานมาแล้ว</th><th>ข้อสังเกต</th><th></th></tr>${gs.map(g=>{const r=g.report||{};return`<tr><td style="white-space:nowrap">${GWS[g.status][0]} ${GWS[g.status][1]}</td><td>${esc(g.label||"-")}<div class="mut"><code>${esc(g.gateway_id)}</code></div></td><td>${ago(g.last_seen)}</td><td>${ago(g.last_report_at)}</td><td>${g.devices}</td><td>${g.uplinks_total}</td><td>${r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-"} / ${upt(r.uptime_s)}</td><td style="color:${g.status==="offline"?"var(--red)":"var(--amb)"}">${esc(why(g))}</td><td>${canEdit()?`<button class="btn" data-g="${g.id}">แก้ไข</button>`:""}</td></tr>`}).join("")}</table>`:'<p class="mut">ยังไม่มีเกตเวย์ — ติดตั้งตาม INSTALL-2 แล้วเกตเวย์จะปรากฏที่นี่เอง</p>'}
+  <div class="card">${gs.length?`<table><tr><th>สถานะ</th><th>ป้าย / ID</th><th>เห็นล่าสุด</th><th>รายงานล่าสุด</th><th>อุปกรณ์ active</th><th>เฟรมสะสม</th><th>CPU / ทำงานมาแล้ว</th><th>ตำแหน่ง</th><th>ข้อสังเกต</th><th></th></tr>${gs.map(g=>{const r=g.report||{};return`<tr><td style="white-space:nowrap">${GWS[g.status][0]} ${GWS[g.status][1]}</td><td>${esc(g.label||"-")}<div class="mut"><code>${esc(g.gateway_id)}</code></div></td><td>${ago(g.last_seen)}</td><td>${ago(g.last_report_at)}</td><td>${g.devices}</td><td>${g.uplinks_total}</td><td>${r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-"} / ${upt(r.uptime_s)}</td><td>${g.loc.registered?gmap(g.loc.registered.lat,g.loc.registered.lon,"📍 แผนที่"):'<span class="mut">ยังไม่ระบุ</span>'}${g.loc.moved_m!=null?` <b style="color:var(--amb)">ย้าย ${dist(g.loc.moved_m)}?</b>`:""}</td><td style="color:${g.status==="offline"?"var(--red)":"var(--amb)"}">${esc(why(g))}</td><td>${canEdit()?`<button class="btn" data-g="${g.id}">แก้ไข</button>`:""}</td></tr>`}).join("")}</table>`:'<p class="mut">ยังไม่มีเกตเวย์ — ติดตั้งตาม INSTALL-2 แล้วเกตเวย์จะปรากฏที่นี่เอง</p>'}
   <p class="mut">เกตเวย์ส่งรายงานตัวเองทุก 1 นาที ถ้าเงียบเกินที่ตั้งไว้ (หน้าตั้งค่า → ออฟไลน์) หรือตัวรับสัญญาณ LoRa เสียเกิน 3 นาที ระบบจะส่ง LINE แจ้งผู้รับที่เลือกไว้ในหน้าตั้งค่า</p></div>`;
   if($("#ga"))$("#ga").onclick=guard(async()=>{await api("/gateways",{method:"POST",body:{gateway_id:$("#gi").value,label:$("#gl").value}});toast("เพิ่มแล้ว");loadGateways()});
   document.querySelectorAll("button[data-g]").forEach(b=>b.onclick=guard(async()=>{const g=gs.find(x=>x.id==b.dataset.g),r=g.report||{};devEdit=true;
@@ -123,14 +126,24 @@ const loadGateways=guard(async()=>{
       <div class="row"><label><input type="checkbox" id="gen" ${g.enabled?"checked":""} ${role==="admin"?"":"disabled"}> เฝ้าระวังเกตเวย์นี้ (ส่ง LINE เมื่อขาดการเชื่อมต่อ)</label>${role==="admin"?"":'<span class="mut">เฉพาะผู้ดูแลระบบ</span>'}</div>
       <p class="mut">ปิดการเฝ้าระวังเมื่อถอดเกตเวย์เครื่องนี้ออกจากระบบถาวร มิฉะนั้นระบบจะแจ้งว่าออฟไลน์</p>
       <div class="row"><button class="btn p" id="gsv">บันทึก</button></div></div>
+    <div class="card"><h3>ตำแหน่งเกตเวย์</h3>
+      <p>ตำแหน่งที่ลงทะเบียน: ${g.loc.registered?`${g.loc.registered.lat.toFixed(5)}, ${g.loc.registered.lon.toFixed(5)} ${gmap(g.loc.registered.lat,g.loc.registered.lon)}`:'<span class="mut">ยังไม่ระบุ</span>'}</p>
+      <p>GPS ของเกตเวย์: ${g.loc.gps?`${g.loc.gps.lat.toFixed(5)}, ${g.loc.gps.lon.toFixed(5)} ${gmap(g.loc.gps.lat,g.loc.gps.lon)} <span class="mut">(${ago(g.loc.gps.at)} · ดาวเทียม ${g.loc.gps.sats??"-"}${g.loc.gps.fresh?"":" · เก่า"})</span>`:`<span class="mut">${g.loc.gps_attached?"ติดตั้ง GPS แล้ว แต่ยังไม่ได้ตำแหน่ง (ต้องเห็นท้องฟ้า)":"ไม่มี GPS ติดตั้ง — ใส่ตำแหน่งเองด้านล่างได้"}</span>`}</p>
+      ${g.loc.moved_m!=null?`<div class="warn">GPS ห่างจากตำแหน่งที่ลงทะเบียน ${dist(g.loc.moved_m)} — เกตเวย์อาจถูกย้ายหรือถูกนำออกไป</div>`:""}
+      <div class="row">ละติจูด <input id="glat" size="10" value="${g.loc.registered?g.loc.registered.lat:""}"> ลองจิจูด <input id="glon" size="10" value="${g.loc.registered?g.loc.registered.lon:""}"></div>
+      <div class="row"><button class="btn p" id="gls">บันทึกตำแหน่ง</button>${g.loc.gps?'<button class="btn" id="glu">ใช้ตำแหน่งจาก GPS</button>':""}${g.loc.registered?'<button class="btn" id="glc">ล้างตำแหน่ง</button>':""}</div>
+      <p class="mut">หาพิกัดได้จาก Google Maps (กดค้างบนแผนที่) · GPS ในอาคารไม่แม่น ควรลงทะเบียนตำแหน่งตอนติดตั้งแล้วใช้ GPS เทียบเพื่อดูว่าถูกย้ายหรือไม่</p></div>
     <div class="card"><h3>รายงานล่าสุดจากเกตเวย์</h3><table>${row("รับรายงานเมื่อ",fmt(g.last_report_at)+" ("+ago(g.last_report_at)+")")}${row("ที่อยู่ IP ในเครือข่าย",esc(r.ip||"-"))}${row("ทำงานมาแล้ว",upt(r.uptime_s))}${row("อุณหภูมิ CPU",r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-")}${row("ไฟเลี้ยง (get_throttled)",esc(r.throttled||"-")+' <span class="mut">(0x0 = ปกติ)</span>')}${row("พื้นที่การ์ดที่ใช้",r.disk_pct!=null?r.disk_pct+"%":"-")}${row("หน่วยความจำที่ใช้",r.mem_pct!=null?r.mem_pct+"%":"-")}${row("ตัวรับสัญญาณ LoRa (concentratord)",r.services?(r.services.concentratord?'<span class="ok">ทำงาน</span>':'<b class="bad">หยุด</b>'):"-")}${row("ตัวส่งต่อ MQTT (forwarder)",r.services?(r.services.forwarder?'<span class="ok">ทำงาน</span>':'<b class="bad">หยุด</b>'):"-")}${row("SPI ของ WM1302",r.spi==null?"-":r.spi?'<span class="ok">พบ</span>':'<b class="bad">ไม่พบ</b>')}${row("เวลา (NTP)",r.ntp==null?"-":r.ntp?"ซิงก์แล้ว":'<b class="bad">ยังไม่ซิงก์</b>')}${row("รีสตาร์ตวิทยุอัตโนมัติสะสม",r.radio_fail??"-")}${row("ซอฟต์แวร์รายงาน",esc(r.sw||"-"))}</table></div>`;
     $("#back").onclick=()=>{devEdit=false;render()};
+    const glp=body=>guard(async()=>{await api("/gateways/"+g.id,{method:"PUT",body});toast("บันทึกแล้ว");devEdit=false;render()})();
+    $("#gls").onclick=()=>{const la=$("#glat").value.trim(),lo=$("#glon").value.trim();if(la===""||lo===""||isNaN(+la)||isNaN(+lo)){toast("กรอกละติจูดและลองจิจูดเป็นตัวเลข");return}glp({lat:+la,lon:+lo})};
+    if($("#glu"))$("#glu").onclick=()=>glp({use_gps:true});if($("#glc"))$("#glc").onclick=()=>glp({clear_location:true});
     $("#gsv").onclick=guard(async()=>{const body={label:$("#gl2").value};if(role==="admin")body.enabled=$("#gen").checked;await api("/gateways/"+g.id,{method:"PUT",body});toast("บันทึกแล้ว");devEdit=false;render()})}))});
 
 const loadDevices=guard(async()=>{
   const [ds,ps]=await Promise.all([api("/devices"),api("/patients")]);if(page!=="devices")return;
   const LC=["ready","active","repair","retired","lost"];
-  $("#main").innerHTML=`<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}${d.offline?' <b style="color:var(--red)">ออฟไลน์</b>':""}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${fmt(d.last_seen)}</td><td>${esc(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
+  $("#main").innerHTML=`<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>ตำแหน่ง GPS</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}${d.offline?' <b style="color:var(--red)">ออฟไลน์</b>':""}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${fmt(d.last_seen)}</td><td>${locCell(d.loc)}</td><td>${esc(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
   document.querySelectorAll("button[data-id]").forEach(b=>b.onclick=guard(async()=>{const d=ds.find(x=>x.id==b.dataset.id);devEdit=true;
     const dd=(await api("/settings")).device_defaults;
     const CF=[["heartbeat_min","Heartbeat (นาที)",5,1275,"เครื่องรายงานสถานะทุกกี่นาที (ยิ่งถี่ยิ่งกินแบต)"],["poll_s","Poll (วินาที)",5,120,"ช่วงถามผลรับเรื่องระหว่างมีเหตุ"],["buzzer","เสียงบัซเซอร์ (0-3)",0,3,"0=ปิด 1=เบา 2=ปกติ 3=ดัง"],["hold_ms","กดปุ่มค้าง (ms)",500,5000,"ต้องกดค้างนานเท่าไรจึงนับเป็นการแจ้งเหตุ"]];
@@ -249,4 +262,117 @@ const loadInstall=guard(async()=>{
   }});
 
 render();
+
+/* ===================== v0.5: passwords, users, PDPA, reports, locations ===================== */
+const dist=m=>m==null?"":m>=1000?(m/1000).toFixed(1)+" กม.":m+" ม.";
+const gmap=(la,lo,t="แผนที่")=>la==null?"":`<a target="_blank" rel="noopener" href="https://maps.google.com/?q=${encodeURIComponent(la)},${encodeURIComponent(lo)}">${t}</a>`;
+const locCell=l=>!l?'<span class="mut">-</span>':`${gmap(l.lat,l.lon,"📍 แผนที่")} <span class="mut">${ago(l.at)} · ดาวเทียม ${l.sats??"-"}${l.fresh===false?" · เก่า":""}</span>${l.away?` <b style="color:var(--amb)">ห่างบ้าน ${dist(l.home_distance_m)}</b>`:l.home_distance_m!=null?` <span class="mut">(ห่างบ้าน ${dist(l.home_distance_m)})</span>`:""}`;
+
+/* ---- password change (voluntary and forced) ---- */
+function pwScreen(forced){
+  $("#app").innerHTML=`<div class="card" id="login"><h2>${forced?"ตั้งรหัสผ่านใหม่":"เปลี่ยนรหัสผ่าน"}</h2>${forced?'<p class="warn">บัญชีนี้ใช้รหัสผ่านชั่วคราว ต้องตั้งรหัสผ่านใหม่ก่อนใช้งาน</p>':""}
+  <div class="row"><input id="pc" type="password" placeholder="รหัสผ่านปัจจุบัน" autocomplete="current-password"></div>
+  <div class="row"><input id="pn" type="password" placeholder="รหัสผ่านใหม่ (อย่างน้อย 10 ตัวอักษร)" autocomplete="new-password"></div>
+  <div class="row"><input id="pn2" type="password" placeholder="ยืนยันรหัสผ่านใหม่" autocomplete="new-password"></div>
+  <p class="mut">ห้ามมีชื่อผู้ใช้ ห้ามเป็นรหัสที่เดาง่าย/ตัวอักษรซ้ำ ๆ · เมื่อเปลี่ยนแล้ว เครื่องอื่นที่ล็อกอินอยู่จะถูกออกจากระบบ</p>
+  <div class="row"><button class="btn p" id="pgo">บันทึก</button>${forced?'<button class="btn" id="pout">ออกจากระบบ</button>':'<button class="btn" id="pback">ยกเลิก</button>'}</div></div>`;
+  if(forced)$("#pout").onclick=logout;else $("#pback").onclick=()=>render();
+  $("#pgo").onclick=guard(async()=>{if($("#pn").value!==$("#pn2").value)throw new Error("รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน");
+    const r=await api("/me/password",{method:"POST",body:{current_password:$("#pc").value,new_password:$("#pn").value}});
+    token=r.token;sessionStorage.setItem("tk",token);sessionStorage.removeItem("mc");toast("เปลี่ยนรหัสผ่านแล้ว");render()});
+  $("#pn2").onkeydown=e=>{if(e.key==="Enter")$("#pgo").click()}}
+
+/* ---- users (admin) ---- */
+const RTH={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
+const loadUsers=guard(async()=>{
+  if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
+  const us=await api("/users");if(page!=="users")return;
+  $("#main").innerHTML=`<div class="card"><h3>เพิ่มผู้ใช้</h3><div class="row"><input id="nu" placeholder="ชื่อผู้ใช้ (a-z 0-9 . _ -)"><input id="nd" placeholder="ชื่อที่แสดง"><input id="np" type="password" placeholder="รหัสผ่านเริ่มต้น (≥10)" autocomplete="new-password"><select id="nr"><option value="staff">เจ้าหน้าที่</option><option value="viewer">ดูอย่างเดียว</option><option value="admin">ผู้ดูแลระบบ</option></select><button class="btn p" id="nadd">เพิ่ม</button></div><p class="mut">ผู้ใช้ใหม่ต้องเปลี่ยนรหัสผ่านเมื่อเข้าสู่ระบบครั้งแรก · "ดูอย่างเดียว" จะไม่เห็นที่อยู่/เบอร์เต็ม/พิกัดของผู้ป่วย</p></div>
+  <div id="tmp"></div>
+  <div class="card"><table><tr><th>ผู้ใช้</th><th>สิทธิ์</th><th>สถานะ</th><th>เข้าสู่ระบบล่าสุด</th><th>เปลี่ยนรหัสล่าสุด</th><th></th></tr>${us.map(u=>`<tr><td>${esc(u.username)}<div class="mut">${esc(u.display_name)}</div></td><td><select data-role="${u.id}">${Object.entries(RTH).map(([k,v])=>`<option value="${k}" ${u.role===k?"selected":""}>${v}</option>`).join("")}</select></td><td>${u.active?'<span class="ok">ใช้งาน</span>':'<span class="bad">ปิด</span>'}${u.locked?' <b class="bad">🔒 ถูกล็อก</b>':""}${u.must_change?' <span class="tag">รอตั้งรหัสใหม่</span>':""}</td><td>${fmt(u.last_login_at)}</td><td>${fmt(u.password_changed_at)}</td><td style="white-space:nowrap"><button class="btn" data-rs="${u.id}">รีเซ็ตรหัสผ่าน</button> ${u.locked?`<button class="btn" data-ul="${u.id}">ปลดล็อก</button> `:""}<button class="btn" data-ac="${u.id}" data-to="${u.active?0:1}">${u.active?"ปิดบัญชี":"เปิดบัญชี"}</button></td></tr>`).join("")}</table>
+  <p class="mut">ไม่มีการรีเซ็ตทางอีเมล: ผู้ดูแลระบบกดรีเซ็ตให้ จะได้รหัสชั่วคราวแสดงครั้งเดียว (ส่งต่อให้ผู้ใช้ทางที่ปลอดภัย) · ถ้าผู้ดูแลระบบทุกคนเข้าไม่ได้ ใช้คำสั่ง <code>python -m app.cli reset-password &lt;ผู้ใช้&gt;</code> บนเซิร์ฟเวอร์</p></div>`;
+  $("#nadd").onclick=guard(async()=>{await api("/users",{method:"POST",body:{username:$("#nu").value,display_name:$("#nd").value,password:$("#np").value,role:$("#nr").value}});toast("เพิ่มผู้ใช้แล้ว");loadUsers()});
+  document.querySelectorAll("[data-role]").forEach(s=>s.onchange=guard(async()=>{try{await api("/users/"+s.dataset.role,{method:"PUT",body:{role:s.value}});toast("บันทึกสิทธิ์แล้ว")}finally{loadUsers()}}));
+  document.querySelectorAll("[data-ac]").forEach(b=>b.onclick=guard(async()=>{await api("/users/"+b.dataset.ac,{method:"PUT",body:{active:b.dataset.to==="1"}});loadUsers()}));
+  document.querySelectorAll("[data-ul]").forEach(b=>b.onclick=guard(async()=>{await api("/users/"+b.dataset.ul+"/unlock",{method:"POST"});toast("ปลดล็อกแล้ว");loadUsers()}));
+  document.querySelectorAll("[data-rs]").forEach(b=>b.onclick=guard(async()=>{const u=us.find(x=>x.id==b.dataset.rs);if(!confirm("รีเซ็ตรหัสผ่านของ "+u.username+" ?\nผู้ใช้จะถูกออกจากระบบทุกเครื่อง"))return;
+    const r=await api("/users/"+u.id+"/reset-password",{method:"POST"});
+    $("#tmp").innerHTML=`<div class="card" style="border:2px solid var(--amb)"><b>รหัสผ่านชั่วคราวของ ${esc(r.username)}</b> (แสดงครั้งเดียว — ปิดหน้านี้แล้วดูอีกไม่ได้)<div class="row"><code id="tpw" style="font-size:22px;letter-spacing:1px">${esc(r.temp_password)}</code><button class="btn" id="tcp">คัดลอก</button><button class="btn" id="thd">ซ่อน</button></div></div>`;
+    $("#tcp").onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(r.temp_password).then(()=>toast("คัดลอกแล้ว"));$("#thd").onclick=()=>{$("#tmp").innerHTML=""};scrollTo(0,0)}))});
+
+/* ---- PDPA / privacy ---- */
+const loadPrivacy=guard(async()=>{
+  const adm=role==="admin";const [ov,s]=await Promise.all([api("/privacy/overview"),api("/settings")]);if(page!=="privacy")return;
+  const pv=ov.settings,g=s.geo,rp=ov.retention_preview;
+  $("#main").innerHTML=`<div class="card"><h3>ภาพรวมข้อมูลส่วนบุคคล (PDPA)</h3>
+   <div class="row"><span class="tag">ผู้ป่วยทั้งหมด ${ov.patients}</span><span class="tag">ใช้งานอยู่ ${ov.active}</span><span class="tag">ถอนความยินยอม ${ov.withdrawn}</span><span class="tag">ลบข้อมูลแล้ว ${ov.anonymized}</span></div>
+   ${ov.without_consent.length?`<div class="warn" style="margin-top:8px"><b>ยังไม่มีบันทึกความยินยอม ${ov.without_consent.length} ราย:</b> ${ov.without_consent.map(p=>esc(p.full_name)+(p.has_active_device?" (มีอุปกรณ์ใช้งานอยู่!)":"")).join(", ")}<br>ไปที่หน้า "ผู้ป่วย" → ปุ่ม "ข้อมูล/PDPA" เพื่อบันทึกความยินยอม</div>`:'<p class="ok">ผู้ป่วยที่ใช้งานอยู่ทุกรายมีบันทึกความยินยอมแล้ว</p>'}
+   <p class="mut">ระบบนี้เป็นเครื่องมือช่วยจัดการ ไม่ใช่คำปรึกษากฎหมาย — ผู้ควบคุมข้อมูล (รพ.สต./อบต.) ต้องกำหนดระยะเวลาเก็บ ข้อความขอความยินยอม และผู้รับผิดชอบเอง · ข้อมูลที่ส่งผ่าน LINE อยู่กับผู้ให้บริการ LINE (ต่างประเทศ) ต้องระบุในหนังสือยินยอมด้วย</p></div>
+  <div class="card"><h3>นโยบายข้อมูล</h3>${adm?"":'<p class="mut">เฉพาะผู้ดูแลระบบแก้ไขได้</p>'}
+   <div class="row"><label><input type="checkbox" id="rc" ${pv.require_consent?"checked":""} ${adm?"":"disabled"}> ต้องมีบันทึกความยินยอมก่อนเปิดใช้อุปกรณ์ (แนะนำให้เปิดไว้)</label></div>
+   <div class="row">ข้อความ LINE <select id="ld" ${adm?"":"disabled"}><option value="full" ${pv.line_detail==="full"?"selected":""}>เต็ม (ชื่อ ที่อยู่ ปุ่มโทร/นำทาง)</option><option value="minimal" ${pv.line_detail==="minimal"?"selected":""}>น้อยที่สุด (ชื่อ+หมู่บ้าน เท่านั้น)</option></select></div>
+   <div class="row">เก็บเคสที่ปิดแล้ว <input id="crd" type="number" min="30" max="3650" value="${pv.case_retention_days}" ${adm?"":"disabled"}> วัน · เก็บบันทึกการใช้งาน <input id="ard" type="number" min="90" max="3650" value="${pv.audit_retention_days}" ${adm?"":"disabled"}> วัน</div>
+   <div class="row"><label><input type="checkbox" id="ap" ${pv.auto_purge?"checked":""} ${adm?"":"disabled"}> ลบข้อมูลที่เกินกำหนดอัตโนมัติทุกชั่วโมง (ปิดไว้ = ลบเองด้วยปุ่มด้านล่าง)</label></div>
+   ${adm?'<div class="row"><button class="btn p" id="pvs">บันทึกนโยบาย</button></div>':""}</div>
+  <div class="card"><h3>ลบข้อมูลที่เกินระยะเก็บ</h3><p>ตอนนี้เข้าเกณฑ์: เคส <b>${rp.cases}</b> รายการ (+ เหตุการณ์ ${rp.case_events}, การแจ้งเตือน ${rp.notifications}) · บันทึกการใช้งาน <b>${rp.audit_rows}</b> แถว</p>
+   <p class="mut">เคสที่ยังเปิดอยู่ไม่ถูกลบ · เคสทดสอบเก็บ 30 วัน · บันทึกการใช้งานด้านข้อมูลส่วนบุคคลเก็บไว้เสมอ</p>${adm?'<div class="row"><button class="btn r" id="pur">ลบตอนนี้</button></div>':""}</div>
+  <div class="card"><h3>ตำแหน่ง (GPS)</h3>
+   <div class="row">เตือนเมื่ออุปกรณ์อยู่ห่างบ้านเกิน <input id="hr" type="number" min="20" max="5000" value="${g.home_radius_m}" ${adm?"":"disabled"}> เมตร · ถือว่าตำแหน่ง "ล่าสุด" ภายใน <input id="gf" type="number" min="1" max="1440" value="${g.gps_fresh_min}" ${adm?"":"disabled"}> นาที · เตือนเกตเวย์ถูกย้ายเมื่อห่าง <input id="gm" type="number" min="20" max="100000" value="${g.gateway_move_m}" ${adm?"":"disabled"}> เมตร</div>
+   ${adm?'<div class="row"><button class="btn p" id="gs">บันทึก</button></div>':""}<p class="mut">ตำแหน่งของผู้ป่วยเป็นข้อมูลอ่อนไหว: ระบบเก็บพิกัดล่าสุดของอุปกรณ์/เคสเพื่อช่วยค้นหา แต่บันทึกเหตุการณ์ไม่เก็บพิกัด และจะถูกลบเมื่อถอนความยินยอม</p></div>`;
+  if(!adm)return;const put=(k,v)=>guard(async()=>{await api("/settings/"+k,{method:"PUT",body:v});toast("บันทึกแล้ว");loadPrivacy()})();
+  $("#pvs").onclick=()=>put("privacy",{require_consent:$("#rc").checked,line_detail:$("#ld").value,case_retention_days:+$("#crd").value,audit_retention_days:+$("#ard").value,auto_purge:$("#ap").checked});
+  $("#gs").onclick=()=>put("geo",{home_radius_m:+$("#hr").value,gps_fresh_min:+$("#gf").value,gateway_move_m:+$("#gm").value});
+  $("#pur").onclick=guard(async()=>{const p=await api("/privacy/retention",{method:"POST",body:{dry_run:true}});
+    if(!p.cases&&!p.audit_rows){toast("ไม่มีข้อมูลที่เกินกำหนด");return}
+    if(!confirm(`จะลบถาวร: เคส ${p.cases} รายการ (เหตุการณ์ ${p.case_events}, การแจ้งเตือน ${p.notifications}) และบันทึกการใช้งาน ${p.audit_rows} แถว\nกู้คืนไม่ได้ ยืนยัน?`))return;
+    const r=await api("/privacy/retention",{method:"POST",body:{dry_run:false}});toast(`ลบแล้ว: เคส ${r.cases}, บันทึก ${r.audit_rows}`);loadPrivacy()})});
+
+/* ---- per-patient PDPA panel ---- */
+async function patientPrivacy(p){
+  const adm=role==="admin";const st=p.anonymized_at?'<b class="bad">ลบข้อมูลแล้ว</b>':p.consent_withdrawn_at?'<b class="bad">ถอนความยินยอมแล้ว</b> ('+fmt(p.consent_withdrawn_at)+')':p.consent_at?'<b class="ok">ให้ความยินยอมแล้ว</b> ('+fmt(p.consent_at)+' · บันทึกโดย '+esc(p.consent_by)+')':'<b class="bad">ยังไม่มีบันทึกความยินยอม</b>';
+  $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>ข้อมูล/PDPA: ${esc(p.full_name)}</h3>
+   <p>สถานะ: ${st}</p>${p.consent_note?`<p class="mut">หมายเหตุ: ${esc(p.consent_note)}</p>`:""}
+   ${p.anonymized_at?"":`<div class="row"><input id="cn" placeholder="เลขที่แบบฟอร์ม / ผู้ให้ความยินยอมแทน (ถ้ามี)" size="40" maxlength="128"><button class="btn g" id="cg">บันทึกว่าได้รับความยินยอมแล้ว</button></div>
+   <p class="mut">บันทึกเมื่อมีหนังสือยินยอมที่ผู้ป่วย (หรือผู้ใช้อำนาจแทน) ลงนามแล้วเท่านั้น</p>
+   ${p.consent_at&&!p.consent_withdrawn_at?'<div class="row"><button class="btn r" id="cw">ถอนความยินยอม</button></div><p class="mut">ถอนแล้ว: ปิดผู้ป่วย คืนอุปกรณ์เป็นสถานะ ready ลบรายชื่อผู้ดูแลที่แจ้ง และล้างตำแหน่งของอุปกรณ์</p>':""}`}</div>
+  ${adm?`<div class="card"><h3>คำขอของเจ้าของข้อมูล</h3><div class="row"><button class="btn" id="ex">⬇ ส่งออกข้อมูลทั้งหมดของผู้ป่วย (JSON)</button></div>
+   ${p.anonymized_at?"":`<hr><p>ลบข้อมูลที่ระบุตัวตน (ย้อนกลับไม่ได้): ชื่อ อายุ ที่อยู่ เบอร์ พิกัด หมายเหตุ ถูกลบ เหลือสถิติเคสแบบไม่ระบุตัวตน</p>
+   <div class="row"><label><input type="checkbox" id="kv" checked> คงชื่อหมู่บ้านไว้เพื่อสถิติ</label></div>
+   <div class="row"><input id="cf" placeholder="พิมพ์เลขที่ผู้ป่วย ${p.id} เพื่อยืนยัน" size="28"><button class="btn r" id="an">ลบข้อมูลที่ระบุตัวตน</button></div>`}</div>`:""}`;
+  $("#back").onclick=()=>render();
+  const act=f=>guard(async()=>{await f();loadPatients()});
+  if($("#cg"))$("#cg").onclick=act(async()=>{await api(`/patients/${p.id}/consent`,{method:"PUT",body:{given:true,note:$("#cn").value}});toast("บันทึกความยินยอมแล้ว")});
+  if($("#cw"))$("#cw").onclick=act(async()=>{if(!confirm("ถอนความยินยอมของ "+p.full_name+" ?"))return;const r=await api(`/patients/${p.id}/consent`,{method:"PUT",body:{given:false,note:$("#cn").value}});toast(`ถอนแล้ว · คืนอุปกรณ์ ${r.devices_freed} เครื่อง`)});
+  if($("#ex"))$("#ex").onclick=guard(async()=>{const r=await fetch(`/api/patients/${p.id}/export`,{headers:{authorization:"Bearer "+token}});if(!r.ok)throw new Error("ส่งออกไม่สำเร็จ ("+r.status+")");dl(await r.blob(),`patient-${p.id}-export.json`)});
+  if($("#an"))$("#an").onclick=act(async()=>{const n=+$("#cf").value;if(n!==p.id)throw new Error("เลขที่ยืนยันไม่ตรง");if(!confirm("ลบข้อมูลที่ระบุตัวตนของ "+p.full_name+" ถาวร?"))return;
+    const r=await api(`/patients/${p.id}/anonymize`,{method:"POST",body:{confirm_id:n,keep_village:$("#kv").checked}});toast(`ลบแล้ว · ล้างข้อมูลในเคส ${r.cases_scrubbed} รายการ`)})}
+function dl(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000)}
+
+/* ---- reports ---- */
+const MTH=["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+let rq=null;
+const sec=s=>s==null?"-":s<90?Math.round(s)+" วินาที":(s/60).toFixed(1)+" นาที";
+const loadReports=guard(async()=>{
+  const nowBkk=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Bangkok"}));
+  if(!rq)rq={y:nowBkk.getFullYear(),m:nowBkk.getMonth()+1};
+  const ys=[];for(let y=nowBkk.getFullYear();y>=nowBkk.getFullYear()-4;y--)ys.push(y);
+  const q="month="+rq.y+"-"+String(rq.m).padStart(2,"0");
+  const r=await api("/reports/summary?"+q);if(page!=="reports")return;
+  const c=r.cases,rs=r.response,mx=Math.max(1,...r.by_hour);
+  const tbl=(h,rows)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join("")}</tr>${rows.map(x=>`<tr>${x.map(y=>`<td>${y}</td>`).join("")}</tr>`).join("")}</table>`:'<p class="mut">ไม่มีข้อมูล</p>';
+  $("#main").innerHTML=`<div class="card"><div class="row"><b>รายงานเดือน</b><select id="rm">${MTH.map((n,i)=>`<option value="${i+1}" ${rq.m===i+1?"selected":""}>${n}</option>`).join("")}</select><select id="ry">${ys.map(y=>`<option value="${y}" ${rq.y===y?"selected":""}>${y+543}</option>`).join("")}</select>
+   <button class="btn" id="rprint">🖨 พิมพ์ / บันทึกเป็น PDF</button>${canEdit()?'<button class="btn" id="rcsv">⬇ ดาวน์โหลด CSV (เปิดใน Excel ได้)</button>':""}</div></div>
+  <div id="rpt"><div class="card"><h2 style="margin-top:0">รายงานสรุปเหตุฉุกเฉิน ${MTH[rq.m-1]} ${rq.y+543}</h2><p class="mut">ช่วง ${esc(r.period.from_be)} – ${esc(r.period.to_be)} (เวลาประเทศไทย)</p>
+   <div class="row"><span class="tag">เคสทั้งหมด <b>${c.total}</b></span><span class="tag">ช่วยเหลือสำเร็จ ${c.resolved}</span><span class="tag">เหตุผิดพลาด ${c.false_alarm}</span><span class="tag">ผู้ป่วยยกเลิกเอง ${c.cancelled_by_device}</span><span class="tag">นอกเวลาทำการ ${c.after_hours}</span><span class="tag">เกินเวลา ${c.overdue}</span><span class="tag">ต้องแจ้งต่อคนถัดไป ${c.escalated}</span><span class="tag">ยังเปิดอยู่ ${c.still_open}</span><span class="tag">ทดสอบ ${c.tests}</span></div></div>
+  <div class="card"><h3>ความเร็วในการรับเรื่อง</h3>${rs.accepted?`<div class="row"><span class="tag">รับเรื่อง ${rs.accepted} เคส</span><span class="tag">เฉลี่ย ${sec(rs.accept_avg_s)}</span><span class="tag">มัธยฐาน ${sec(rs.accept_median_s)}</span><span class="tag">P90 ${sec(rs.accept_p90_s)}</span><span class="tag">ภายในเป้า ${rs.target_s} วินาที: <b>${rs.within_target_pct}%</b></span><span class="tag">ปิดเคสเฉลี่ย ${rs.close_avg_min??"-"} นาที</span></div>`:'<p class="mut">ยังไม่มีเคสที่รับเรื่องในช่วงนี้</p>'}</div>
+  <div class="card"><h3>แยกตามหมู่บ้าน</h3>${tbl(["หมู่บ้าน","เคส","เหตุผิดพลาด","รับเรื่องเฉลี่ย"],r.by_village.map(v=>[esc(v.village||"(ไม่ระบุ)"),v.cases,v.false_alarm,sec(v.accept_avg_s)]))}</div>
+  <div class="card"><h3>ช่วงเวลาที่เกิดเหตุ</h3><div style="display:flex;align-items:flex-end;gap:2px;height:80px">${r.by_hour.map((n,h)=>`<div title="${h}:00 น. — ${n} เคส" style="flex:1;background:var(--pri);height:${Math.max(n?4:1,Math.round(n/mx*76))}px;opacity:${n?1:.25}"></div>`).join("")}</div><div class="mut" style="display:flex;justify-content:space-between"><span>0 น.</span><span>12 น.</span><span>23 น.</span></div>
+   <div class="row" style="margin-top:8px">${r.by_weekday.map(d=>`<span class="tag">${esc(d.day)} ${d.cases}</span>`).join("")}</div></div>
+  ${r.top_patients.length?`<div class="card"><h3>ผู้ป่วยที่แจ้งบ่อย (10 อันดับ)</h3>${tbl(["ผู้ป่วย","เคส"],r.top_patients.map(p=>[esc(p.name||p.full_name||"-"),p.cases]))}</div>`:""}
+  <div class="card"><h3>ระบบ</h3><div class="row"><span class="tag">LINE ส่งสำเร็จ ${r.line.sent}</span><span class="tag">LINE ล้มเหลว ${r.line.failed}</span><span class="tag">อุปกรณ์ใช้งาน ${r.devices.active}</span><span class="tag">ออฟไลน์ตอนนี้ ${r.devices.offline_now}</span><span class="tag">แบตต่ำ ${r.devices.low_battery}</span><span class="tag">ไฟบ้านดับ ${r.devices.mains_lost}</span></div>
+   <h4>เกตเวย์ขาดการเชื่อมต่อในช่วงนี้</h4>${r.gateways.length?tbl(["เกตเวย์","จำนวนครั้ง","รวม (นาที)",""],r.gateways.map(g=>[esc(g.label||g.gateway_id),g.outages,g.downtime_min,g.ongoing?"<b class='bad'>ยังขาดอยู่</b>":""])):'<p class="ok">ไม่มี</p>'}</div></div>`;
+  $("#rm").onchange=()=>{rq.m=+$("#rm").value;loadReports()};$("#ry").onchange=()=>{rq.y=+$("#ry").value;loadReports()};
+  $("#rprint").onclick=()=>{document.body.classList.add("rpt");window.print();setTimeout(()=>document.body.classList.remove("rpt"),500)};
+  if($("#rcsv"))$("#rcsv").onclick=guard(async()=>{const x=await fetch("/api/reports/cases.csv?"+q,{headers:{authorization:"Bearer "+token}});if(!x.ok)throw new Error("ดาวน์โหลดไม่สำเร็จ ("+x.status+")");dl(await x.blob(),`sos-cases-${rq.y+543}-${String(rq.m).padStart(2,"0")}.csv`)})});
+
 </script></body></html>

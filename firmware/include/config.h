@@ -25,11 +25,12 @@
 
 // ===== Protocol (must match docs/contract) =====
 #define PROTO_VER 1
-enum MsgType : uint8_t { T_ALERT = 1, T_CANCEL, T_TEST, T_HEARTBEAT, T_POLL, T_ACK_L2, T_CONFIG };
+enum MsgType : uint8_t { T_ALERT = 1, T_CANCEL, T_TEST, T_HEARTBEAT, T_POLL, T_ACK_L2, T_CONFIG, T_LOC };
 enum : uint8_t { F_MAINS_OK = 1, F_BATT_LOW = 2, F_CHARGING = 4, F_TEST_MODE = 8 };
 #define FPORT_EVENT 1
 #define FPORT_HEARTBEAT 2
 #define FPORT_POLL 3
+#define FPORT_LOC 4
 #define FPORT_ACK_L2 10
 #define FPORT_CONFIG 11
 
@@ -54,3 +55,16 @@ struct Config {              // runtime-tunable from server via CONFIG downlink
   uint8_t  buzzer = 2;       // 0 off, 1 low, 2 normal, 3 loud (pattern length)
   uint16_t hold_ms = 1500;
 };
+
+// ===== Optional GPS module (NEO-6M / ATGM336H class, 3.3 V, NMEA 9600 baud). Off by default: build env heltec_v3_gps =====
+#ifndef SOS_GPS
+  #define SOS_GPS 0
+#endif
+#if SOS_GPS
+  #define PIN_GPS_RX 33          // ESP32 RX  <- GPS TX.  CHECK these pins are on YOUR board's header before wiring
+  #define PIN_GPS_TX 34          // ESP32 TX  -> GPS RX
+  #define GPS_BAUD 9600
+  #define GPS_MIN_SATS 4         // below this the fix is ignored (also enforced again by the server)
+  #define GPS_MAX_AGE_MS 120000UL  // a fix older than 2 min is not reported
+  #define GPS_LOC_MAX_TRIES 4    // tries per alert (first right after L1 ACK, then on the next polls)
+#endif

@@ -19,13 +19,14 @@ def verify_signature(body: bytes, signature: str, secret: str | None = None) -> 
     return hmac.compare_digest(base64.b64encode(mac).decode(), signature or "")
 
 
-def flex_for_case(case: Case, reminder: bool = False) -> dict:
+def flex_for_case(case: Case, reminder: bool = False, detail: str = "full") -> dict:
     p = case.patient
     name = p.full_name if p else "ไม่ทราบผู้ป่วย (อุปกรณ์ยังไม่ผูก)"
     addr = (p.address if p else "") or "-"
     phone = (p.phone if p else "") or "-"
     title = ("⏰ เตือนซ้ำ: " if reminder else "🚨 ") + "แจ้งเหตุฉุกเฉิน"
-    rows = [("ผู้ป่วย", name), ("ที่อยู่", addr), ("โทร", phone)]
+    minimal = detail == "minimal"          # PDPA data minimisation: LINE servers see only name + village
+    rows = [("ผู้ป่วย", name), ("หมู่บ้าน", (p.village if p else "") or "-")] if minimal else [("ผู้ป่วย", name), ("ที่อยู่", addr), ("โทร", phone)]
     body = [{"type": "text", "text": title, "weight": "bold", "size": "lg", "color": "#D32F2F"}]
     for k, v in rows:
         body.append({"type": "box", "layout": "baseline", "contents": [
@@ -35,10 +36,12 @@ def flex_for_case(case: Case, reminder: bool = False) -> dict:
                 "footer": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": [
                     {"type": "button", "style": "primary", "color": "#2E7D32",
                      "action": {"type": "postback", "label": "รับเรื่อง", "data": f"accept:{case.id}"}}]}}
-    if p and p.phone:
+    if minimal:
+        pass
+    elif p and p.phone:
         contents["footer"]["contents"].append({"type": "button", "style": "secondary",
             "action": {"type": "uri", "label": "โทรหาผู้ป่วย", "uri": f"tel:{p.phone}"}})
-    if p and p.lat is not None and p.lon is not None:
+    if not minimal and p and p.lat is not None and p.lon is not None:
         contents["footer"]["contents"].append({"type": "button", "style": "secondary",
             "action": {"type": "uri", "label": "นำทาง", "uri": f"https://maps.google.com/?q={p.lat},{p.lon}"}})
     return {"type": "flex", "altText": f"{title}: {name}", "contents": contents}
@@ -61,13 +64,29 @@ class LineNotifier:
     def notify_case(self, db: Session, case: Case, cg: Caregiver, reminder: bool) -> tuple[bool, str]:
         if not cg.line_user_id:
             return False, "no line_user_id"
-        return self._post(PUSH_URL, {"to": cg.line_user_id, "messages": [flex_for_case(case, reminder)]})
+        from . import settings_store
+        detail = settings_store.get(db, "privacy")["line_detail"]
+        return self._post(PUSH_URL, {"to": cg.line_user_id, "messages": [flex_for_case(case, reminder, detail)]})
 
     def notify_system(self, db: Session, cg: Caregiver, text: str) -> tuple[bool, str]:
         """Plain-text system message (e.g. gateway offline)."""
         if not cg.line_user_id:
             return False, "no line_user_id"
         return self._post(PUSH_URL, {"to": cg.line_user_id, "messages": [{"type": "text", "text": text[:4900]}]})
+
+    def notify_location(self, db: Session, case: Case, cg: Caregiver, lat: float, lon: float, sats: int,
+                        home_m: int | None) -> tuple[bool, str]:
+        """Follow-up to the alert: the live GPS fix of the button. Skipped in 'minimal' privacy mode (coordinates = navigation data)."""
+        from . import settings_store
+        from .geo import maps_url
+        if not cg.line_user_id:
+            return False, "no line_user_id"
+        if settings_store.get(db, "privacy")["line_detail"] == "minimal":
+            return False, "skipped: minimal privacy mode"
+        name = case.patient.full_name if case.patient else f"เคส #{case.id}"
+        far = f"\nห่างจากที่อยู่ที่ลงทะเบียน ~{home_m} ม." if home_m is not None else ""
+        text = f"📍 พิกัดสดจากอุปกรณ์ ({name}) จับดาวเทียมได้ {sats} ดวง{far}\n{maps_url(lat, lon)}"
+        return self._post(PUSH_URL, {"to": cg.line_user_id, "messages": [{"type": "text", "text": text}]})
 
     def reply_text(self, reply_token: str, text: str):
         self._post(REPLY_URL, {"replyToken": reply_token, "messages": [{"type": "text", "text": text}]})

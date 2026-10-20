@@ -6,6 +6,9 @@
 #include <U8g2lib.h>
 #include <Wire.h>
 #include "config.h"
+#if SOS_GPS
+#include "gps_nmea.h"
+#endif
 
 // ---------------------------------------------------------------- radio
 SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY);
@@ -261,6 +264,29 @@ void serialCommands() {
   }
 }
 
+
+// ---------------------------------------------------------------- optional GPS (build with -D SOS_GPS=1, see docs/GPS-kit.md)
+#if SOS_GPS
+NmeaParser g_nmea; GpsFix g_fix; uint32_t g_fixAt = 0; bool g_locSent = false; uint8_t g_locTries = 0;
+void gpsPoll() {                                  // drain the UART; keep only the newest valid fix
+  while (Serial1.available()) {
+    if (g_nmea.feed((char)Serial1.read())) { g_nmea.take(g_fix); g_fixAt = millis(); }
+  }
+}
+bool gpsFresh() { return g_fix.valid && g_fix.sats >= GPS_MIN_SATS && millis() - g_fixAt <= GPS_MAX_AGE_MS; }
+// One unconfirmed LOC uplink per alert (FPort 4) — sent only AFTER the L1 ACK so it can never delay the alert itself.
+void sendLocIfAny(uint8_t alertId) {
+  if (g_locSent || g_locTries >= GPS_LOC_MAX_TRIES) return;
+  g_locTries++;
+  if (!gpsFresh()) return;
+  uint8_t p[9]; encodeLoc(alertId, g_fix.lat, g_fix.lon, g_fix.sats, g_fix.hdop, p);
+  LoRaWANEvent_t up, dn; uint8_t down[8]; size_t dl = 0;
+  int16_t s = node.sendReceive(p, sizeof p, FPORT_LOC, down, &dl, false, &up, &dn);
+  Serial.printf("[gps] LOC sent state=%d sats=%u hdop=%.1f\n", s, g_fix.sats, g_fix.hdop);
+  if (s >= 0) g_locSent = true;
+}
+#endif
+
 // ---------------------------------------------------------------- main logic
 enum Phase { P_IDLE, P_ALERT } phase = P_IDLE;
 uint8_t  curAlert = 0;
@@ -281,6 +307,9 @@ void doAlertStep() {
     tries++;
     if (conf) {                                   // L1: server acknowledged the confirmed uplink
       l1Ok = true; nextPoll = millis() + 3000; setUi(UI_SENT_WAIT);
+#if SOS_GPS
+      sendLocIfAny(curAlert);
+#endif
     } else {
       nextTry = millis() + min<uint32_t>(3000UL << min<uint8_t>(tries, 4), 30000UL);   // backoff 6,12,24,30 s…
       if (millis() - alertStart > L1_TIMEOUT_MS && g_ui != UI_FAIL) setUi(UI_FAIL);
@@ -290,6 +319,9 @@ void doAlertStep() {
   if (now - alertStart > POLL_MAX_MS) { endAlert(UI_READY); return; }
   if (now < nextPoll) return;
   pollCount++;
+#if SOS_GPS
+  sendLocIfAny(curAlert);                          // retry on the early polls if there was no fix at first
+#endif
   int16_t s = sendFrame(T_POLL, curAlert, FPORT_POLL, false, pollCount, down, &dl, &conf);
   nextPoll = millis() + (uint32_t)g_cfg.poll_s * 1000UL;
   if (s > 0 && dl > 0) {
@@ -307,6 +339,9 @@ void doAlertStep() {
 void startAlert() {
   curAlert = nextAlertId(); phase = P_ALERT; l1Ok = false; tries = 0; pollCount = 0;
   alertStart = millis(); nextTry = 0; setUi(UI_SENDING);
+#if SOS_GPS
+  g_locSent = false; g_locTries = 0;
+#endif
 }
 
 void doCancel() {
@@ -335,6 +370,9 @@ void setup() {
   setUi(UI_BOOT);
   xTaskCreatePinnedToCore(uiTask, "ui", 6144, nullptr, 2, nullptr, 0);
   loadStorage();
+#if SOS_GPS
+  Serial1.begin(GPS_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
+#endif
   delay(800);
   if (!g_provisioned) { setUi(UI_NOT_PROVISIONED); return; }
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
@@ -347,6 +385,9 @@ void setup() {
 
 void loop() {
   serialCommands();
+#if SOS_GPS
+  gpsPoll();
+#endif
   if (!g_provisioned) { delay(50); return; }
 
   static uint32_t nextJoin = 0, joinDelay = (uint32_t)JOIN_RETRY_MIN_MS;

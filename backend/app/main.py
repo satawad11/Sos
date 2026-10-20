@@ -3,8 +3,8 @@ import asyncio, logging, threading, time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from . import api
-from .auth import hash_pw, user_from_token
+from . import api, privacy, settings_store
+from .auth import audit, hash_pw, user_from_token
 from .config import env
 from .db import Base, SessionLocal, engine as dbengine, ensure_columns
 from .engine import Engine
@@ -39,17 +39,29 @@ def bootstrap_admin():
                 log.warning("No users and SOS_BOOTSTRAP_ADMIN_PASSWORD empty — set it and restart")
                 return
             db.add(User(username=env.bootstrap_admin_user, password_hash=hash_pw(env.bootstrap_admin_password),
-                        role="admin", display_name="ผู้ดูแลระบบ"))
+                        role="admin", display_name="ผู้ดูแลระบบ", must_change=True))
             db.commit(); log.info("bootstrap admin created")
 
 
 def escalation_loop(eng: Engine, stop: threading.Event):
+    n = 0
     while not stop.wait(5):
         try:
             with SessionLocal() as db:
                 eng.tick(db)
         except Exception:
             log.exception("escalation tick failed")
+        n += 1
+        if n % 720 == 0:                       # hourly (720 x 5 s): retention purge, only when the admin switched it on
+            try:
+                with SessionLocal() as db:
+                    if settings_store.get(db, "privacy")["auto_purge"]:
+                        res = privacy.retention(db, dry_run=False)
+                        if res["cases"] or res["audit_rows"]:
+                            audit(db, "system", "retention_run", "", auto=True, **{k: v for k, v in res.items() if isinstance(v, int)})
+                        db.commit()
+            except Exception:
+                log.exception("retention purge failed")
 
 
 @asynccontextmanager

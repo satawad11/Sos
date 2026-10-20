@@ -96,6 +96,9 @@ class MqttWorker:
             return
         with SessionLocal() as db:
             try:
+                if fport == codec.FPORT_LOC:
+                    log.info("location %s -> %s", dev_eui, self.engine.handle_location(db, dev_eui, data, meta))
+                    return
                 res = self.engine.handle_uplink(db, dev_eui, data, meta)
                 log.info("uplink %s fport=%s -> %s", dev_eui, fport, res)
             except Exception:

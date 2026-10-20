@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from . import settings_store
 from .config import env
+from . import geo
 from .models import AuditLog, Caregiver, Gateway, utcnow
 
 log = logging.getLogger("sos.gateways")
@@ -68,6 +69,18 @@ def sanitize_report(d) -> dict | None:
         v = d.get(key)
         if isinstance(v, str) and re.fullmatch(r"[0-9A-Za-z .:_/+-]{1,40}", v):
             out[key] = v
+    gp = d.get("gps")
+    if isinstance(gp, dict):
+        lat, lon = gp.get("lat"), gp.get("lon")
+        if geo.valid_latlon(lat, lon) and gp.get("fix") is True:
+            g = {"fix": True, "lat": round(float(lat), 6), "lon": round(float(lon), 6)}
+            sats = _num(gp.get("sats"), 0, 99, int)
+            if sats is not None: g["sats"] = sats
+            alt = _num(gp.get("alt"), -500, 10000, float)
+            if alt is not None: g["alt"] = round(alt, 1)
+            out["gps"] = g
+        elif gp.get("fix") is False:
+            out["gps"] = {"fix": False}                 # a GPS is attached but has no fix right now
     return out or None
 
 
@@ -100,7 +113,21 @@ def warnings(rep: dict | None) -> list[str]:
     return out
 
 
-def classify(g: Gateway, now: datetime, off_min: int) -> tuple[str, str]:
+GPS_FRESH_S = 30 * 60
+
+
+def moved_m(g: Gateway, now: datetime, limit_m: int | None = None) -> float | None:
+    """Metres between the REGISTERED position and a fresh GPS fix of the gateway itself (None if either is missing).
+    Returns a value only when it exceeds limit_m (when given): used to flag a gateway that was moved or stolen."""
+    if g.lat is None or g.lon is None or g.gps_lat is None or g.gps_lon is None or not g.gps_at:
+        return None
+    if (now - _aware(g.gps_at)).total_seconds() > GPS_FRESH_S:
+        return None
+    d = geo.distance_m(g.lat, g.lon, g.gps_lat, g.gps_lon)
+    return round(d) if (limit_m is None or d > limit_m) else None
+
+
+def classify(g: Gateway, now: datetime, off_min: int, move_m: int | None = None) -> tuple[str, str]:
     """Return (status, reason). status: disabled|unknown|online|warning|offline ; reason only for offline."""
     if g.enabled is False:
         return "disabled", ""
@@ -112,7 +139,7 @@ def classify(g: Gateway, now: datetime, off_min: int) -> tuple[str, str]:
     ds = _aware(g.degraded_since)
     if ds and (now - ds).total_seconds() >= DEGRADED_GRACE_S:
         return "offline", "radio"
-    if ds or warnings(g.report):
+    if ds or warnings(g.report) or (move_m is not None and moved_m(g, now, move_m) is not None):
         return "warning", ""
     return "online", ""
 
@@ -159,6 +186,9 @@ class GatewayMonitor:
         g = self._get(db, gid)
         g.last_seen = g.last_report_at = now
         g.report = rep
+        gp = rep.get("gps")
+        if gp and gp.get("fix") and gp.get("sats", 4) >= 4:        # ignore 2-3 satellite "fixes": they can be hundreds of metres off
+            g.gps_lat, g.gps_lon, g.gps_at, g.gps_sats = gp["lat"], gp["lon"], now, gp.get("sats")
         if critical(rep):
             g.degraded_since = g.degraded_since or now
         else:

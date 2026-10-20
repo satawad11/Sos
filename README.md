@@ -16,7 +16,7 @@
 ## สถานะการทดสอบ (ตรงไปตรงมา)
 | ส่วน | สถานะ |
 |---|---|
-| backend (case engine, ACK_L2, escalation, after-hours, LINE webhook, auth/role/lockout, settings→CONFIG) | ✅ เทสต์อัตโนมัติ 41 ข้อ (รวมตั้งค่ารายเครื่อง, provision API, QR, ตรวจเกตเวย์ออฟไลน์/LINE) + end-to-end จริงกับ Mosquitto (กด→รับ→ได้ ACK) |
+| backend (case engine, ACK_L2, escalation, after-hours, LINE webhook, auth/role/lockout, settings→CONFIG) | ✅ เทสต์อัตโนมัติ 61 ข้อ (รวมตั้งค่ารายเครื่อง, provision API, QR, ตรวจเกตเวย์ออฟไลน์/LINE) + end-to-end จริงกับ Mosquitto (กด→รับ→ได้ ACK) |
 | dashboard | ✅ ทดสอบใน Chromium (login, ทุกหน้า, เคสขึ้นสีแดง) · ❗ ยังไม่ทดสอบบนมือถือ/จอเล็กและเสียงเตือนจริง |
 | Mosquitto TLS + ACL ต่อ gateway | ✅ ทดสอบด้วย mosquitto 2.0.18 (gateway ปลอมหัวข้อของตัวอื่นไม่ได้) |
 | ตรวจสุขภาพเกตเวย์ + แจ้ง LINE เมื่อออฟไลน์ | ✅ เทสต์อัตโนมัติ 10 ข้อ + ทดสอบหน้าเว็บใน Chromium + ทดสอบสคริปต์รายงานจริงผ่าน mosquitto 2.0.18 (TLS+ACL) ไปจนถึงตัวถอดรหัสของ backend · ❗ ยังไม่เคยรันบน Pi จริง (vcgencmd/systemd) และยังไม่ส่ง LINE จริง |
@@ -24,6 +24,8 @@
 | หน้าเว็บ "ติดตั้งอุปกรณ์" (Web Serial) + ตั้งค่ารายเครื่อง | ✅ ทดสอบใน Chromium กับเฟิร์มแวร์จำลอง (สำเร็จ/ล้มแล้ว rollback/ตั้งค่า/รีเซ็ต) · ❗ ยังไม่ทดสอบกับบอร์ด Heltec จริง (พฤติกรรม DTR/RTS ตอนเปิดพอร์ต) และ ChirpStack จริง |
 | provision tool | ✅ ยูนิตเทสต์ 5 ข้อ (serial/HTTP จำลอง) · ❗ ยังไม่ได้ลองกับ ChirpStack/บอร์ดจริง |
 | docker-compose / ChirpStack config | ⚠️ `docker compose config` ผ่านเท่านั้น **ยังไม่เคยรัน stack จริง** (ไม่มี Docker daemon/เครือข่ายในที่เขียน) — ข้อเสี่ยงที่รู้: การแทน `$ตัวแปร` ใน toml ของ ChirpStack (มีวิธีแก้ใน INSTALL-1) |
+| ตำแหน่ง GPS (เกตเวย์/อุปกรณ์) | ✅ backend+แดชบอร์ดทดสอบแล้ว (codec LOC, ห่างบ้าน, เกตเวย์ถูกย้าย) + พาร์เซอร์ NMEA/ตัวเข้ารหัส C++ ทดสอบบนเครื่อง · ❗ เฟิร์มแวร์ GPS ไม่เคยคอมไพล์/ต่อโมดูลจริง, ยังไม่ยืนยันว่า WM1302 รุ่นที่ซื้อมี GPS — ดู `docs/GPS-kit.md` |
+| รหัสผ่าน/ผู้ใช้/รายงาน/PDPA | ✅ เทสต์อัตโนมัติ 61 ข้อ + ทดสอบหน้าเว็บใน Chromium (เปลี่ยนรหัสบังคับ, รีเซ็ต, ยินยอม/ถอน/ส่งออก/ลบข้อมูล, รายงาน+CSV, viewer บนจอมือถือ) · ❗ ไม่ใช่คำปรึกษากฎหมาย — ดู `docs/PDPA.md` |
 | **firmware** | ⚠️ **ยังไม่เคยคอมไพล์/รันบนบอร์ด** — ตรวจ API กับซอร์ส RadioLib 7.2.1 แล้ว (beginOTAA/activateOTAA/sendReceive/NONCES buffer/`LoRaWANEvent_t.confirming,fPort`/AS923) |
 | LINE จริง | ❗ ยังไม่ทดสอบกับ LINE API จริง (ทดสอบด้วย webhook จำลอง + ตรวจลายเซ็น) |
 | ประสิทธิภาพ/ระยะ/แบตเตอรี่ | ❗ ยังไม่วัด — ต้องวัดตอนต้นแบบ |

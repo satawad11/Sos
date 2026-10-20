@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Protocol
 from sqlalchemy.orm import Session
-from . import codec, settings_store
+from . import codec, geo, settings_store
 from .hours import is_office_hours
 from .gateways import GatewayMonitor
 from .models import (Case, CaseEvent, Device, Assignment, Caregiver, Notification, utcnow)
@@ -88,6 +88,54 @@ class Engine:
 
     def handle_gateway_report(self, db: Session, gateway_id: str, raw) -> str:
         return self.gw.on_report(db, gateway_id.lower(), raw, utcnow())
+
+    def handle_location(self, db: Session, dev_eui: str, payload: bytes, meta: dict | None = None) -> str:
+        """LOC uplink (FPort 4) from a device with optional GPS: remember the fix, attach it to the alert's case and,
+        if the case is still open, send the people already notified a follow-up with the live position."""
+        meta = meta or {}
+        try:
+            loc = codec.decode_loc(payload)
+        except codec.CodecError as e:
+            log.warning("bad LOC from %s: %s", dev_eui, e)
+            return "bad_payload"
+        dev = db.query(Device).filter_by(dev_eui=dev_eui.lower()).first()
+        if dev is None:
+            return "unknown_device"
+        now = utcnow()
+        dev.last_seen = now
+        if "rssi" in meta: dev.last_rssi = meta["rssi"]
+        if "snr" in meta: dev.last_snr = meta["snr"]
+        if meta.get("gateway_id"):
+            dev.last_gateway = meta["gateway_id"]; self.gw.on_uplink(db, meta["gateway_id"], now)
+        dev.loc_lat, dev.loc_lon, dev.loc_at, dev.loc_sats, dev.loc_hdop = loc.lat, loc.lon, now, loc.sats, loc.hdop
+        case = (db.query(Case).filter(Case.device_id == dev.id, Case.alert_id == loc.alert_id, Case.is_test.is_(False),
+                                      Case.created_at > now - timedelta(minutes=30)).order_by(Case.id.desc()).first())
+        if case is None:
+            db.commit(); return "stored_no_case"
+        first = case.loc_lat is None
+        moved = (not first) and geo.distance_m(case.loc_lat, case.loc_lon, loc.lat, loc.lon) > 50
+        case.loc_lat, case.loc_lon, case.loc_at, case.loc_sats, case.loc_hdop = loc.lat, loc.lon, now, loc.sats, loc.hdop
+        home_m = None
+        if case.patient and case.patient.lat is not None and case.patient.lon is not None:
+            home_m = round(geo.distance_m(case.patient.lat, case.patient.lon, loc.lat, loc.lon))
+        self._event(db, case, "location", sats=loc.sats, hdop=loc.hdop, away_from_home_m=home_m)     # coordinates stay in the case columns only
+        if (first or moved) and case.state in OPEN_STATES:
+            self._push_location(db, case, loc, home_m)
+        db.commit(); self._pub(case, "case_update")
+        return "ok"
+
+    def _push_location(self, db: Session, case: Case, loc, home_m):
+        fn = getattr(self.notifier, "notify_location", None)
+        if fn is None:
+            return
+        chain = self._chain(db, case)[: case.esc_step + 1]
+        for cg in chain:
+            try:
+                ok, detail = fn(db, case, cg, loc.lat, loc.lon, loc.sats, home_m)
+            except Exception as e:
+                log.exception("location push failed"); ok, detail = False, f"error: {e}"
+            status = "skipped" if detail.startswith("skipped") else ("sent" if ok else "failed")
+            db.add(Notification(case_id=case.id, caregiver_id=cg.id, channel="line_loc", status=status, detail=detail))
 
     def _open_case(self, db: Session, dev: Device) -> Case | None:
         return (db.query(Case).filter(Case.device_id == dev.id, Case.state.in_(OPEN_STATES),

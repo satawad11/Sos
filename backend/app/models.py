@@ -28,6 +28,10 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = _dt(nullable=True)
+    must_change: Mapped[bool] = mapped_column(Boolean, default=False)      # temp/initial password: must set a new one first
+    token_ver: Mapped[int] = mapped_column(Integer, default=0)             # bump to revoke every issued token
+    password_changed_at: Mapped[datetime | None] = _dt(nullable=True)
+    last_login_at: Mapped[datetime | None] = _dt(nullable=True)
 
 
 class Patient(Base):
@@ -43,6 +47,12 @@ class Patient(Base):
     notes: Mapped[str] = mapped_column(Text, default="")  # keep minimal: PDPA data minimisation
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = _dt(default=utcnow)
+    # PDPA: consent record (health data = sensitive personal data, section 26)
+    consent_at: Mapped[datetime | None] = _dt(nullable=True)
+    consent_by: Mapped[str] = mapped_column(String(64), default="")        # staff user who recorded it
+    consent_note: Mapped[str] = mapped_column(String(128), default="")     # e.g. consent form number / who consented (guardian)
+    consent_withdrawn_at: Mapped[datetime | None] = _dt(nullable=True)
+    anonymized_at: Mapped[datetime | None] = _dt(nullable=True)
 
 
 class Device(Base):
@@ -64,6 +74,11 @@ class Device(Base):
     last_rssi: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_snr: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_gateway: Mapped[str] = mapped_column(String(16), default="")
+    loc_lat: Mapped[float | None] = mapped_column(Float, nullable=True)    # last GPS fix reported by the device (optional hardware)
+    loc_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    loc_at: Mapped[datetime | None] = _dt(nullable=True)
+    loc_sats: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    loc_hdop: Mapped[float | None] = mapped_column(Float, nullable=True)
     patient = relationship(Patient)
 
 
@@ -107,6 +122,11 @@ class Case(Base):
     next_escalation_at: Mapped[datetime | None] = _dt(nullable=True)
     ack_result_sent: Mapped[int] = mapped_column(Integer, default=0)
     ack_sent_at: Mapped[datetime | None] = _dt(nullable=True)
+    loc_lat: Mapped[float | None] = mapped_column(Float, nullable=True)    # live fix received for THIS alert (LOC message)
+    loc_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    loc_at: Mapped[datetime | None] = _dt(nullable=True)
+    loc_sats: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    loc_hdop: Mapped[float | None] = mapped_column(Float, nullable=True)
     device = relationship(Device)
     patient = relationship(Patient)
     events = relationship("CaseEvent", order_by="CaseEvent.id", back_populates="case")
@@ -184,3 +204,9 @@ class Gateway(Base):
     report: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # sanitized last health report
     degraded_since: Mapped[datetime | None] = _dt(nullable=True)   # radio/forwarder reported down since...
     uplinks_total: Mapped[int] = mapped_column(Integer, default=0)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)        # registered (installed) position
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gps_lat: Mapped[float | None] = mapped_column(Float, nullable=True)    # last fix reported by the gateway's own GPS (optional)
+    gps_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gps_at: Mapped[datetime | None] = _dt(nullable=True)
+    gps_sats: Mapped[int | None] = mapped_column(Integer, nullable=True)
