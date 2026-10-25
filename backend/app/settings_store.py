@@ -13,6 +13,7 @@ DEFAULTS: dict[str, dict] = {
     "device_defaults": {"heartbeat_min": 30, "poll_s": 10, "buzzer": 2, "hold_ms": 1500},
     "offline": {"device_offline_min": 90, "gateway_offline_min": 5},
     "system_alert": {"caregiver_ids": [], "repeat_min": 60},   # who gets "gateway offline" LINE alerts; 0 = no reminders
+    "device_alert": {"enabled": True, "battery_low_pct": 20, "mains_grace_min": 10},   # LINE alert when a button goes quiet / low battery / mains lost
     "privacy": {"require_consent": True, "case_retention_days": 730, "audit_retention_days": 365,
                 "auto_purge": False, "line_detail": "full"},          # line_detail: full | minimal (name + village only)
     "geo": {"home_radius_m": 150, "gps_fresh_min": 15, "gateway_move_m": 200},

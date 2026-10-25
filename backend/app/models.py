@@ -79,6 +79,7 @@ class Device(Base):
     loc_at: Mapped[datetime | None] = _dt(nullable=True)
     loc_sats: Mapped[int | None] = mapped_column(Integer, nullable=True)
     loc_hdop: Mapped[float | None] = mapped_column(Float, nullable=True)
+    watch: Mapped[dict | None] = mapped_column(JSON, nullable=True)       # DeviceMonitor state (offline/battery/mains alerts)
     patient = relationship(Patient)
 
 

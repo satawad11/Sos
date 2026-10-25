@@ -560,6 +560,13 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
         if value.get("line_detail") not in ("full", "minimal"): raise HTTPException(422, "line_detail must be full or minimal")
         value = {"require_consent": value["require_consent"], "auto_purge": value["auto_purge"], "line_detail": value["line_detail"],
                  "case_retention_days": _int("case_retention_days", 30, 3650), "audit_retention_days": _int("audit_retention_days", 90, 3650)}
+    if key == "device_alert":
+        def _i(k, lo, hi):
+            v = value.get(k)
+            if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi: raise HTTPException(422, f"{k} must be {lo}-{hi}")
+            return v
+        if not isinstance(value.get("enabled"), bool): raise HTTPException(422, "enabled must be true/false")
+        value = {"enabled": value["enabled"], "battery_low_pct": _i("battery_low_pct", 5, 50), "mains_grace_min": _i("mains_grace_min", 1, 240)}
     if key == "geo":
         out = {}
         for k, lo, hi in (("home_radius_m", 20, 5000), ("gps_fresh_min", 1, 1440), ("gateway_move_m", 20, 100000)):

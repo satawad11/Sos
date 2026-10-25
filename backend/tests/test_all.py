@@ -1084,3 +1084,109 @@ def test_loc_vectors_match_firmware_file():
         assert codec.encode_loc(int(a), float(la), float(lo), int(s), float(h)).hex() == hx
         d = codec.decode_loc(bytes.fromhex(hx))
         assert abs(d.lat - float(la)) < 3e-5 and abs(d.lon - float(lo)) < 3e-5
+
+
+# ---------------- device watch: silent / low battery / mains lost ----------------
+EUI1 = "70b3d57ed0000001"
+
+
+def _dev(db):
+    from app.models import Device
+    return db.query(Device).filter_by(dev_eui=EUI1).one()
+
+
+def test_device_silent_alert_repeat_recovery(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 30}, "t")
+        d = _dev(db); d.last_seen = t0; d.battery = 90; d.mains_ok = True; db.commit()
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=60)); assert notif.system == []              # < 90 min threshold
+        for m in (95, 95.1, 100):
+            eng.dev_watch.tick(db, t0 + timedelta(minutes=m))
+        assert len(notif.system) == 1 and "เงียบหาย" in notif.system[0][1] and "A1" in notif.system[0][1]
+        assert "นางสมศรี" in notif.system[0][1]                                                    # privacy.line_detail = full
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=120)); assert len(notif.system) == 1
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=127)); assert len(notif.system) == 2 and "เตือนซ้ำ" in notif.system[1][1]
+        d = _dev(db); d.last_seen = t0 + timedelta(minutes=130); db.commit()
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=131))
+        assert len(notif.system) == 3 and "กลับมาส่งสัญญาณ" in notif.system[2][1]
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=132)); assert len(notif.system) == 3
+        from app.models import AuditLog
+        assert [a.action for a in db.query(AuditLog).order_by(AuditLog.id)] == ["device_offline", "device_offline_repeat", "device_offline_ok"]
+
+
+def test_device_watch_minimal_privacy_hides_patient_name(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 0}, "t")
+        settings_store.put(db, "privacy", {**settings_store.get(db, "privacy"), "line_detail": "minimal"}, "t")
+        d = _dev(db); d.last_seen = t0; db.commit()
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=100))
+        assert len(notif.system) == 1 and "A1" in notif.system[0][1] and "นางสมศรี" not in notif.system[0][1]
+
+
+def test_device_battery_hysteresis_and_mains_grace(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 0}, "t")
+        d = _dev(db); d.last_seen = t0; d.battery = 15; d.mains_ok = False; db.commit()
+        eng.dev_watch.tick(db, t0)                                                                   # battery alert at once, mains waits 10 min
+        assert len(notif.system) == 1 and "แบตเตอรี่ต่ำ" in notif.system[0][1]
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=5)); assert len(notif.system) == 1
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=11))
+        assert len(notif.system) == 2 and "ไฟบ้านดับ" in notif.system[1][1] and "15%" in notif.system[1][1]
+        d = _dev(db); d.battery = 25; d.last_seen = t0 + timedelta(minutes=12); db.commit()          # 25% is inside the hysteresis band: stay alerted
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=12)); assert len(notif.system) == 2
+        d = _dev(db); d.battery = 40; d.mains_ok = True; db.commit()
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=13))
+        assert len(notif.system) == 4 and all(m[1].startswith("✅") for m in notif.system[2:])
+        assert {"แบตเตอรี่กลับมาปกติ", "ไฟบ้านกลับมาแล้ว"} == {k for m in notif.system[2:] for k in ("แบตเตอรี่กลับมาปกติ", "ไฟบ้านกลับมาแล้ว") if k in m[1]}
+        assert _dev(db).watch is None
+
+
+def test_device_short_mains_blip_is_silent_and_never_seen_is_silent(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 0}, "t")
+        d = _dev(db); d.last_seen = None; d.mains_ok = False; db.commit()
+        eng.dev_watch.tick(db, t0); eng.dev_watch.tick(db, t0 + timedelta(minutes=3))
+        d = _dev(db); d.mains_ok = True; db.commit()
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=4)); eng.dev_watch.tick(db, t0 + timedelta(minutes=500))
+        assert notif.system == []                                                                    # blip < grace; never-seen device not judged
+
+
+def test_device_watch_suppressed_when_mqtt_down_no_gateway_up_or_disabled(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 0}, "t")
+        d = _dev(db); d.last_seen = t0; db.commit()
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=200), mqtt_ok=False); assert notif.system == []
+        # a registered gateway that has been silent for hours: the gateway alert explains it, devices are not blamed
+        eng.gw.on_report(db, GW, GOOD, t0)
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=200)); assert notif.system == []
+        eng.gw.on_report(db, GW, GOOD, t0 + timedelta(minutes=199))                                  # gateway is back, device still silent
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=200)); assert len(notif.system) == 1
+        settings_store.put(db, "device_alert", {"enabled": False, "battery_low_pct": 20, "mains_grace_min": 10}, "t")
+        d = _dev(db); d.battery = 3; db.commit()
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=201)); assert len(notif.system) == 1
+
+
+def test_device_watch_ignores_inactive_devices_and_api_validation(env_):
+    eng, downs, notif, client, ids = env_
+    t0 = NOON_TUE
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 0}, "t")
+        d = _dev(db); d.last_seen = t0; d.lifecycle = "repair"; db.commit()
+        eng.dev_watch.tick(db, t0 + timedelta(minutes=500)); assert notif.system == []
+    tok = client.post("/api/login", json={"username": "admin", "password": "password12345"}).json()["token"]
+    H = {"authorization": "Bearer " + tok}
+    P = lambda v: client.put("/api/settings/device_alert", json=v, headers=H)
+    assert P({"enabled": True, "battery_low_pct": 20, "mains_grace_min": 10}).status_code == 200
+    for bad in ({"enabled": "yes", "battery_low_pct": 20, "mains_grace_min": 10}, {"enabled": True, "battery_low_pct": 2, "mains_grace_min": 10},
+                {"enabled": True, "battery_low_pct": 20, "mains_grace_min": 0}, {"enabled": True, "battery_low_pct": True, "mains_grace_min": 10}, {}):
+        assert P(bad).status_code == 422, bad

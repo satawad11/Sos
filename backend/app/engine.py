@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from . import codec, geo, settings_store
 from .hours import is_office_hours
 from .gateways import GatewayMonitor
+from .device_monitor import DeviceMonitor
 from .models import (Case, CaseEvent, Device, Assignment, Caregiver, Notification, utcnow)
 
 log = logging.getLogger("sos.engine")
@@ -33,6 +34,7 @@ class Engine:
         self.notifier = notifier
         self.publish = publish or (lambda e: None)
         self.gw = GatewayMonitor(notifier, self.publish)
+        self.dev_watch = DeviceMonitor(self.gw)
         self.mqtt_ok: Callable[[], bool] = lambda: True      # main.py plugs in the MQTT worker's connection state
 
     # ---------- helpers ----------
@@ -293,4 +295,5 @@ class Engine:
                     self._event(db, case, "chain_exhausted")
         db.commit()
         self.gw.tick(db, now, self.mqtt_ok())
+        self.dev_watch.tick(db, now, self.mqtt_ok())
         return n
