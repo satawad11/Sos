@@ -1322,14 +1322,55 @@ def ai_models(u=Depends(admin_only)):
 _ai_last = {"t": 0.0}
 
 
+def _ai_ready(db: Session) -> dict:
+    """Shared guard for every AI feature: configured, switched on, and not hammered (free-tier quota)."""
+    import time
+    st = _ai_state(db)
+    if not st["key_set"] or not st["enabled"]: raise HTTPException(409, "ยังไม่ได้เปิดใช้ AI — ผู้ดูแลระบบตั้งค่าได้ที่เมนู 'เชื่อมต่อ LINE/AI'")
+    if time.monotonic() - _ai_last["t"] < 5: raise HTTPException(429, "กดถี่เกินไป รอสักครู่")
+    _ai_last["t"] = time.monotonic()
+    return st
+
+
+@router.get("/ai/status")
+def ai_status(db: Session = Depends(get_db), u=Depends(current_user)):
+    st = _ai_state(db)
+    return {"ready": st["key_set"] and st["enabled"]}
+
+
+class AiDiagIn(BaseModel):
+    scope: str                      # gateways | devices
+    id: int | None = None           # one gateway / device, or all of them when omitted
+
+
+@router.post("/ai/diagnose")
+def ai_diagnose(b: AiDiagIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    """AI reading of gateway/device health. Sends only technical readings under anonymous names ("เกตเวย์ 1", "อุปกรณ์ 2"):
+    no labels, ids, IPs, coordinates, patient names or addresses."""
+    if b.scope not in ("gateways", "devices"): raise HTTPException(422, "scope must be gateways or devices")
+    st = _ai_ready(db)
+    now = utcnow()
+    rows = gateways(db=db, u=u) if b.scope == "gateways" else [d for d in devices(db=db, u=u) if d["lifecycle"] in ("active", "repair", "ready")]
+    if b.id is not None:
+        rows = [r for r in rows if r["id"] == b.id]
+        if not rows: raise HTTPException(404)
+    if not rows: raise HTTPException(409, "ยังไม่มีข้อมูลให้วิเคราะห์")
+    rows = rows[:40]                                      # keeps the prompt small / inside the free quota
+    conv = ai.anon_gateway if b.scope == "gateways" else ai.anon_device
+    items = [conv(r, i + 1, now) for i, r in enumerate(rows)]
+    try:
+        text = ai.generate(linecfg.gemini_key(), st["model"], ai.diagnose_prompt(b.scope, items), max_tokens=3000)
+    except ai.AIError as e:
+        raise HTTPException(502, str(e))
+    audit(db, u.username, "ai_diagnose", b.scope + (f":{b.id}" if b.id is not None else ":all"), model=st["model"]); db.commit()
+    return {"text": text, "model": st["model"], "count": len(items),
+            "note": "วิเคราะห์โดย AI จากค่าทางเทคนิค (ไม่มีชื่อ/ที่อยู่/พิกัด) — เป็นข้อเสนอแนะ ตรวจสอบหน้างานก่อนดำเนินการ"}
+
+
 @router.post("/reports/ai-summary")
 def report_ai_summary(month: str, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
     """AI-written Thai summary of one month. Only anonymised aggregate numbers leave the server (see ai.anonymise)."""
-    import time
-    st = _ai_state(db)
-    if not st["key_set"] or not st["enabled"]: raise HTTPException(409, "ยังไม่ได้เปิดใช้ AI — ผู้ดูแลระบบตั้งค่าได้ที่เมนู 'เชื่อมต่อ'")
-    if time.monotonic() - _ai_last["t"] < 5: raise HTTPException(429, "กดถี่เกินไป รอสักครู่")
-    _ai_last["t"] = time.monotonic()
+    st = _ai_ready(db)
     start, end, d1, d2 = _range(month, None, None)
     summary = reports.summary(db, start, end, d1, d2, names=False)
     try:

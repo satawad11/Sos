@@ -469,6 +469,21 @@ function lister(key,root,o={}){
     toast(`${b.label}: สำเร็จ ${ok}`+(bad?` · ไม่สำเร็จ ${bad} (${err})`:""));if(o.reload)o.reload()}
   draw()}
 
+
+/* ---- AI diagnosis of gateways/devices (Gemini; sends anonymous technical readings only, see app/ai.py) ---- */
+let _aiOk=null;const aiReady=async()=>{if(_aiOk&&Date.now()-_aiOk.t<30000)return _aiOk.v;let v=false;try{v=(await api("/ai/status")).ready}catch(e){}_aiOk={t:Date.now(),v};return v};
+const AIOUT={};
+function aiBtn(scope,id,label){return `<button class="btn" data-aid="${scope}:${id??""}">✨ ${label}</button>`}
+function aiWire(root){
+  const show=(k,r)=>{const box=document.querySelector(`[data-aibox="${k}"]`)||document.getElementById("aibox");if(!box||!r)return;
+    box.innerHTML=`<div class="card" style="margin-top:10px"><h3>✨ วิเคราะห์โดย AI <span class="mut" style="font-weight:400;font-size:13px">(${r.count} รายการ · ${esc(r.model)})</span></h3><p style="white-space:pre-wrap">${esc(r.text)}</p><p class="hint">${esc(r.note)}</p><div class="row"><button class="btn" data-aicp>คัดลอก</button><button class="btn" data-aiclr>ปิด</button></div></div>`;
+    box.querySelector("[data-aicp]").onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(r.text).then(()=>toast("คัดลอกแล้ว"));
+    box.querySelector("[data-aiclr]").onclick=()=>{delete AIOUT[k];box.innerHTML=""}};
+  (root||document).querySelectorAll("[data-aid]").forEach(b=>{const k=b.dataset.aid,[scope,id]=k.split(":");const old=b.textContent;
+    if(AIOUT[k])show(k,AIOUT[k]);
+    b.onclick=guard(async()=>{b.disabled=true;b.textContent="✨ AI กำลังวิเคราะห์…";
+      try{const r=await api("/ai/diagnose",{method:"POST",body:{scope,id:id?+id:null}});AIOUT[k]=r;show(k,r)}finally{b.disabled=false;b.textContent=old}})})}
+
 const loadCases=guard(async()=>{
   const [open,recent,st,gw]=await Promise.all([api("/cases?state=new,accepted"),api("/cases?limit=200"),api("/stats"),api("/gateways")]);
   if(page!=="cases")return;
@@ -566,9 +581,9 @@ const GWS={online:["🟢","ออนไลน์"],warning:["🟡","ออนไ
 const ago=iso=>{if(!iso)return "-";const s=(Date.now()-new Date(iso))/1000;return s<90?Math.max(0,Math.round(s))+" วินาทีที่แล้ว":s<5400?Math.round(s/60)+" นาทีที่แล้ว":s<172800?Math.round(s/3600)+" ชม.ที่แล้ว":Math.round(s/86400)+" วันที่แล้ว"};
 const upt=s=>s==null?"-":s<3600?Math.round(s/60)+" นาที":s<172800?(s/3600).toFixed(1)+" ชม.":Math.round(s/86400)+" วัน";
 const loadGateways=guard(async()=>{
-  const gs=await api("/gateways");if(page!=="gateways")return;
+  const [gs,aiOk]=await Promise.all([api("/gateways"),aiReady()]);if(page!=="gateways")return;
   const why=g=>g.status==="offline"?(g.reason==="radio"?(g.critical.join("; ")||"ตัวรับสัญญาณ LoRa ใช้ไม่ได้"):"ไม่ได้รับสัญญาณเกินเวลาที่กำหนด"):g.critical.concat(g.warnings).join("; ");
-  $("#main").innerHTML=`${role==="admin"?`<div class="card"><h3>เพิ่มเกตเวย์</h3><div class="row"><input id="gi" placeholder="Gateway ID 16 หลัก" size="24" title="ได้จาก sudo ./install-gateway.sh --show-id"><input id="gl" placeholder="ป้าย เช่น รพ.สต. ม.3"><button class="btn p" id="ga">เพิ่ม</button></div><p class="mut">ไม่ต้องเพิ่มเองก็ได้ ระบบจะเพิ่มให้เองเมื่อเกตเวย์เชื่อมต่อครั้งแรก — เพิ่มล่วงหน้าเพื่อตั้งป้ายชื่อ</p></div>`:""}
+  $("#main").innerHTML=`${aiOk&&canEdit()&&gs.length?`<div class="card"><div class="row">${aiBtn("gateways","","AI วิเคราะห์เกตเวย์ทั้งหมด")}<span class="mut">ให้ AI ช่วยอ่านค่าสถานะ (ส่งเฉพาะค่าทางเทคนิค ไม่มีชื่อ/ตำแหน่ง)</span></div><div data-aibox="gateways:"></div></div>`:""}${role==="admin"?`<div class="card"><h3>เพิ่มเกตเวย์</h3><div class="row"><input id="gi" placeholder="Gateway ID 16 หลัก" size="24" title="ได้จาก sudo ./install-gateway.sh --show-id"><input id="gl" placeholder="ป้าย เช่น รพ.สต. ม.3"><button class="btn p" id="ga">เพิ่ม</button></div><p class="mut">ไม่ต้องเพิ่มเองก็ได้ ระบบจะเพิ่มให้เองเมื่อเกตเวย์เชื่อมต่อครั้งแรก — เพิ่มล่วงหน้าเพื่อตั้งป้ายชื่อ</p></div>`:""}
   <div class="card">${gs.length?`<table><tr><th>สถานะ</th><th>ป้าย / ID</th><th>เห็นล่าสุด</th><th>รายงานล่าสุด</th><th>อุปกรณ์ active</th><th>เฟรมสะสม</th><th>CPU / ทำงานมาแล้ว</th><th>ตำแหน่ง</th><th>ข้อสังเกต</th><th></th></tr>${gs.map(g=>{const r=g.report||{};return`<tr data-rid="${g.id}"><td style="white-space:nowrap">${GWS[g.status][0]} ${GWS[g.status][1]}</td><td>${esc(g.label||"-")}<div class="mut"><code>${esc(g.gateway_id)}</code></div></td><td>${ago(g.last_seen)}</td><td>${ago(g.last_report_at)}</td><td>${g.devices}</td><td>${g.uplinks_total}</td><td>${r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-"} / ${upt(r.uptime_s)}</td><td>${g.loc.registered?gmap(g.loc.registered.lat,g.loc.registered.lon,"📍 แผนที่"):'<span class="mut">ยังไม่ระบุ</span>'}${g.loc.moved_m!=null?` <b style="color:var(--amb)">ย้าย ${dist(g.loc.moved_m)}?</b>`:""}</td><td style="color:${g.status==="offline"?"var(--red)":"var(--amb)"}">${esc(why(g))}</td><td>${canEdit()?`<button class="btn" data-g="${g.id}">แก้ไข</button>`:""}</td></tr>`}).join("")}</table>`:'<p class="mut">ยังไม่มีเกตเวย์ — ติดตั้งตาม INSTALL-2 แล้วเกตเวย์จะปรากฏที่นี่เอง</p>'}
   <p class="mut">เกตเวย์ส่งรายงานตัวเองทุก 1 นาที ถ้าเงียบเกินที่ตั้งไว้ (หน้าตั้งค่า → ออฟไลน์) หรือตัวรับสัญญาณ LoRa เสียเกิน 3 นาที ระบบจะส่ง LINE แจ้งผู้รับที่เลือกไว้ในหน้าตั้งค่า</p></div>`;
   const gById=i=>gs.find(x=>x.id==i);
@@ -576,6 +591,7 @@ const loadGateways=guard(async()=>{
     {label:"เปิดเฝ้าระวัง",only:i=>gById(i).enabled===false,run:i=>api("/gateways/"+i,{method:"PUT",body:{enabled:true}})},
     {label:"ปิดเฝ้าระวัง",only:i=>gById(i).enabled!==false,confirm:n=>`ปิดเฝ้าระวัง ${n} เครื่อง? ระบบจะไม่ส่ง LINE เมื่อเครื่องเหล่านี้ขาดการเชื่อมต่อ`,run:i=>api("/gateways/"+i,{method:"PUT",body:{enabled:false}})},
     {label:"ลบ",cls:"r",confirm:n=>`ลบเกตเวย์ ${n} เครื่อง (และลบใน ChirpStack ถ้าตั้งค่าไว้)?\nถ้าเครื่องยังเปิดอยู่ จะถูกเพิ่มกลับเองเมื่อส่งข้อมูล`,run:i=>api("/gateways/"+i,{method:"DELETE"})}]:[]});
+  aiWire($("#main"));
   if($("#ga"))$("#ga").onclick=guard(async()=>{const r=await api("/gateways",{method:"POST",body:{gateway_id:$("#gi").value,label:$("#gl").value}});toast("เพิ่มแล้ว"+csNote(r.chirpstack));loadGateways()});
   document.querySelectorAll("button[data-g]").forEach(b=>b.onclick=guard(async()=>{const g=gs.find(x=>x.id==b.dataset.g),r=g.report||{};devEdit=true;
     const cgs=role==="admin"?await api("/caregivers"):[];
@@ -584,7 +600,7 @@ const loadGateways=guard(async()=>{
       <div class="row">ป้าย <input id="gl2" value="${esc(g.label)}" maxlength="64"></div>
       <div class="row"><label><input type="checkbox" id="gen" ${g.enabled?"checked":""} ${role==="admin"?"":"disabled"}> เฝ้าระวังเกตเวย์นี้ (ส่ง LINE เมื่อขาดการเชื่อมต่อ)</label>${role==="admin"?"":'<span class="mut">เฉพาะผู้ดูแลระบบ</span>'}</div>
       <p class="mut">ปิดการเฝ้าระวังเมื่อถอดเกตเวย์เครื่องนี้ออกจากระบบถาวร มิฉะนั้นระบบจะแจ้งว่าออฟไลน์</p>
-      <div class="row"><button class="btn p" id="gsv">บันทึก</button>${role==="admin"?'<button class="btn r" id="gdl">ลบเกตเวย์นี้</button>':""}</div></div>
+      ${aiOk&&canEdit()?`<div class="row">${aiBtn("gateways",g.id,"AI วิเคราะห์เครื่องนี้")}</div><div data-aibox="gateways:${g.id}"></div>`:""}<div class="row"><button class="btn p" id="gsv">บันทึก</button>${role==="admin"?'<button class="btn r" id="gdl">ลบเกตเวย์นี้</button>':""}</div></div>
     <div class="card"><h3>ตั้งค่าเกตเวย์นี้</h3>
       <div class="row">หมายเหตุ <input id="gnt" value="${esc(g.notes)}" maxlength="500" size="40" placeholder="เช่น ติดบนหลังคา รพ.สต. ชั้น 2"></div>
       <div class="row">เตือนเมื่อเงียบเกิน <input id="gof" type="number" min="3" max="240" size="4" style="width:80px" value="${g.offline_min??""}" placeholder="${g.offline_min_effective}" ${role==="admin"?"":"disabled"}> นาที
@@ -613,6 +629,7 @@ const loadGateways=guard(async()=>{
         const ids=[...document.querySelectorAll("#gcg input:checked")].map(i=>+i.value);if(ids.length||g.alert_ids!=null)body.alert_ids=ids}
       glp(body)};
     if($("#gofr"))$("#gofr").onclick=()=>glp({reset_offline:true});if($("#gcr"))$("#gcr").onclick=()=>glp({reset_alerts:true});
+    aiWire($("#main"));
     if(role==="admin")gwRemote(g)}))});
 
 /* ---- remote control of one gateway (admin): signed whitelisted commands, see docs/GATEWAY-REMOTE.md ---- */
@@ -641,9 +658,10 @@ async function gwRemote(g){
   try{await draw()}catch(e){box.innerHTML='<span class="bad">โหลดไม่สำเร็จ</span>'}}
 
 const loadDevices=guard(async()=>{
-  const [ds,ps]=await Promise.all([api("/devices"),api("/patients")]);if(page!=="devices")return;
+  const [ds,ps,aiOk]=await Promise.all([api("/devices"),api("/patients"),aiReady()]);if(page!=="devices")return;
   const LC=["ready","active","repair","retired","lost"];
-  $("#main").innerHTML=`${canEdit()?`<div class="card"><h3>เพิ่มอุปกรณ์</h3><div class="row"><input id="ndu" placeholder="DevEUI 16 หลัก" size="20" maxlength="23"><input id="ndl" placeholder="ป้าย เช่น บ้านลุงสม"><button class="btn p" id="nda">เพิ่ม</button></div><p class="mut">สำหรับลงทะเบียนเครื่องที่โปรแกรมไว้แล้ว — ถ้าเป็นเครื่องใหม่ ใช้เมนู "ติดตั้งอุปกรณ์" (ผู้ดูแลระบบ) จะง่ายกว่า</p></div>`:""}<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>ตำแหน่ง GPS</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr data-rid="${d.id}"><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}${d.offline?' <b style="color:var(--red)">ออฟไลน์</b>':""}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${fmt(d.last_seen)}</td><td>${locCell(d.loc)}</td><td>${esc(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
+  $("#main").innerHTML=`${aiOk&&canEdit()&&ds.length?`<div class="card"><div class="row">${aiBtn("devices","","AI วิเคราะห์อุปกรณ์ทั้งหมด")}<span class="mut">ให้ AI ช่วยดูแบตเตอรี่ สัญญาณ และเครื่องที่เงียบ (ไม่ส่งชื่อผู้ป่วย/รหัสเครื่อง)</span></div><div data-aibox="devices:"></div></div>`:""}${canEdit()?`<div class="card"><h3>เพิ่มอุปกรณ์</h3><div class="row"><input id="ndu" placeholder="DevEUI 16 หลัก" size="20" maxlength="23"><input id="ndl" placeholder="ป้าย เช่น บ้านลุงสม"><button class="btn p" id="nda">เพิ่ม</button></div><p class="mut">สำหรับลงทะเบียนเครื่องที่โปรแกรมไว้แล้ว — ถ้าเป็นเครื่องใหม่ ใช้เมนู "ติดตั้งอุปกรณ์" (ผู้ดูแลระบบ) จะง่ายกว่า</p></div>`:""}<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>ตำแหน่ง GPS</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr data-rid="${d.id}"><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}${d.offline?' <b style="color:var(--red)">ออฟไลน์</b>':""}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${fmt(d.last_seen)}</td><td>${locCell(d.loc)}</td><td>${esc(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
+  aiWire($("#main"));
   const dById=i=>ds.find(x=>x.id==i),dBody=(d,lc)=>({dev_eui:d.dev_eui,label:d.label,lifecycle:lc,patient_id:d.patient_id});
   lister("devices",$("#main").lastElementChild,{noun:"เครื่อง",reload:loadDevices,bulk:[
     {label:"ตั้งเป็น ready",only:i=>dById(i).lifecycle!=="ready",run:i=>api("/devices/"+i,{method:"PUT",body:dBody(dById(i),"ready")})},
@@ -660,9 +678,10 @@ const loadDevices=guard(async()=>{
       ${CF.map(([k,t,lo,hi,h])=>`<div class="row"><label style="min-width:190px"><input type="checkbox" class="ck" data-k="${k}" ${k in ov?"checked":""}> ${t}</label><input type="number" class="cv" data-k="${k}" min="${lo}" max="${hi}" value="${k in ov?ov[k]:dd[k]}" ${k in ov?"":"disabled"}><span class="mut">ค่ากลาง ${dd[k]} · ช่วง ${lo}-${hi} · ${h}</span></div>`).join("")}
       <div class="row">สถานะ: ${d.config_pending?'<b style="color:var(--amb)">⏳ รอเครื่องรับค่า</b>':d.config_applied_at?"✅ เครื่องใช้ค่านี้แล้ว (เมื่อ "+fmt(d.config_applied_at)+")":"✅ ตรงกับค่าที่ตั้ง"} · เวอร์ชันค่า ${d.config_ver}</div>
       <div class="row"><button class="btn p" id="svc">ส่งค่าไปยังเครื่อง</button><button class="btn" id="rsc">กลับไปใช้ค่ากลางทั้งหมด</button></div></div>`:"";
-    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}</option>`).join("")}</select></div><div class="row"><button class="btn p" id="sv">บันทึก</button>${role==="admin"?'<button class="btn r" id="dxl">ลบอุปกรณ์นี้</button>':""}</div></div>${cfgCard}`;
+    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}</option>`).join("")}</select></div>${aiOk&&canEdit()?`<div class="row">${aiBtn("devices",d.id,"AI วิเคราะห์เครื่องนี้")}</div><div data-aibox="devices:${d.id}"></div>`:""}<div class="row"><button class="btn p" id="sv">บันทึก</button>${role==="admin"?'<button class="btn r" id="dxl">ลบอุปกรณ์นี้</button>':""}</div></div>${cfgCard}`;
     $("#back").onclick=()=>{devEdit=false;render()};
     $("#sv").onclick=guard(async()=>{const r=await api("/devices/"+d.id,{method:"PUT",body:{dev_eui:d.dev_eui,label:$("#l").value,lifecycle:$("#lc").value,patient_id:$("#pt").value?Number($("#pt").value):null}});toast("บันทึกแล้ว"+csNote(r.chirpstack));devEdit=false;render()});
+    aiWire($("#main"));
     if($("#dxl"))$("#dxl").onclick=guard(async()=>{if(!confirm(`ลบอุปกรณ์ ${d.dev_eui} ?\nลบได้เฉพาะเครื่องที่ยังไม่เคยมีเคส — ถ้าเคยใช้งานแล้วให้เปลี่ยนสถานะเป็น retired/lost แทน`))return;const r=await api("/devices/"+d.id,{method:"DELETE"});toast("ลบแล้ว"+csNote(r.chirpstack));devEdit=false;render()});
     document.querySelectorAll(".ck").forEach(c=>c.onchange=()=>{document.querySelector(`.cv[data-k="${c.dataset.k}"]`).disabled=!c.checked});
     if($("#svc")){

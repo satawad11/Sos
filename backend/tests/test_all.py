@@ -1673,3 +1673,45 @@ def test_ai_anonymise_drops_identifying_fields():
     p = json.dumps(ai.anonymise(s), ensure_ascii=False)
     for bad in ("บ้านลับ", "0016c001f1234567", "รพ.สต.ลับ", "นายลับ"): assert bad not in p
     assert "หมู่บ้าน 1" in p and "เกตเวย์ 1" in p
+
+
+def test_ai_diagnose_gateways_and_devices_anonymous(env_, monkeypatch):
+    import json
+    eng, downs, notif, client, ids = env_
+    from app import linecfg
+    from app.models import User, Device, Patient
+    from app.auth import hash_pw
+    h = login(client)
+    with SessionLocal() as db:
+        db.add(User(username="v4", password_hash=hash_pw("password12345"), role="viewer")); db.commit()
+        gid = _gw_row(db)
+    hv = login(client, "v4")
+    client.put(f"/api/gateways/{gid}", json={"label": "รพ.สต.ลับสุดยอด", "lat": 13.9, "lon": 100.6}, headers=h)
+    key = "AIza" + "z" * 35 + "WXYZ"
+    sent = []
+    class R:
+        status_code = 200
+        def json(s): return {"candidates": [{"content": {"parts": [{"text": "ภาพรวม: ปกติ"}]}}]}
+    try:
+        assert client.post("/api/ai/diagnose", json={"scope": "gateways"}, headers=h).status_code == 409          # AI not set up
+        assert client.get("/api/ai/status", headers=hv).json()["ready"] is False
+        client.put("/api/integrations/ai", json={"key": key}, headers=h)
+        assert client.get("/api/ai/status", headers=hv).json()["ready"] is True
+        monkeypatch.setattr("app.ai.httpx.post", lambda url, headers=None, json=None, timeout=None: (sent.append(json), R())[1])
+        def go(body):
+            monkeypatch.setattr("app.api._ai_last", {"t": 0.0}); return client.post("/api/ai/diagnose", json=body, headers=h)
+        r = go({"scope": "gateways"}); assert r.status_code == 200 and r.json()["text"].startswith("ภาพรวม") and r.json()["count"] >= 1
+        r = go({"scope": "devices"}); assert r.status_code == 200
+        for body in sent:
+            prompt = body["contents"][0]["parts"][0]["text"]
+            for bad in ("รพ.สต.ลับสุดยอด", "0016c001", "13.9", "นางสมศรี", "ใจดี", EUI, "0800000000", "ม.3"):
+                assert bad not in prompt, bad
+        assert "เกตเวย์ 1" in sent[0]["contents"][0]["parts"][0]["text"] and "อุปกรณ์ 1" in sent[1]["contents"][0]["parts"][0]["text"]
+        did = client.get("/api/devices", headers=h).json()[0]["id"]
+        assert go({"scope": "devices", "id": did}).json()["count"] == 1
+        assert go({"scope": "gateways", "id": 99999}).status_code == 404
+        assert go({"scope": "patients"}).status_code == 422
+        monkeypatch.setattr("app.api._ai_last", {"t": 0.0})
+        assert client.post("/api/ai/diagnose", json={"scope": "gateways"}, headers=hv).status_code == 403          # viewers cannot
+    finally:
+        with SessionLocal() as db: linecfg.save(db, "gemini", "")

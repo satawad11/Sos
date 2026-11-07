@@ -78,3 +78,44 @@ def summary_prompt(summary: dict) -> str:
             "กติกา: ใช้เฉพาะตัวเลขในข้อมูลด้านล่าง ห้ามแต่งตัวเลขหรือข้อเท็จจริงเพิ่ม ห้ามให้คำแนะนำทางการแพทย์ "
             "ระบุจุดที่ควรติดตาม (เช่น เคสรับเรื่องช้า แจ้งผิดพลาดมาก เกตเวย์ขัดข้อง แบตต่ำ) และสรุปแนวโน้มช่วงเวลาที่เกิดเหตุบ่อย "
             "ถ้าไม่มีเคสให้บอกว่าไม่มีเหตุในช่วงนี้\n\nข้อมูล (JSON):\n" + data)
+
+
+# ---------------------------------------------------------------- gateway / device diagnosis (health data only, no patient data)
+def _mins(iso: str | None, now) -> int | None:
+    if not iso: return None
+    from datetime import datetime, timezone
+    t = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    if t.tzinfo is None: t = t.replace(tzinfo=timezone.utc)
+    return max(0, round((now - t).total_seconds() / 60))
+
+
+def anon_gateway(g: dict, i: int, now) -> dict:
+    r = g.get("report") or {}; sv = r.get("services") or {}
+    out = {"ชื่อ": f"เกตเวย์ {i}", "สถานะ": g["status"], "ไม่ได้รับสัญญาณมา_นาที": _mins(g.get("last_seen"), now),
+           "รายงานล่าสุดเมื่อ_นาทีที่แล้ว": _mins(g.get("last_report_at"), now), "เกณฑ์ถือว่าออฟไลน์_นาที": g.get("offline_min_effective"),
+           "จำนวนอุปกรณ์ที่ใช้เกตเวย์นี้": g.get("devices"), "เฟรมที่รับสะสม": g.get("uplinks_total"),
+           "CPU_องศา": r.get("cpu_temp_c"), "ทำงานต่อเนื่อง_ชั่วโมง": round(r["uptime_s"] / 3600, 1) if r.get("uptime_s") is not None else None,
+           "throttled": r.get("throttled"), "การ์ดใช้_เปอร์เซ็นต์": r.get("disk_pct"), "หน่วยความจำใช้_เปอร์เซ็นต์": r.get("mem_pct"),
+           "load1": r.get("load1"), "concentratord_ทำงาน": sv.get("concentratord"), "forwarder_ทำงาน": sv.get("forwarder"),
+           "spi_พบ": r.get("spi"), "ntp_ซิงก์": r.get("ntp"), "รีสตาร์ตวิทยุอัตโนมัติสะสม": r.get("radio_fail"),
+           "ระบบตรวจพบ": (g.get("critical") or []) + (g.get("warnings") or [])}
+    if g["status"] == "offline" and g.get("reason"): out["ประเภทที่ขาด"] = "ตัวรับสัญญาณเสีย" if g["reason"] == "radio" else "เงียบเกินเวลา"
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def anon_device(d: dict, i: int, now) -> dict:
+    out = {"ชื่อ": f"อุปกรณ์ {i}", "สถานะ": d["lifecycle"], "ออฟไลน์": d["offline"], "เห็นล่าสุด_นาทีที่แล้ว": _mins(d.get("last_seen"), now),
+           "แบตเตอรี่_เปอร์เซ็นต์": None if d.get("battery") in (None, 255) else d["battery"], "ไฟบ้านปกติ": d.get("mains_ok"),
+           "RSSI": d.get("rssi"), "SNR": d.get("snr"), "firmware": d.get("fw"), "ค่าตั้งใหม่ยังไม่ถึงเครื่อง": d.get("config_pending")}
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def diagnose_prompt(kind: str, items: list[dict]) -> str:
+    what = "เกตเวย์ LoRaWAN (Raspberry Pi + WM1302)" if kind == "gateways" else "ปุ่มแจ้งเหตุฉุกเฉิน LoRa (ESP32)"
+    data = json.dumps(items, ensure_ascii=False)
+    return (f"คุณเป็นผู้ช่วยช่างเทคนิคของ รพ.สต. วิเคราะห์สถานะ{what} จากข้อมูลด้านล่าง ตอบเป็นภาษาไทย กระชับ ใช้หัวข้อสั้น ๆ\n"
+            "รูปแบบคำตอบ: (1) ภาพรวม 1-2 ประโยค (2) ปัญหาที่พบ เรียงจากเร่งด่วนที่สุด พร้อมสาเหตุที่เป็นไปได้ (3) สิ่งที่ควรตรวจ/ทำตามลำดับ\n"
+            "กติกา: ใช้เฉพาะข้อมูลที่ให้ ห้ามแต่งตัวเลข ถ้าข้อมูลไม่พอให้บอกว่าขาดข้อมูลอะไร "
+            "ระบบนี้ใช้แจ้งเหตุฉุกเฉินของผู้ป่วยติดบ้าน — เกตเวย์ออฟไลน์ ตัวรับสัญญาณเสีย หรือปุ่มออฟไลน์/แบตต่ำ ถือว่าเร่งด่วน "
+            "คำแนะนำต้องทำได้จริงโดยเจ้าหน้าที่ทั่วไป (เช่น ตรวจแหล่งจ่ายไฟ ตรวจสายเสาอากาศ สั่งรีสตาร์ท LoRa services จากแดชบอร์ด เปลี่ยนแบตเตอรี่) "
+            "ถ้าทุกอย่างปกติให้บอกสั้น ๆ ว่าปกติ\n\nข้อมูล (JSON):\n" + data)
