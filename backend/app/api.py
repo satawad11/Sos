@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from . import settings_store
-from .auth import (admin_only, audit, check_pw, current_user, hash_pw, make_token, password_problem, staff_or_admin)
+from .auth import (admin_only, audit, check_pw, current_user, hash_pw, make_token, password_problem, staff_or_admin,
+                   make_mfa_ticket, user_from_mfa_ticket)
+from . import mfa
 from .db import get_db
 from .engine import aware
 from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, GatewayCommand, Holiday, Notification,
@@ -51,15 +53,104 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
             db.commit()
         audit(db, body.username, "login_failed"); db.commit()
         raise HTTPException(401, "bad credentials")
+    if u.totp_secret:
+        # password OK, second step pending — failed_logins is NOT reset here, so the code step shares the lockout
+        db.commit()
+        return {"mfa_required": True, "ticket": make_mfa_ticket(u), "name": u.display_name or u.username}
     u.failed_logins, u.locked_until, u.last_login_at = 0, None, now
     audit(db, u.username, "login"); db.commit()
     return {"token": make_token(u), "role": u.role, "name": u.display_name or u.username,
-            "must_change": bool(u.must_change)}
+            "must_change": bool(u.must_change), "mfa_setup": mfa.required(db, u)}
+
+
+class MfaLoginIn(BaseModel):
+    ticket: str = Field(max_length=2048)
+    code: str = Field(max_length=32)
+
+
+@router.post("/login/2fa")
+def login_2fa(body: MfaLoginIn, db: Session = Depends(get_db)):
+    u = user_from_mfa_ticket(db, body.ticket)
+    now = utcnow()
+    if u.locked_until and aware(u.locked_until) > now:
+        raise HTTPException(429, "account locked, try later")
+    step = mfa.verify_totp(u.totp_secret, body.code, u.totp_last_step)
+    used_backup = step is None and mfa.use_backup(u, body.code)
+    if step is None and not used_backup:
+        u.failed_logins += 1
+        if u.failed_logins >= 5:
+            u.locked_until, u.failed_logins = now + timedelta(minutes=15), 0
+        audit(db, u.username, "login_failed", step="2fa"); db.commit()
+        raise HTTPException(401, "รหัสยืนยันไม่ถูกต้อง")
+    if step is not None:
+        u.totp_last_step = step
+    u.failed_logins, u.locked_until, u.last_login_at = 0, None, now
+    audit(db, u.username, "login", method="backup_code" if used_backup else "totp",
+          **({"backup_codes_left": len(u.backup_codes or [])} if used_backup else {}))
+    db.commit()
+    return {"token": make_token(u, mfa=True), "role": u.role, "name": u.display_name or u.username,
+            "must_change": bool(u.must_change), "backup_codes_left": len(u.backup_codes or [])}
 
 
 @router.get("/me")
-def me(u: User = Depends(current_user)):
-    return {"username": u.username, "role": u.role, "name": u.display_name, "must_change": bool(u.must_change)}
+def me(db: Session = Depends(get_db), u: User = Depends(current_user)):
+    return {"username": u.username, "role": u.role, "name": u.display_name, "must_change": bool(u.must_change),
+            "mfa": {"enabled": mfa.enabled(u), "required": mfa.required(db, u), "backup_left": len(u.backup_codes or []),
+                    "enabled_at": iso(u.totp_enabled_at)}}
+
+
+@router.post("/me/2fa/setup")
+def mfa_setup(db: Session = Depends(get_db), u: User = Depends(current_user)):
+    if u.totp_secret: raise HTTPException(409, "เปิดใช้งานอยู่แล้ว")
+    u.totp_pending = mfa.new_secret(); db.commit()
+    link = mfa.uri(u, u.totp_pending)
+    return {"secret": u.totp_pending, "uri": link, "qr_svg": mfa.qr_svg(link)}
+
+
+class MfaCodeIn(BaseModel):
+    code: str = Field(max_length=32)
+    password: str | None = Field(default=None, max_length=128)
+
+
+@router.post("/me/2fa/enable")
+def mfa_enable(b: MfaCodeIn, db: Session = Depends(get_db), u: User = Depends(current_user)):
+    if u.totp_secret: raise HTTPException(409, "เปิดใช้งานอยู่แล้ว")
+    if not u.totp_pending: raise HTTPException(409, "เริ่มตั้งค่าใหม่อีกครั้ง")
+    step = mfa.verify_totp(u.totp_pending, b.code, None)
+    if step is None: raise HTTPException(422, "รหัสไม่ถูกต้อง — ตรวจว่าเวลาในมือถือตรง แล้วลองรหัสล่าสุด")
+    plain, hashed = mfa.new_backup_codes()
+    u.totp_secret, u.totp_pending, u.totp_last_step, u.backup_codes, u.totp_enabled_at = u.totp_pending, None, step, hashed, utcnow()
+    u.token_ver = (u.token_ver or 0) + 1                 # other sessions (without 2FA) are logged out
+    audit(db, u.username, "2fa_enable"); db.commit()
+    return {"ok": True, "backup_codes": plain, "token": make_token(u, mfa=True)}
+
+
+def _check_code(db: Session, u: User, code: str) -> None:
+    step = mfa.verify_totp(u.totp_secret, code, u.totp_last_step)
+    if step is None and not mfa.use_backup(u, code):
+        audit(db, u.username, "2fa_check_failed"); db.commit()
+        raise HTTPException(403, "รหัสยืนยันไม่ถูกต้อง")
+    if step is not None: u.totp_last_step = step
+
+
+@router.post("/me/2fa/disable")
+def mfa_disable(b: MfaCodeIn, db: Session = Depends(get_db), u: User = Depends(current_user)):
+    if not u.totp_secret: raise HTTPException(409, "ยังไม่ได้เปิดใช้งาน")
+    if mfa.required(db, u): raise HTTPException(409, "นโยบายของระบบบังคับใช้การยืนยัน 2 ขั้นสำหรับบัญชีนี้ — ปิดเองไม่ได้")
+    if not b.password or not check_pw(b.password, u.password_hash): raise HTTPException(403, "รหัสผ่านไม่ถูกต้อง")
+    _check_code(db, u, b.code)
+    mfa.clear(u); u.token_ver = (u.token_ver or 0) + 1
+    audit(db, u.username, "2fa_disable"); db.commit()
+    return {"ok": True, "token": make_token(u)}
+
+
+@router.post("/me/2fa/backup-codes")
+def mfa_new_backup(b: MfaCodeIn, db: Session = Depends(get_db), u: User = Depends(current_user)):
+    if not u.totp_secret: raise HTTPException(409, "ยังไม่ได้เปิดใช้งาน")
+    _check_code(db, u, b.code)
+    plain, u.backup_codes = mfa.new_backup_codes()
+    audit(db, u.username, "2fa_backup_codes_regenerated"); db.commit()
+    return {"backup_codes": plain}
 
 
 class PasswordChangeIn(BaseModel):
@@ -469,6 +560,22 @@ def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str
             "alert_ids": g.alert_ids, "agent": rep.get("agent") is True}
 
 
+class LocationIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+@router.put("/patients/{pid}/location")
+def set_patient_location(pid: int, b: LocationIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    """Pin a patient's home on the map (only the coordinates change)."""
+    p = db.get(Patient, pid)
+    if not p: raise HTTPException(404)
+    if p.anonymized_at: raise HTTPException(409, "ข้อมูลผู้ป่วยรายนี้ถูกลบ (ทำให้ไม่ระบุตัวตน) แล้ว แก้ไขไม่ได้")
+    p.lat, p.lon = round(b.lat, 6), round(b.lon, 6)
+    audit(db, u.username, "patient_location", str(pid)); db.commit()
+    return {"id": p.id, "lat": p.lat, "lon": p.lon}
+
+
 @router.get("/gateways")
 def gateways(db: Session = Depends(get_db), u=Depends(current_user)):
     off = settings_store.get(db, "offline")["gateway_offline_min"]
@@ -511,6 +618,8 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
                     "last_seen": x["last_seen"], "devices": x["devices"], "lat": pos["lat"] if pos else None,
                     "lon": pos["lon"] if pos else None, "pos_src": src})
     dvs, links = [], []
+    open_ = {c.patient_id: c for c in db.query(Case).filter(Case.state.in_(("new", "accepted")), Case.is_test.is_(False))
+             .order_by(Case.id).all() if c.patient_id}
     for d in devs:
         ls = aware(d.last_seen)
         offline = d.lifecycle == "active" and (ls is None or (now - ls).total_seconds() > doff * 60)
@@ -521,8 +630,11 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
             elif d.patient and d.patient.lat is not None and d.patient.lon is not None: lat, lon, src = d.patient.lat, d.patient.lon, "home"
             elif d.loc_lat is not None: lat, lon, src = d.loc_lat, d.loc_lon, "gps_old"
         q = _quality(d.last_rssi, d.last_snr)
+        cs = open_.get(d.patient_id) if d.patient_id else None
         dvs.append({"id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,
-                    "patient": d.patient.full_name if d.patient else None, "battery": d.battery, "mains_ok": d.mains_ok,
+                    "patient": d.patient.full_name if d.patient else None, "patient_id": d.patient_id,
+                    "phone": d.patient.phone if d.patient and not viewer else "", "address": (f"{d.patient.address} {d.patient.village}".strip() if d.patient and not viewer else ""),
+                    "case": {"id": cs.id, "state": cs.state, "overdue": cs.overdue, "created_at": iso(cs.created_at)} if cs else None, "battery": d.battery, "mains_ok": d.mains_ok,
                     "offline": offline, "last_seen": iso(d.last_seen), "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
                     "gateway_id": d.last_gateway or None, "lat": lat, "lon": lon, "pos_src": src})
         if d.last_gateway:
@@ -530,7 +642,16 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
             dist = round(geo.distance_m(lat, lon, gp[0], gp[1])) if lat is not None and gp else None
             links.append({"device_id": d.id, "gateway_id": d.last_gateway, "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
                           "offline": offline, "distance_m": dist})
-    return {"gateways": gws, "devices": dvs, "links": links, "restricted": viewer}
+    # patients for the "pin a home" tool and homes that have no button yet (never for the read-only role)
+    homes, no_loc = [], []
+    if not viewer:
+        with_dev = {d.patient_id for d in devs if d.patient_id}
+        for p in db.query(Patient).filter(Patient.active.is_(True), Patient.anonymized_at.is_(None)).order_by(Patient.id).all():
+            row = {"id": p.id, "name": p.full_name, "village": p.village, "address": p.address, "phone": p.phone, "lat": p.lat, "lon": p.lon}
+            if p.lat is None: no_loc.append(row)
+            elif p.id not in with_dev: homes.append(row)
+    return {"gateways": gws, "devices": dvs, "links": links, "restricted": viewer, "coverage_m": gcfg["coverage_m"],
+            "homes": homes, "no_location": no_loc}
 
 
 class GatewayIn(BaseModel):
@@ -698,6 +819,34 @@ def get_settings(db: Session = Depends(get_db), u=Depends(current_user)):
 @router.put("/settings/{key}")
 def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(admin_only)):
     if key not in settings_store.DEFAULTS: raise HTTPException(404)
+    if key == "org":
+        out = {}
+        for k in settings_store.DEFAULTS["org"]:
+            v = value.get(k, "")
+            if not isinstance(v, str) or len(v) > 160: raise HTTPException(422, f"{k} must be text (max 160)")
+            out[k] = v.strip()
+        value = out
+    if key == "self_test":
+        def _day(k, allow0):
+            v = value.get(k)
+            if isinstance(v, bool) or not isinstance(v, int) or not ((allow0 and v == 0) or 1 <= v <= 28):
+                raise HTTPException(422, f"{k} must be 1-28" + (" or 0 (off)" if allow0 else ""))
+            return v
+        if not isinstance(value.get("enabled"), bool) or not isinstance(value.get("confirm_line"), bool):
+            raise HTTPException(422, "enabled and confirm_line must be true/false")
+        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(value.get("remind_time", ""))): raise HTTPException(422, "remind_time must be HH:MM")
+        d1, d2 = _day("remind_day", False), _day("second_day", True)
+        if d2 and d2 <= d1: raise HTTPException(422, "second_day must be after remind_day (or 0)")
+        value = {"enabled": value["enabled"], "remind_day": d1, "second_day": d2, "remind_time": value["remind_time"],
+                 "confirm_line": value["confirm_line"]}
+    if key == "security":
+        on, roles = value.get("mfa_enabled"), value.get("mfa_roles", ["admin"])
+        if not isinstance(on, bool): raise HTTPException(422, "mfa_enabled must be true/false")
+        if not isinstance(roles, list) or not set(roles) <= set(ROLES) or "admin" not in roles:
+            raise HTTPException(422, "mfa_roles must be a list of roles and always include admin")
+        value = {"mfa_enabled": on, "mfa_roles": sorted(set(roles))}
+        if on: audit(db, u.username, "2fa_policy_on", ",".join(value["mfa_roles"]))
+        elif settings_store.get(db, "security").get("mfa_enabled"): audit(db, u.username, "2fa_policy_off")
     if key == "office_hours":
         if not re.match(r"^\d\d:\d\d$", str(value.get("start", ""))) or not re.match(r"^\d\d:\d\d$", str(value.get("end", ""))):
             raise HTTPException(422, "start/end must be HH:MM")
@@ -738,8 +887,9 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
         value = {"enabled": value["enabled"], "battery_low_pct": _i("battery_low_pct", 5, 50), "mains_grace_min": _i("mains_grace_min", 1, 240)}
     if key == "geo":
         out = {}
-        for k, lo, hi in (("home_radius_m", 20, 5000), ("gps_fresh_min", 1, 1440), ("gateway_move_m", 20, 100000)):
-            v = value.get(k)
+        cur = settings_store.get(db, "geo")
+        for k, lo, hi in (("home_radius_m", 20, 5000), ("gps_fresh_min", 1, 1440), ("gateway_move_m", 20, 100000), ("coverage_m", 200, 30000)):
+            v = value.get(k, cur[k])
             if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi: raise HTTPException(422, f"{k} must be {lo}-{hi}")
             out[k] = v
         value = out
@@ -798,7 +948,8 @@ def temp_password() -> str:
 def user_dict(x: User) -> dict:
     return {"id": x.id, "username": x.username, "role": x.role, "display_name": x.display_name, "active": x.active,
             "must_change": bool(x.must_change), "locked": bool(x.locked_until and aware(x.locked_until) > utcnow()),
-            "last_login_at": iso(x.last_login_at), "password_changed_at": iso(x.password_changed_at)}
+            "last_login_at": iso(x.last_login_at), "password_changed_at": iso(x.password_changed_at),
+            "mfa": bool(x.totp_secret)}
 
 
 def _other_active_admin(db: Session, uid: int) -> bool:
@@ -862,6 +1013,17 @@ def reset_password(uid: int, db: Session = Depends(get_db), u=Depends(admin_only
     return {"username": t.username, "temp_password": pw}
 
 
+@router.post("/users/{uid}/reset-2fa")
+def reset_user_2fa(uid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    """Lost phone: clears the user's 2FA. If the policy requires it they enrol again at the next sign-in."""
+    t = db.get(User, uid)
+    if not t: raise HTTPException(404)
+    if t.id == u.id: raise HTTPException(422, "ใช้เมนู 'ยืนยัน 2 ขั้น' ของบัญชีตัวเอง")
+    mfa.clear(t); t.token_ver = (t.token_ver or 0) + 1
+    audit(db, u.username, "2fa_reset", t.username); db.commit()
+    return user_dict(t)
+
+
 @router.post("/users/{uid}/unlock")
 def unlock_user(uid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
     t = db.get(User, uid)
@@ -900,6 +1062,61 @@ def report_cases_csv(month: str | None = None, frm: str | None = Query(default=N
     audit(db, u.username, "report_export", f"{d1}..{d2}", rows=n); db.commit()
     fn = f"sos-cases-{d1.year + 543}-{d1.month:02d}" + ("" if month else f"-to-{d2.year + 543}-{d2.month:02d}-{d2.day:02d}") + ".csv"
     return Response(text, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@router.get("/reports/monthly.pdf")
+def report_pdf(month: str, db: Session = Depends(get_db), u=Depends(current_user)):
+    from fastapi.responses import Response
+    from . import pdf_report
+    start, end, d1, d2 = _range(month, None, None)
+    data = pdf_report.build(db, month, names=u.role in ("admin", "staff"), actor=u.display_name or u.username)
+    audit(db, u.username, "report_export", month, format="pdf"); db.commit()
+    fn = f"sos-report-{d1.year + 543}-{d1.month:02d}.pdf"
+    return Response(data, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+LOGO_SLOTS = ("left", "right")
+LOGO_MAX = 400_000
+
+
+class LogoIn(BaseModel):
+    data_url: str = Field(max_length=600_000)
+
+
+@router.put("/org/logo/{slot}")
+def put_logo(slot: str, b: LogoIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    import base64
+    from .models import Asset
+    if slot not in LOGO_SLOTS: raise HTTPException(404)
+    m = re.match(r"^data:(image/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$", b.data_url)
+    if not m: raise HTTPException(422, "ต้องเป็นไฟล์ PNG หรือ JPG")
+    raw = base64.b64decode(m.group(2))
+    if len(raw) > LOGO_MAX: raise HTTPException(422, "ไฟล์ใหญ่เกิน 400 KB")
+    sig_ok = raw.startswith(b"\x89PNG\r\n\x1a\n") if m.group(1) == "image/png" else raw.startswith(b"\xff\xd8\xff")
+    if not sig_ok: raise HTTPException(422, "ไฟล์ไม่ใช่รูปภาพที่ถูกต้อง")
+    a = db.get(Asset, f"logo_{slot}")
+    if a: a.mime, a.data, a.updated_at, a.updated_by = m.group(1), raw, utcnow(), u.username
+    else: db.add(Asset(key=f"logo_{slot}", mime=m.group(1), data=raw, updated_by=u.username))
+    audit(db, u.username, "org_logo_set", slot, bytes=len(raw)); db.commit()
+    return {"ok": True}
+
+
+@router.delete("/org/logo/{slot}")
+def del_logo(slot: str, db: Session = Depends(get_db), u=Depends(admin_only)):
+    from .models import Asset
+    if slot not in LOGO_SLOTS: raise HTTPException(404)
+    a = db.get(Asset, f"logo_{slot}")
+    if a: db.delete(a); audit(db, u.username, "org_logo_delete", slot); db.commit()
+    return {"ok": True}
+
+
+@router.get("/org/logo/{slot}")
+def get_logo(slot: str, db: Session = Depends(get_db), u=Depends(current_user)):
+    from fastapi.responses import Response
+    from .models import Asset
+    a = db.get(Asset, f"logo_{slot}") if slot in LOGO_SLOTS else None
+    if not a: raise HTTPException(404)
+    return Response(a.data, media_type=a.mime, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/stats")
@@ -1089,6 +1306,71 @@ def chirpstack_sync(db: Session = Depends(get_db), u=Depends(admin_only)):
           disabled=len(done["devices_disabled"]), enabled=len(done["devices_enabled"]), errors=len(done["errors"]))
     db.commit()
     return done
+# ---------------- Web Push / installed app (app/push.py) ----------------
+from . import push as pushmod
+from .models import PushSub
+
+
+class PushSubIn(BaseModel):
+    endpoint: str = Field(max_length=1000)
+    keys: dict
+    label: str = Field(default="", max_length=120)
+
+
+@router.get("/push/key")
+def push_key(db: Session = Depends(get_db), u=Depends(current_user)):
+    mine = db.query(PushSub).filter_by(user_id=u.id).count()
+    return {"public_key": pushmod.public_key(db), "subscriptions": mine, "notify": u.role in pushmod.NOTIFY_ROLES}
+
+
+@router.post("/push/subscribe")
+def push_subscribe(b: PushSubIn, db: Session = Depends(get_db), u=Depends(current_user)):
+    if not pushmod.endpoint_ok(b.endpoint): raise HTTPException(422, "push service not supported")
+    p256, auth = str(b.keys.get("p256dh", "")), str(b.keys.get("auth", ""))
+    if not (20 <= len(p256) <= 200 and 8 <= len(auth) <= 100): raise HTTPException(422, "bad keys")
+    s = db.query(PushSub).filter_by(endpoint=b.endpoint).first()
+    if s: s.user_id, s.p256dh, s.auth, s.label, s.fail_count = u.id, p256, auth, b.label, 0
+    else: db.add(PushSub(user_id=u.id, endpoint=b.endpoint, p256dh=p256, auth=auth, label=b.label))
+    audit(db, u.username, "push_subscribe", b.label); db.commit()
+    return {"ok": True}
+
+
+class EndpointIn(BaseModel):
+    endpoint: str = Field(max_length=1000)
+
+
+@router.post("/push/unsubscribe")
+def push_unsubscribe(b: EndpointIn, db: Session = Depends(get_db), u=Depends(current_user)):
+    n = db.query(PushSub).filter_by(endpoint=b.endpoint, user_id=u.id).delete(); db.commit()
+    return {"removed": n}
+
+
+@router.post("/push/test")
+def push_test(db: Session = Depends(get_db), u=Depends(current_user)):
+    subs = db.query(PushSub).filter_by(user_id=u.id).all()
+    if not subs: raise HTTPException(409, "อุปกรณ์นี้ยังไม่ได้เปิดการแจ้งเตือน")
+    sender = _engine.get("push") or pushmod.PushSender(None)
+    ok = sender.send_many(db, subs, {"title": "🔔 ทดสอบการแจ้งเตือน", "body": "ถ้าเห็นข้อความนี้ แปลว่าอุปกรณ์นี้จะได้รับการแจ้งเหตุฉุกเฉิน",
+                                     "tag": "test", "url": "./", "urgent": False})
+    return {"sent": ok, "devices": len(subs)}
+
+
+# ---------------- monthly button self-test (app/selftest.py) ----------------
+from . import selftest as stest
+
+
+@router.get("/selftest")
+def selftest_status(month: str | None = None, db: Session = Depends(get_db), u=Depends(current_user)):
+    try:
+        return stest.status(db, month, names=u.role in ("admin", "staff"))
+    except (ValueError, reports.RangeError) as e:
+        raise HTTPException(422, str(e))
+
+
+@router.post("/selftest/remind")
+def selftest_remind(db: Session = Depends(get_db), u=Depends(staff_or_admin), eng=Depends(get_engine)):
+    """Send the 'please test your button' LINE reminder now (outside the monthly schedule)."""
+    return stest.send_reminders(db, eng.notifier, "manual", actor=u.username)
 
 
 # ---------------- system update (GitHub → host updater; see app/updates.py, docs/UPDATE.md) ----------------

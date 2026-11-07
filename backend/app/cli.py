@@ -3,6 +3,7 @@
     docker compose exec backend python -m app.cli list-users
     docker compose exec backend python -m app.cli reset-password <username>     # prints a one-time temporary password
     docker compose exec backend python -m app.cli unlock <username>
+    docker compose exec backend python -m app.cli reset-2fa <username>          # lost phone + no backup codes
 
 Needs shell access to the server, which is the point: it is the recovery path that does not depend on the web login.
 Every use is written to the audit log with actor "cli".
@@ -23,6 +24,15 @@ def main(argv: list[str]) -> int:
             for u in db.query(User).order_by(User.id):
                 print(f"{u.id:>3}  {u.username:<20} {u.role:<7} {'active' if u.active else 'DISABLED':<9}"
                       f"{' must-change' if u.must_change else ''}{' LOCKED' if u.locked_until else ''}")
+            return 0
+        if cmd == "reset-2fa" and len(argv) == 2:
+            from . import mfa
+            u = db.query(User).filter_by(username=argv[1]).first()
+            if not u:
+                print(f"no such user: {argv[1]}", file=sys.stderr); return 1
+            mfa.clear(u); u.token_ver = (u.token_ver or 0) + 1
+            audit(db, "cli", "2fa_reset", u.username); db.commit()
+            print(f"2FA cleared for {u.username}. If the policy requires 2FA they will enrol again at the next sign-in.")
             return 0
         if cmd in ("reset-password", "unlock") and len(argv) == 2:
             u = db.query(User).filter_by(username=argv[1]).first()

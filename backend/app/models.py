@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-from sqlalchemy import (String, Integer, Boolean, DateTime, ForeignKey, Text, JSON, UniqueConstraint, Float)
+from sqlalchemy import (String, Integer, Boolean, DateTime, ForeignKey, Text, JSON, UniqueConstraint, Float, LargeBinary)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -32,6 +32,11 @@ class User(Base):
     token_ver: Mapped[int] = mapped_column(Integer, default=0)             # bump to revoke every issued token
     password_changed_at: Mapped[datetime | None] = _dt(nullable=True)
     last_login_at: Mapped[datetime | None] = _dt(nullable=True)
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)     # 2-step sign-in (app/mfa.py)
+    totp_pending: Mapped[str | None] = mapped_column(String(64), nullable=True)    # secret shown during enrolment
+    totp_last_step: Mapped[int | None] = mapped_column(Integer, nullable=True)     # replay protection
+    totp_enabled_at: Mapped[datetime | None] = _dt(nullable=True)
+    backup_codes: Mapped[list | None] = mapped_column(JSON, nullable=True)         # sha256 of unused one-time codes
 
 
 class Patient(Base):
@@ -229,3 +234,34 @@ class GatewayCommand(Base):
     requested_by: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = _dt(default=utcnow)
     done_at: Mapped[datetime | None] = _dt(nullable=True)
+
+
+class PushSub(Base):
+    """A browser/phone that asked for Web Push notifications (app/push.py)."""
+    __tablename__ = "sos_push_subs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("sos_users.id"), index=True)
+    endpoint: Mapped[str] = mapped_column(String(1000), unique=True)
+    p256dh: Mapped[str] = mapped_column(String(200))
+    auth: Mapped[str] = mapped_column(String(100))
+    label: Mapped[str] = mapped_column(String(120), default="")       # e.g. "Android · Chrome"
+    created_at: Mapped[datetime] = _dt(default=utcnow)
+    last_ok_at: Mapped[datetime | None] = _dt(nullable=True)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Secret(Base):
+    """Server-side secrets generated at runtime (e.g. VAPID key). Never exposed through the API."""
+    __tablename__ = "sos_secrets"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
+class Asset(Base):
+    """Small uploaded files (organisation logos for the PDF report)."""
+    __tablename__ = "sos_assets"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    mime: Mapped[str] = mapped_column(String(32))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    updated_at: Mapped[datetime] = _dt(default=utcnow)
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
