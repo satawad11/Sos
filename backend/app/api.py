@@ -548,7 +548,20 @@ def delete_device(did: int, db: Session = Depends(get_db), u=Depends(admin_only)
     if db.query(Case).filter_by(device_id=did).first():
         raise HTTPException(409, "อุปกรณ์นี้มีประวัติเคสแล้ว ลบไม่ได้ — เปลี่ยนสถานะเป็น 'ปลดระวาง/สูญหาย' แทน")
     eui = d.dev_eui; db.delete(d); audit(db, u.username, "device_delete", eui); db.commit()
-    return {"ok": True}
+    return {"ok": True, "chirpstack": _cs_remove(db, u.username, "device", eui)}
+
+
+def _cs_remove(db: Session, who: str, kind: str, ident: str) -> str:
+    """Best effort: also remove the device/gateway from ChirpStack. Never fails the delete here (the row is already gone)."""
+    cs = prov.get_cs()
+    if not cs.configured: return "not_configured"
+    try:
+        gone = cs.remove_device(ident) if kind == "device" else cs.remove_gateway(ident)
+    except Exception as e:
+        audit(db, who, f"chirpstack_{kind}_delete_failed", ident, err=str(e)[:150]); db.commit()
+        return "error: " + str(e)[:150]
+    if gone: audit(db, who, f"chirpstack_{kind}_delete", ident); db.commit()
+    return "deleted" if gone else "absent"
 
 
 class DeviceConfigIn(BaseModel):
@@ -743,7 +756,7 @@ def delete_gateway(gid: int, db: Session = Depends(get_db), u=Depends(admin_only
     gw = g.gateway_id
     db.query(GatewayCommand).filter_by(gateway_id=gw).delete()
     db.delete(g); audit(db, u.username, "gateway_delete", gw); db.commit()
-    return {"ok": True, "note": "ถ้าเกตเวย์ยังเปิดอยู่ มันจะถูกเพิ่มกลับเองเมื่อส่งข้อมูลครั้งถัดไป — ปิดการเฝ้าระวังแทนถ้าแค่ไม่ต้องการแจ้งเตือน"}
+    return {"ok": True, "chirpstack": _cs_remove(db, u.username, "gateway", gw), "note": "ถ้าเกตเวย์ยังเปิดอยู่ มันจะถูกเพิ่มกลับเองเมื่อส่งข้อมูลครั้งถัดไป — ปิดการเฝ้าระวังแทนถ้าแค่ไม่ต้องการแจ้งเตือน"}
 
 
 @router.put("/gateways/{gid}")

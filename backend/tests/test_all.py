@@ -1405,6 +1405,12 @@ class FakeCSMgmt(FakeCS):
         self.cs_devices = {"70b3d57ed0000001": {"devEui": "70B3D57ED0000001", "name": "A1", "isDisabled": False},
                            "02aaaaaaaaaaaaaa": {"devEui": "02aaaaaaaaaaaaaa", "name": "stray", "isDisabled": False}}
         self.cs_gws = {}; self.boom = False
+    def remove_device(self, eui):
+        if self.boom: raise RuntimeError("down")
+        return self.cs_devices.pop(eui, None) is not None
+    def remove_gateway(self, gid):
+        if self.boom: raise RuntimeError("down")
+        return self.cs_gws.pop(gid, None) is not None
     def status(self): return {"configured": True, "reachable": True, "error": "", "application": "sos-patients"}
     def list_devices(self): return list(self.cs_devices.values())
     def list_gateways(self): return [{"gatewayId": g} for g in self.cs_gws]
@@ -1540,3 +1546,20 @@ def test_delete_rules_for_caregiver_patient_device_gateway_user(env_):
     assert client.delete(f"/api/users/{st}", headers=h).status_code == 409
     client.put(f"/api/users/{st}", json={"active": False}, headers=h)
     assert client.delete(f"/api/users/{st}", headers=h).status_code == 200
+
+
+def test_delete_device_and_gateway_also_removes_from_chirpstack(env_, monkeypatch):
+    *_, client, ids = env_
+    cs = FakeCSMgmt(); monkeypatch.setattr("app.provision.get_cs", lambda: cs)
+    h = login(client)
+    d = client.post("/api/devices", json={"dev_eui": "70b3d57ed0000099", "label": "tmp"}, headers=h).json()["id"]
+    cs.cs_devices["70b3d57ed0000099"] = {"devEui": "70b3d57ed0000099", "isDisabled": False}
+    r = client.delete(f"/api/devices/{d}", headers=h).json()
+    assert r["chirpstack"] == "deleted" and "70b3d57ed0000099" not in cs.cs_devices
+    g = client.post("/api/gateways", json={"gateway_id": "0016c001ff10cccc", "label": "G"}, headers=h).json()["id"]
+    assert client.delete(f"/api/gateways/{g}", headers=h).json()["chirpstack"] == "deleted" and not cs.cs_gws
+    d2 = client.post("/api/devices", json={"dev_eui": "70b3d57ed0000098", "label": "t2"}, headers=h).json()["id"]
+    cs.boom = True          # ChirpStack down: the local delete still succeeds and the problem is reported + audited
+    r = client.delete(f"/api/devices/{d2}", headers=h)
+    assert r.status_code == 200 and r.json()["chirpstack"].startswith("error")
+    assert any(a["action"] == "chirpstack_device_delete_failed" for a in client.get("/api/audit", headers=h).json())

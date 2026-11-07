@@ -119,6 +119,21 @@ class ChirpStackRest:
     def list_gateways(self) -> list[dict]:
         return self._pages("/api/gateways", {"tenantId": self.tenant_id()})
 
+    def remove_device(self, dev_eui: str) -> bool:
+        """Delete the device in ChirpStack. True if it existed, False if it was already gone."""
+        try: self._call("DELETE", f"/api/devices/{dev_eui}")
+        except ProvisionError as e:
+            if e.not_found: return False
+            raise
+        return True
+
+    def remove_gateway(self, gateway_id: str) -> bool:
+        try: self._call("DELETE", f"/api/gateways/{gateway_id}")
+        except ProvisionError as e:
+            if e.not_found: return False
+            raise
+        return True
+
     def ensure_gateway(self, gateway_id: str, name: str, lat: float | None = None, lon: float | None = None) -> str:
         """Register the gateway in ChirpStack. Returns "created" or "exists"."""
         gw = {"gatewayId": gateway_id, "name": (name or gateway_id)[:100], "description": "added from SOS dashboard",
