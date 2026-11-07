@@ -373,6 +373,24 @@ h1,h2,h3,h4,.acn,.kv,.pt,.upg-h b,.sbrand b{font-weight:700;letter-spacing:-.2px
 .kpi.red{box-shadow:-1px 0 0 var(--bd),0 -1px 0 var(--bd),inset 0 3px 0 var(--red)}
 .auth{background:radial-gradient(900px 600px at 80% 110%,#2c3366 0,transparent 60%),var(--pine)}
 .auth-side p{color:#b7bdd8}
+
+/* collapsible nav groups + breadcrumb */
+.ngw+.ngw{margin-top:2px}
+#side .ng{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--mut);padding:12px 12px 6px;cursor:pointer;border-radius:6px;min-height:0;text-align:left}
+#side .ng span{flex:1}#side .ng:hover{color:var(--ink)}
+#side .ng em{font-style:normal;font-size:11.5px;font-weight:600;background:var(--soft);color:var(--mut);border-radius:99px;padding:0 7px;line-height:18px}
+#side .ng svg.i{width:15px;height:15px;transition:transform .18s}#side .ng[aria-expanded=false] svg.i{transform:rotate(-90deg)}
+#side .ng[aria-expanded=true] em{display:none}
+.ngi[hidden]{display:none}.ngi{display:flex;flex-direction:column;gap:1px}
+.ptw{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.bc ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--mut);line-height:1.5}
+.bc li{display:flex;align-items:center;min-width:0}.bc li+li::before{content:"";width:5px;height:5px;margin:0 9px;border:solid var(--line);border-width:1.5px 1.5px 0 0;transform:rotate(45deg)}
+.bc button{border:0;background:none;padding:0;font:inherit;color:var(--mut);cursor:pointer;min-height:0;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:3px}
+.bc button:hover{color:var(--pri);text-decoration-color:currentColor}
+.bc [aria-current] span{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40ch}
+.ptw .pt{flex:none;font-size:22px;line-height:1.3}
+@media(max-width:640px){.bc .bcg{display:none}.ptw .pt{font-size:18px}.bc ol{font-size:12px}}
+@media(prefers-reduced-motion:reduce){#side .ng svg.i{transition:none}}
 </style></head>
 <body>
 <div id="app"></div><div id="toast"></div>
@@ -445,22 +463,36 @@ function render(){
   const NG=[["งานประจำวัน",["cases","map","selftest"]],["ข้อมูล",["patients","caregivers","devices","gateways","reports"]]],inG=k=>NG.some(g=>g[1].includes(k));
   const groups=[...NG.map(g=>[g[0],tabs.filter(t=>g[1].includes(t[0]))]),["ระบบ",tabs.filter(t=>!inG(t[0]))]].filter(g=>g[1].length);
   const navb=t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}"${page===t[0]?' aria-current="page"':""}>${IC[t[0]]?ico(t[0]):""}<span>${t[1]}</span></button>`;
-  const title=(tabs.find(t=>t[0]===page)||["","บัญชีของฉัน"])[1];
+  const title=(tabs.find(t=>t[0]===page)||["","บัญชีของฉัน"])[1],curG=groups.find(g=>g[1].some(t=>t[0]===page));
+  const navC=new Set(JSON.parse(lsGet("navc")||"[]"));if(curG)navC.delete(curG[0]);
+  const ngrp=(g,i)=>{const open=!navC.has(g[0]);return `<div class="ngw"><button type="button" class="ng" data-g="${esc(g[0])}" aria-expanded="${open}" aria-controls="ng${i}"><span>${g[0]}</span>${g[0]===curG?.[0]?"":`<em>${g[1].length}</em>`}${ico("chev")}</button><div class="ngi" id="ng${i}" ${open?"":"hidden"}>${g[1].map(navb).join("")}</div></div>`};
+  const bc=`<nav class="bc" aria-label="ตำแหน่งหน้า"><ol><li><button type="button" data-bp="cases">หน้าหลัก</button></li>${curG?`<li class="bcg">${curG[0]}</li>`:""}<li id="bcp" aria-current="page"><span>${title}</span></li></ol></nav>`;
   $("#app").innerHTML=`<div class="shell" id="shell">
    <aside id="side" aria-label="เมนู"><div class="sbrand">${LOGO(34)}<div><b>ระบบแจ้งเหตุฉุกเฉิน</b><span>ปุ่มแจ้งเหตุผู้ป่วยติดบ้าน</span></div></div>
-    <nav>${groups.map(g=>`<div class="ng">${g[0]}</div>${g[1].map(navb).join("")}`).join("")}</nav>
+    <nav>${groups.map(ngrp).join("")}</nav>
     <div class="me"><div class="who"><span class="av">${esc((sessionStorage.getItem("nm")||"?").trim().charAt(0).toUpperCase())}</span><div><b>${esc(sessionStorage.getItem("nm")||"")}</b><span>${RN[role]||role}</span></div></div><div class="row"><button class="btn" id="pw">บัญชี</button><button class="btn" id="out">ออกจากระบบ</button></div></div></aside>
-   <header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">${ico("menu")}</button><h1 class="pt">${title}</h1>
+   <header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">${ico("menu")}</button><div class="ptw">${bc}<h1 class="pt" id="pt">${title}</h1></div>
     <div class="phr"><span class="hchip" id="conn"><span class="sdot ${wsUp?"on":"off"}"></span>${wsUp?"เชื่อมต่อสด":"กำลังเชื่อมต่อ…"}</span><span class="hchip tm" id="clk">${nowTH()}</span>
     <button class="btn snd ${audioOn?"on":""}" id="snd" title="เสียงเตือนเคสใหม่">${ico(audioOn?"bell":"bellOff")}<span class="lbl">${audioOn?"เสียงเปิด":"เปิดเสียงเตือน"}</span></button></div></header>
    <div class="scrim" id="scrim"></div><main><div id="main"></div></main></div>`;
-  document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(setDirty()&&!confirm("มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ออกจากหน้านี้?"))return;setDirty=()=>false;page=b.dataset.p;render();scrollTo(0,0)});
+  const go=p=>{if(setDirty()&&!confirm("มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ออกจากหน้านี้?"))return;setDirty=()=>false;page=p;render();scrollTo(0,0)};
+  document.querySelectorAll("#side nav button[data-p]").forEach(b=>b.onclick=()=>go(b.dataset.p));
+  document.querySelectorAll(".bc [data-bp]").forEach(b=>b.onclick=()=>go(b.dataset.bp));
+  document.querySelectorAll("#side .ng").forEach(b=>b.onclick=()=>{const box=b.nextElementSibling,open=box.hidden;box.hidden=!open;b.setAttribute("aria-expanded",open);
+    const c=new Set(JSON.parse(lsGet("navc")||"[]"));open?c.delete(b.dataset.g):c.add(b.dataset.g);lsSet("navc",JSON.stringify([...c]))});
+  // sub-views (case detail, edit forms) add a last breadcrumb item via crumb(); it goes away when #main no longer shows a "back" view
+  new MutationObserver(()=>{if(!$("#main #back"))crumb(null)}).observe($("#main"),{childList:true});
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>{page="account";render()};$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
   clearInterval(timer);(({cases:loadCases,map:loadMap,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,selftest:loadSelftest,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,chirpstack:loadChirpstack,integrations:loadIntegrations,update:loadUpdate,account:loadAccount,settings:loadSettings,audit:loadAudit})[page])();
   if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
   if(!ws||ws.readyState>1)connectWS()}
 
+function crumb(label){const p=$("#bcp"),pt=$("#pt");if(!p)return;const base=(p.dataset.base??=p.querySelector("span").textContent);
+  document.querySelectorAll(".bc .bcx").forEach(e=>e.remove());
+  if(label==null){p.innerHTML=`<span>${esc(base)}</span>`;p.setAttribute("aria-current","page");if(pt)pt.textContent=base;return}
+  p.removeAttribute("aria-current");p.innerHTML=`<button type="button">${esc(base)}</button>`;p.querySelector("button").onclick=()=>{setDirty=()=>false;render();scrollTo(0,0)};
+  p.insertAdjacentHTML("afterend",`<li class="bcx" aria-current="page"><span>${esc(label)}</span></li>`);if(pt)pt.textContent=label}
 let devEdit=false;
 const canEdit=()=>role==="admin"||role==="staff";
 
@@ -554,7 +586,7 @@ const showCase=guard(async id=>{
   <p>อุปกรณ์ ${esc(c.device.label)} (${c.device.dev_eui}) · แบต ${c.device.battery??"-"}% · ไฟบ้าน ${c.device.mains_ok===false?"ดับ":"ปกติ"}</p>
   ${canEdit()&&c.state==="new"?`<button class="btn g" id="acc">✅ รับเรื่อง (ส่งสัญญาณกลับอุปกรณ์)</button> `:""}
   ${canEdit()&&(c.state==="new"||c.state==="accepted")?`<div class="row"><input id="note" placeholder="บันทึก (ถ้ามี)" size="40"><button class="btn p" id="cls">ปิดเคส</button><button class="btn r" id="fal">เหตุผิดพลาด</button></div>`:""}
-  </div><div class="card"><h3>ไทม์ไลน์</h3><table>${c.events.map(e=>`<tr><td>${fmt(e.at)}</td><td>${esc(e.kind)}</td><td>${esc(e.actor)}</td><td class="mut">${esc(JSON.stringify(e.detail))}</td></tr>`).join("")}</table></div>`;
+  </div><div class="card"><h3>ไทม์ไลน์</h3><table>${c.events.map(e=>`<tr><td>${fmt(e.at)}</td><td>${esc(e.kind)}</td><td>${esc(e.actor)}</td><td class="mut">${esc(JSON.stringify(e.detail))}</td></tr>`).join("")}</table></div>`;crumb(`เคส #${c.id}`);
   $("#back").onclick=()=>render();
   const act=(url,body)=>guard(async()=>{await api(url,{method:"POST",body});toast("บันทึกแล้ว");showCase(id)});
   if($("#acc"))$("#acc").onclick=act(`/cases/${id}/accept`);
@@ -581,13 +613,13 @@ const loadPatients=guard(async()=>{
      <div class="row">ละติจูด <input id="ela" size="10" value="${p.lat??""}"> ลองจิจูด <input id="elo" size="10" value="${p.lon??""}"></div>
      <div class="row">หมายเหตุ <input id="eno" size="50" value="${esc(p.notes)}"></div>
      <div class="row"><label><input type="checkbox" id="eac" ${p.active?"checked":""}> เปิดใช้งาน (ถ้าปิด ระบบจะไม่รับแจ้งเหตุของผู้ป่วยรายนี้)</label></div>
-     <div class="row"><button class="btn p" id="esv">บันทึก</button></div></div>`;
+     <div class="row"><button class="btn p" id="esv">บันทึก</button></div></div>`;crumb(`แก้ไขผู้ป่วย #${p.id}`);
     $("#back").onclick=()=>{devEdit=false;render()};
     $("#esv").onclick=guard(async()=>{const num=v=>v.trim()===""?null:Number(v);const age=num($("#eg").value),la=num($("#ela").value),lo=num($("#elo").value);
       if([age,la,lo].some(v=>v!==null&&isNaN(v))){toast("อายุ/ละติจูด/ลองจิจูดต้องเป็นตัวเลข");return}
       await api("/patients/"+p.id,{method:"PUT",body:{full_name:$("#en").value,age,address:$("#ea").value,village:$("#ev").value,phone:$("#ep").value,lat:la,lon:lo,notes:$("#eno").value,active:$("#eac").checked}});toast("บันทึกแล้ว");devEdit=false;render()})});
   document.querySelectorAll("button[data-id]").forEach(b=>b.onclick=()=>{const p=ps.find(x=>x.id==b.dataset.id);
-    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>ผู้ดูแลของ ${esc(p.full_name)}</h3><p class="mut">ลำดับที่ 1 จะได้รับแจ้งก่อน ถ้าไม่ตอบรับภายในเวลาที่ตั้งไว้ จะแจ้งคนถัดไป</p>${[1,2,3].map(i=>`<div class="row">ลำดับ ${i}: <select id="s${i}"><option value="">- ไม่ระบุ -</option>${opts}</select></div>`).join("")}<button class="btn p" id="sv">บันทึก</button></div>`;
+    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>ผู้ดูแลของ ${esc(p.full_name)}</h3><p class="mut">ลำดับที่ 1 จะได้รับแจ้งก่อน ถ้าไม่ตอบรับภายในเวลาที่ตั้งไว้ จะแจ้งคนถัดไป</p>${[1,2,3].map(i=>`<div class="row">ลำดับ ${i}: <select id="s${i}"><option value="">- ไม่ระบุ -</option>${opts}</select></div>`).join("")}<button class="btn p" id="sv">บันทึก</button></div>`;crumb(`ผู้ดูแลของ ${p.full_name}`);
     p.assignments.forEach(a=>{$("#s"+a.priority).value=a.caregiver_id});
     $("#back").onclick=()=>render();$("#sv").onclick=guard(async()=>{const ids=[1,2,3].map(i=>$("#s"+i).value).filter(Boolean).map(Number);await api(`/patients/${p.id}/assignments`,{method:"PUT",body:{caregiver_ids:ids}});toast("บันทึกแล้ว");render()})})});
 
@@ -614,7 +646,7 @@ const loadCaregivers=guard(async()=>{
     $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>แก้ไข อสม./ผู้ดูแล</h3>
      <div class="row">ชื่อ-สกุล <input id="cn" value="${esc(c.full_name)}" maxlength="128"> บทบาท <input id="cr" value="${esc(c.role)}"> โทร <input id="cp" value="${esc(c.phone)}"></div>
      <div class="row"><label><input type="checkbox" id="cac" ${c.active?"checked":""}> เปิดใช้งาน (รับแจ้งเหตุ)</label></div>
-     <div class="row"><button class="btn p" id="csv">บันทึก</button></div></div>`;
+     <div class="row"><button class="btn p" id="csv">บันทึก</button></div></div>`;crumb("แก้ไข อสม./ผู้ดูแล");
     $("#back").onclick=()=>{devEdit=false;render()};
     $("#csv").onclick=guard(async()=>{await api("/caregivers/"+c.id,{method:"PUT",body:{full_name:$("#cn").value,role:$("#cr").value,phone:$("#cp").value,active:$("#cac").checked}});toast("บันทึกแล้ว");devEdit=false;render()})})});
 
@@ -660,7 +692,7 @@ const loadGateways=guard(async()=>{
       <div class="row">ละติจูด <input id="glat" size="10" value="${g.loc.registered?g.loc.registered.lat:""}"> ลองจิจูด <input id="glon" size="10" value="${g.loc.registered?g.loc.registered.lon:""}"></div>
       <div class="row"><button class="btn p" id="gls">บันทึกตำแหน่ง</button>${g.loc.gps?'<button class="btn" id="glu">ใช้ตำแหน่งจาก GPS</button>':""}${g.loc.registered?'<button class="btn" id="glc">ล้างตำแหน่ง</button>':""}</div>
       <p class="mut">หาพิกัดได้จาก Google Maps (กดค้างบนแผนที่) · GPS ในอาคารไม่แม่น ควรลงทะเบียนตำแหน่งตอนติดตั้งแล้วใช้ GPS เทียบเพื่อดูว่าถูกย้ายหรือไม่</p></div>
-    <div class="card"><h3>รายงานล่าสุดจากเกตเวย์</h3><table>${row("รับรายงานเมื่อ",fmt(g.last_report_at)+" ("+ago(g.last_report_at)+")")}${row("ที่อยู่ IP ในเครือข่าย",esc(r.ip||"-"))}${row("ทำงานมาแล้ว",upt(r.uptime_s))}${row("อุณหภูมิ CPU",r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-")}${row("ไฟเลี้ยง (get_throttled)",esc(r.throttled||"-")+' <span class="mut">(0x0 = ปกติ)</span>')}${row("พื้นที่การ์ดที่ใช้",r.disk_pct!=null?r.disk_pct+"%":"-")}${row("หน่วยความจำที่ใช้",r.mem_pct!=null?r.mem_pct+"%":"-")}${row("ตัวรับสัญญาณ LoRa (concentratord)",r.services?(r.services.concentratord?'<span class="ok">ทำงาน</span>':'<b class="bad">หยุด</b>'):"-")}${row("ตัวส่งต่อ MQTT (forwarder)",r.services?(r.services.forwarder?'<span class="ok">ทำงาน</span>':'<b class="bad">หยุด</b>'):"-")}${row("SPI ของ WM1302",r.spi==null?"-":r.spi?'<span class="ok">พบ</span>':'<b class="bad">ไม่พบ</b>')}${row("เวลา (NTP)",r.ntp==null?"-":r.ntp?"ซิงก์แล้ว":'<b class="bad">ยังไม่ซิงก์</b>')}${row("รีสตาร์ตวิทยุอัตโนมัติสะสม",r.radio_fail??"-")}${row("ซอฟต์แวร์รายงาน",esc(r.sw||"-"))}</table></div>`;
+    <div class="card"><h3>รายงานล่าสุดจากเกตเวย์</h3><table>${row("รับรายงานเมื่อ",fmt(g.last_report_at)+" ("+ago(g.last_report_at)+")")}${row("ที่อยู่ IP ในเครือข่าย",esc(r.ip||"-"))}${row("ทำงานมาแล้ว",upt(r.uptime_s))}${row("อุณหภูมิ CPU",r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-")}${row("ไฟเลี้ยง (get_throttled)",esc(r.throttled||"-")+' <span class="mut">(0x0 = ปกติ)</span>')}${row("พื้นที่การ์ดที่ใช้",r.disk_pct!=null?r.disk_pct+"%":"-")}${row("หน่วยความจำที่ใช้",r.mem_pct!=null?r.mem_pct+"%":"-")}${row("ตัวรับสัญญาณ LoRa (concentratord)",r.services?(r.services.concentratord?'<span class="ok">ทำงาน</span>':'<b class="bad">หยุด</b>'):"-")}${row("ตัวส่งต่อ MQTT (forwarder)",r.services?(r.services.forwarder?'<span class="ok">ทำงาน</span>':'<b class="bad">หยุด</b>'):"-")}${row("SPI ของ WM1302",r.spi==null?"-":r.spi?'<span class="ok">พบ</span>':'<b class="bad">ไม่พบ</b>')}${row("เวลา (NTP)",r.ntp==null?"-":r.ntp?"ซิงก์แล้ว":'<b class="bad">ยังไม่ซิงก์</b>')}${row("รีสตาร์ตวิทยุอัตโนมัติสะสม",r.radio_fail??"-")}${row("ซอฟต์แวร์รายงาน",esc(r.sw||"-"))}</table></div>`;crumb(`เกตเวย์ ${g.gateway_id}`);
     $("#back").onclick=()=>{devEdit=false;render()};
     const glp=body=>guard(async()=>{await api("/gateways/"+g.id,{method:"PUT",body});toast("บันทึกแล้ว");devEdit=false;render()})();
     $("#gls").onclick=()=>{const la=$("#glat").value.trim(),lo=$("#glon").value.trim();if(la===""||lo===""||isNaN(+la)||isNaN(+lo)){toast("กรอกละติจูดและลองจิจูดเป็นตัวเลข");return}glp({lat:+la,lon:+lo})};
@@ -734,6 +766,7 @@ const loadDevices=guard(async()=>{
   }))});
 
 const IC={
+chev:'<path d="m6 9 6 6 6-6"/>',
 phone:'<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2"/>',
 menu:'<path d="M4 7h16M4 12h16M4 17h10"/>',
 map:'<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
