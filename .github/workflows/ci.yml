@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -r backend/requirements.txt pytest httpx
+      - run: pip install -r backend/requirements.txt pytest httpx pymupdf   # pymupdf: tests/test_pdf.py reads the generated PDF back
       - run: python -m pytest -q
         working-directory: backend
   firmware-host-test:

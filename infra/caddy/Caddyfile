@@ -8,3 +8,7 @@
 	}
 	reverse_proxy backend:8000
 }
+
+# Optional extra sites, e.g. the ChirpStack admin UI on its own domain.
+# Created by scripts/enable-chirpstack-domain.sh; nothing here = no extra sites.
+import /etc/caddy/sites/*.caddy
