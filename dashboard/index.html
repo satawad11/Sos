@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#1d4ed8">
+<meta name="theme-color" content="#4c5fd5">
 <link rel="manifest" href="manifest.json"><link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="SOS แจ้งเหตุ"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -330,6 +330,49 @@ a.btn{display:inline-flex;align-items:center;justify-content:center;text-decorat
 .kpi.red{box-shadow:-1px 0 0 var(--bd),0 -1px 0 var(--bd),inset 0 3px 0 var(--red)}
 #side nav button{padding:8px 12px}.ng{padding:14px 12px 5px}
 td .btn{white-space:nowrap}.auth-side p{max-width:40ch}
+
+/* update progress */
+.upg{border:1px solid var(--bd);border-radius:10px;padding:16px 18px;margin:14px 0;background:var(--soft)}
+.upg.ok{border-color:color-mix(in srgb,var(--grn) 40%,transparent);background:var(--grn2)}.upg.bad{border-color:color-mix(in srgb,var(--red) 40%,transparent);background:var(--red2)}
+.upg-h{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline}.upg-h b{font-family:var(--serif);font-weight:600;font-size:18px}.upg-h>span{color:var(--mut);font-variant-numeric:tabular-nums}
+.upg-bar{height:8px;border-radius:99px;background:color-mix(in srgb,var(--ink) 10%,transparent);overflow:hidden;margin:12px 0 14px}
+.upg-bar span{display:block;height:100%;border-radius:99px;background:var(--pri);transition:width .9s cubic-bezier(.3,.7,.4,1)}
+.upg.ok .upg-bar span{background:var(--grn)}.upg.bad .upg-bar span{background:var(--red)}
+.upg-s{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.upg-s li{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;font-size:13px;color:var(--mut)}
+.upg-s i{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);background:var(--card);position:relative}
+.upg-s li.d{color:var(--ink)}.upg-s li.d i{background:var(--grn);border-color:var(--grn)}
+.upg-s li.d i::after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.upg-s li.a{color:var(--ink);font-weight:600}.upg-s li.a i{border-color:var(--pri);border-top-color:transparent;animation:sp 1s linear infinite}
+.upg-s li.x{color:var(--red);font-weight:600}.upg-s li.x i{background:var(--red);border-color:var(--red)}
+.upg-s li.x i::before,.upg-s li.x i::after{content:"";position:absolute;left:8px;top:3px;width:2px;height:12px;background:#fff;transform:rotate(45deg)}.upg-s li.x i::after{transform:rotate(-45deg)}
+.upg-m{margin:14px 0 0;font-size:14px}
+@media(max-width:640px){.upg-s{grid-template-columns:1fr;gap:8px}.upg-s li{flex-direction:row;text-align:left}}
+
+/* ================= palette v4 — light, calm indigo (overrides v3) ================= */
+:root{--bg:#f5f6fa;--card:#fff;--ink:#1e2433;--mut:#667085;--bd:#e6e8ef;--line:#d5d9e2;--soft:#f2f4f8;
+  --pri:#4c5fd5;--pri3:#4c5fd5;--pri2:#eceefc;--pine:#1e2240;--brass:#4c5fd5;--brass2:#a5b0ff;
+  --red:#d64545;--red2:#fdecec;--amb:#c27a12;--amb2:#fbf1de;--grn:#1e8e5e;--grn2:#e3f4ec;--sh2:0 18px 50px #1e224033;
+  --serif:"Plex Thai",system-ui,"Noto Sans Thai",sans-serif}
+@media(prefers-color-scheme:dark){:root{--bg:#12141c;--card:#1a1d28;--ink:#e6e8f0;--mut:#9aa1b5;--bd:#282c3a;--line:#343949;--soft:#20232f;
+  --pri:#6c7bef;--pri3:#6c7bef;--pri2:#262b4a;--pine:#161924;--red:#ef6b6b;--red2:#3a1d22;--amb:#e0a040;--amb2:#33280f;--grn:#3fb27f;--grn2:#15301f;--sh2:0 18px 50px #0008}}
+h1,h2,h3,h4,.acn,.kv,.pt,.upg-h b,.sbrand b{font-weight:700;letter-spacing:-.2px}
+.kv{font-weight:600}
+::selection{background:var(--pri2);color:var(--ink)}
+:focus-visible{outline-color:var(--pri)}
+#side{background:var(--card);color:var(--ink);border-right:1px solid var(--bd)}
+.sbrand{border-bottom-color:var(--bd)}.sbrand b{color:var(--ink)}.sbrand span{color:var(--mut)}
+.ng{color:var(--mut);opacity:1}
+#side nav button{color:#3f4659}#side nav button svg.i{color:#8a91a5}
+#side nav button:hover{background:var(--soft);color:var(--ink)}
+#side nav button.on{background:var(--pri2);color:var(--pri);box-shadow:inset 3px 0 0 var(--pri)}#side nav button.on svg.i{color:var(--pri)}
+@media(prefers-color-scheme:dark){#side nav button{color:#c3c8d8}#side nav button svg.i{color:#7d849a}}
+.me{border-top-color:var(--bd)}.who b{color:var(--ink)}.who span:not(.av){color:var(--mut)}.av{background:var(--pri)}
+.me .btn{color:var(--ink);border-color:var(--line)}.me .btn:hover:not(:disabled){border-color:var(--ink);background:var(--soft)}
+.top{background:color-mix(in srgb,var(--bg) 85%,transparent)}
+.kpi.red{box-shadow:-1px 0 0 var(--bd),0 -1px 0 var(--bd),inset 0 3px 0 var(--red)}
+.auth{background:radial-gradient(900px 600px at 80% 110%,#2c3366 0,transparent 60%),var(--pine)}
+.auth-side p{color:#b7bdd8}
 </style></head>
 <body>
 <div id="app"></div><div id="toast"></div>
@@ -871,37 +914,71 @@ async function loadChirpstack(){
 let upSawBusy=false;
 const UPST={idle:["ok","พร้อม"],done:["ok","สำเร็จ"],failed:["bad","ไม่สำเร็จ"],queued:["mut","รอคิว"],checking:["mut","กำลังตรวจ…"],updating:["mut","กำลังอัปเดต…"],rolling_back:["bad","กำลังย้อนกลับ…"]};
 const verLine=v=>v?`<code>${esc(v.short)}</code> ${esc(v.subject)} <span class="mut">· ${fmt(v.date)}</span>`:'<span class="mut">-</span>';
+/* ---- update progress: steps reported by infra/scripts/sos-update.sh (status.step), estimated fill inside a step ---- */
+const UPS=["ตรวจเวอร์ชันบน GitHub","สำรองฐานข้อมูล","ดึงโค้ดใหม่","Build และเริ่มระบบใหม่","ตรวจว่าระบบทำงาน"];
+const UPB=[0,4,14,20,82,100],UPT=[6,25,6,100,30];   // % at start of each step, typical seconds per step
+let upLast=null,upPct=0,upTick=0,upOffline=false;
+function upStep(st,queued){
+  if(st.state==="done")return 6;if(queued)return 0;
+  if(st.step)return st.step;const m=st.message||"";   // older updater without step numbers
+  return /ตรวจว่าระบบ/.test(m)?5:/build/i.test(m)?4:/ดึงโค้ด/.test(m)?3:/สำรอง/.test(m)?2:1}
+function upPctOf(st,k){
+  if(k>=6)return 100;if(k<1)return 1;
+  const t0=Date.parse(st.step_at||st.updated_at||"")||Date.now(),el=Math.max(0,(Date.now()-t0)/1000);
+  return UPB[k-1]+(UPB[k]-UPB[k-1])*0.92*(1-Math.exp(-el/UPT[k-1]))}
+const mmss=sec=>{sec=Math.max(0,Math.round(sec));return Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0")};
+function upProgHTML(st,queued){
+  const k=upStep(st,queued),fail=st.state==="failed",rb=st.state==="rolling_back",done=st.state==="done";
+  const t0=Date.parse(st.started_at||"")||0,t1=Date.parse(st.finished_at||"")||Date.now(),el=t0?mmss((t1-t0)/1000):"";
+  const head=done?"อัปเดตสำเร็จ":fail?"อัปเดตไม่สำเร็จ":rb?"กำลังย้อนกลับเวอร์ชันเดิม":queued?"รอตัวอัปเดตบนเซิร์ฟเวอร์รับคำขอ…":`ขั้นที่ ${k} จาก 5 · ${UPS[k-1]}`;
+  return `<div class="upg ${done?"ok":fail||rb?"bad":""}" id="upprog" role="status" aria-live="polite">
+    <div class="upg-h"><b>${head}</b><span><span id="uppct">${Math.round(fail||rb?upPct:upPctOf(st,k))}%</span>${el?` · <span id="upel">${done||fail?"ใช้เวลา":"ผ่านไป"} ${el}</span>`:""}</span></div>
+    <div class="upg-bar"><span id="upbar" style="width:${upPct}%"></span></div>
+    <ol class="upg-s">${UPS.map((n,i)=>{const j=i+1,c=j<k||done?"d":j===k?(fail||rb?"x":"a"):"";return `<li class="${c}"><i></i><span>${n}</span></li>`}).join("")}</ol>
+    <p class="upg-m" id="upmsg">${upOffline&&!done&&!fail?"ระบบกำลังเริ่มใหม่ หน้าเว็บจะกลับมาเองเมื่อพร้อม…":esc(st.message||"")}</p>
+    ${done?'<div class="row"><button class="btn g" id="uprl">โหลดหน้าใหม่เพื่อใช้เวอร์ชันใหม่</button></div>':""}</div>`}
+function upAnimate(st,queued){   // move the bar from its last width to the new one so the transition shows
+  const bar=$("#upbar");if(!bar)return;const k=upStep(st,queued),bad=st.state==="failed"||st.state==="rolling_back";
+  const to=bad?upPct:Math.max(upPct,upPctOf(st,k));requestAnimationFrame(()=>{bar.style.width=to+"%"});upPct=to;
+  const pc=$("#uppct");if(pc)pc.textContent=Math.round(to)+"%";
+  if(st.started_at&&!st.finished_at){const e=$("#upel");if(e)e.textContent="ผ่านไป "+mmss((Date.now()-Date.parse(st.started_at))/1000)}}
+function upTicker(on){clearInterval(upTick);upTick=0;if(on)upTick=setInterval(()=>{if(page!=="update"||!upLast){clearInterval(upTick);return}upAnimate(upLast.st,upLast.q)},1000)}
 async function loadUpdate(){
   if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
   clearTimeout(timer);let s;
   try{s=await api("/system/update")}
   catch(e){if(page!=="update")return;
-    $("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ</h3><p>⏳ ${upSawBusy?"ระบบกำลังรีสตาร์ทหลังอัปเดต รอสักครู่…":"ติดต่อเซิร์ฟเวอร์ไม่ได้ ("+esc(e.message)+")"}</p></div>`;
+    if(upSawBusy&&upLast){upOffline=true;const st={...upLast.st};if((st.step||0)<4)st.step=4;
+      $("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ</h3>${upProgHTML(st,false)}</div>`;upLast={st,q:false};upAnimate(st,false);upTicker(true)}
+    else $("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ</h3><p>ติดต่อเซิร์ฟเวอร์ไม่ได้ (${esc(e.message)})</p></div>`;
     timer=setTimeout(()=>{if(page==="update")loadUpdate()},4000);return}
   if(page!=="update")return;
   const st=s.status||{},busy=s.busy,state=s.pending?"queued":(st.state||"idle"),[cls,lbl]=UPST[state]||["mut",state];
   if(busy)upSawBusy=true;
-  const finished=!busy&&upSawBusy&&(state==="done"||state==="failed");
+  const finished=!busy&&upSawBusy&&(state==="done"||state==="failed");upOffline=false;
+  const showProg=(busy&&(st.request?.action==="update"||state==="updating"||state==="rolling_back"||state==="queued"))||finished;
+  if(!showProg)upPct=0;
   if(!s.installed){$("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ</h3><div class="warn">ยังไม่ได้ติดตั้งตัวอัปเดตบนเซิร์ฟเวอร์ — ให้ผู้ดูแลเซิร์ฟเวอร์รัน <code>sudo bash infra/scripts/setup-updater.sh</code> หนึ่งครั้ง (ดู docs/UPDATE.md)</div></div>`;return}
   const ch=st.changes||[],n=st.behind||0,lu=st.last_update;
   $("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ <span class="mut" style="font-weight:normal">(โค้ดจาก GitHub · สาขา ${esc(st.branch||"main")})</span></h3>
    <div class="row"><b>เวอร์ชันที่ใช้อยู่:</b> ${verLine(st.current)}</div>
    <div class="row"><b>ล่าสุดบน GitHub:</b> ${verLine(st.latest)}</div>
    <div class="row mut">ตรวจล่าสุด ${fmt(st.checked_at)}${lu?` · อัปเดตครั้งก่อน ${fmt(lu.at)} <code>${esc(lu.from.slice(0,7))}</code> → <code>${esc(lu.to.slice(0,7))}</code> ${lu.ok?'<span class="ok">สำเร็จ</span>':'<span class="bad">ไม่สำเร็จ (ย้อนกลับ)</span>'}`:""}</div>
-   <div class="row"><b>สถานะ:</b> <span class="${cls}">${busy?"⏳ ":""}${esc(lbl)}</span> ${esc(st.message||"")}</div>
-   ${finished&&state==="done"?'<div class="row"><b class="ok">อัปเดตเสร็จแล้ว</b> — กด "โหลดหน้าใหม่" เพื่อใช้หน้าจอเวอร์ชันใหม่ <button class="btn g" id="uprl">โหลดหน้าใหม่</button></div>':""}
-   <div class="row"><button class="btn" id="upchk" ${busy?"disabled":""}>🔍 ตรวจหาอัปเดต</button>
-     <button class="btn p" id="upgo" ${busy||!n?"disabled":""}>⬆️ อัปเดตตอนนี้${n?` (${n} รายการ)`:""}</button></div>
+   ${showProg?upProgHTML(st,state==="queued"):`<div class="row"><b>สถานะ:</b> <span class="${cls}">${esc(lbl)}</span> ${esc(st.message||"")}</div>`}
+   <div class="row"><button class="btn" id="upchk" ${busy?"disabled":""}>ตรวจหาอัปเดต</button>
+     <button class="btn p" id="upgo" ${busy||!n?"disabled":""}>อัปเดตตอนนี้${n?` (${n} รายการ)`:""}</button></div>
    ${n?`<h4>มีอะไรใหม่ (${n})</h4><ul>${ch.map(c=>`<li><code>${esc(c.short)}</code> ${esc(c.subject)} <span class="mut">· ${esc(c.author)} · ${fmt(c.date)}</span></li>`).join("")}</ul>`:'<p class="mut">ไม่มีเวอร์ชันใหม่ (กด "ตรวจหาอัปเดต" เพื่อเช็กกับ GitHub อีกครั้ง — ระบบเช็กเองทุก 6 ชั่วโมง)</p>'}
    <p class="mut">ขั้นตอนอัปเดต: สำรองฐานข้อมูล → ดึงโค้ด → build ใหม่ → ตรวจว่าระบบทำงาน — ถ้าไม่ผ่าน ระบบจะ<b>ย้อนกลับเวอร์ชันเดิมให้อัตโนมัติ</b> · ระหว่างอัปเดต (ประมาณ 1–5 นาที) หน้าเว็บและการส่ง LINE จะหยุดชั่วคราว ควรทำนอกช่วงที่มีเคสค้าง</p>
    <details ${busy||state==="failed"?"open":""}><summary>บันทึกการทำงาน (log)</summary><pre style="white-space:pre-wrap;max-height:320px;overflow:auto;font-size:12px;background:#0f1720;color:#d6e2ee;padding:8px;border-radius:8px">${esc((s.log||[]).join("\n"))||"-"}</pre></details></div>`;
   if($("#uprl"))$("#uprl").onclick=()=>location.reload();
-  const send=action=>guard(async()=>{await api("/system/update",{method:"POST",body:{action}});upSawBusy=action==="update";toast(action==="update"?"ส่งคำขออัปเดตแล้ว":"กำลังตรวจกับ GitHub…");loadUpdate()})();
+  const send=action=>guard(async()=>{await api("/system/update",{method:"POST",body:{action}});upSawBusy=action==="update";if(upSawBusy)upPct=0;toast(action==="update"?"ส่งคำขออัปเดตแล้ว":"กำลังตรวจกับ GitHub…");loadUpdate()})();
   $("#upchk").onclick=()=>send("check");
   $("#upgo").onclick=guard(async()=>{
     const open=(await api("/cases?state=new")).length;
     if(!confirm(`อัปเดตเป็น ${st.latest?st.latest.short:"เวอร์ชันล่าสุด"} (${n} รายการ)?\n\nระหว่างอัปเดตประมาณ 1–5 นาที หน้าเว็บและการแจ้ง LINE จะหยุดชั่วคราว`+(open?`\n\n⚠️ ขณะนี้มีเคสรอรับเรื่อง ${open} เคส — แนะนำให้จัดการก่อน`:"")+"\n\nระบบจะสำรองฐานข้อมูลก่อน และย้อนกลับเองถ้าอัปเดตไม่ผ่าน"))return;
     send("update")});
+  if(showProg){upLast={st,q:state==="queued"};upAnimate(st,state==="queued")}else upLast=null;
+  upTicker(showProg&&busy);
   if(busy)timer=setTimeout(()=>{if(page==="update")loadUpdate()},3000);
 }
 

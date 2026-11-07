@@ -51,7 +51,7 @@ healthy() {   # backend answers /healthz from inside its container and nothing i
 }
 
 deploy() {    # $1 = previous commit (to diff which bind-mounted configs changed)
-  local prev="$1" changed
+  local prev="$1" changed   # $2 = "fwd" when updating forward (reports progress; not during rollback)
   chmod +x "$INFRA"/scripts/*.sh "$INFRA"/postgres/initdb/*.sh 2>/dev/null || true
   # git rewrites changed files as root:644 — mosquitto (uid 1883) must keep owning its ACL/password files
   chown 1883:1883 "$INFRA"/mosquitto/acl.conf "$INFRA"/mosquitto/passwd 2>/dev/null || true
@@ -62,6 +62,7 @@ deploy() {    # $1 = previous commit (to diff which bind-mounted configs changed
   for svc in mosquitto chirpstack caddy; do      # config files are bind mounts: recreate doesn't reload them
     if grep -q "^infra/$svc/" <<<"$changed"; then log "config changed → restart $svc"; dc restart "$svc" >>"$LOG" 2>&1; fi
   done
+  [ "${2:-}" = fwd ] && st updating "ตรวจว่าระบบใหม่ทำงานปกติ…" step=5
   log "health check (max ${HEALTH_TIMEOUT}s)"
   healthy
 }
@@ -76,7 +77,7 @@ do_check() {
 
 do_update() {
   [ -f "$LOG" ] && mv -f "$LOG" "$LOG.1"
-  st updating "เริ่มอัปเดต…" started=1
+  st updating "เริ่มอัปเดต… ตรวจเวอร์ชันบน GitHub" started=1 step=1
   log "=== update requested by ${REQ_BY:-host} (branch $BRANCH) ==="
   fetch || return 1
   local prev new dirty missing=""
@@ -90,21 +91,21 @@ do_update() {
   if ! g merge-base --is-ancestor HEAD "origin/$BRANCH"; then
     st failed "ประวัติโค้ดในเซิร์ฟเวอร์ไม่ต่อกับ GitHub (มี commit ที่ไม่ได้อยู่บน $BRANCH) — ต้องแก้ด้วยมือ" checked=1 finished=1; return 1
   fi
-  st updating "สำรองฐานข้อมูลก่อนอัปเดต…"
+  st updating "สำรองฐานข้อมูลก่อนอัปเดต…" step=2
   log "backup"
   if ! bash "$INFRA/scripts/backup.sh" >>"$LOG" 2>&1; then
     st failed "สำรองฐานข้อมูลไม่สำเร็จ จึงยกเลิกการอัปเดต (ระบบเดิมยังทำงานตามปกติ)" finished=1; return 1
   fi
-  st updating "ดึงโค้ดใหม่ ${new:0:7}…"
+  st updating "ดึงโค้ดใหม่ ${new:0:7}…" step=3
   log "git merge --ff-only ${prev:0:7} → ${new:0:7}"
   g merge --ff-only "origin/$BRANCH" >>"$LOG" 2>&1 || { st failed "รวมโค้ดไม่สำเร็จ — ดู log" finished=1; return 1; }
   if [ -f "$INFRA/.env.example" ] && [ -f "$INFRA/.env" ]; then
     missing="$(comm -23 <(grep -oE '^[A-Z_]+=' "$INFRA/.env.example" | sort -u) <(grep -oE '^[A-Z_]+=' "$INFRA/.env" | sort -u) | tr -d '=' | tr '\n' ' ')"
     [ -n "$missing" ] && log "NOTE: new settings in .env.example not in .env: $missing"
   fi
-  st updating "กำลัง build และเริ่มระบบใหม่ (ระบบจะหยุดตอบชั่วครู่)…"
-  if deploy "$prev"; then
-    st done "อัปเดตสำเร็จ ${prev:0:7} → ${new:0:7}${missing:+ · มีค่าตั้งใหม่ใน .env.example: $missing}" finished=1 from="$prev" to="$new" ok=1
+  st updating "กำลัง build และเริ่มระบบใหม่ (ระบบจะหยุดตอบชั่วครู่)…" step=4
+  if deploy "$prev" fwd; then
+    st done "อัปเดตสำเร็จ ${prev:0:7} → ${new:0:7}${missing:+ · มีค่าตั้งใหม่ใน .env.example: $missing}" finished=1 from="$prev" to="$new" ok=1 step=6
     log "=== update OK ==="; return 0
   fi
   log "!!! update failed health check → rolling back to ${prev:0:7}"

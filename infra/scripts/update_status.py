@@ -4,6 +4,7 @@
 usage: update_status.py <repo> <branch> <status.json> <state> <message> [key=value ...]
   keys: checked=1  started=1  finished=1  request=<id>  by=<user>  action=<check|update>
         from=<sha> to=<sha> ok=<0|1>   (records the last update result)
+        step=<1-6>   progress of an update: 1 fetch, 2 backup, 3 merge, 4 build, 5 health check, 6 done
 Versions (current = HEAD, latest = origin/<branch>, list of new commits) are read from the local git repo,
 so this never touches the network.
 """
@@ -45,7 +46,8 @@ def main():
     st.update({"state": state, "message": message, "branch": branch, "current": cur, "latest": lat,
                "behind": int(behind) if behind.isdigit() else 0, "changes": changes, "updated_at": now})
     if opts.get("checked"): st["checked_at"] = now
-    if opts.get("started"): st["started_at"] = now; st.pop("finished_at", None)
+    if opts.get("started"): st["started_at"] = now; st.pop("finished_at", None); st.pop("step", None)
+    if opts.get("step", "").isdigit(): st["step"] = int(opts["step"]); st["step_at"] = now
     if opts.get("finished"): st["finished_at"] = now
     if "request" in opts: st["request"] = {"id": opts["request"], "by": opts.get("by", ""), "action": opts.get("action", "")}
     if "ok" in opts:
