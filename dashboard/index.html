@@ -195,6 +195,141 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke
 .lst-bulk a{color:var(--pri);cursor:pointer;text-decoration:underline}
 td.lck,th.lck{width:34px;padding-right:0}td.lck input,th.lck input{width:17px;height:17px;cursor:pointer}
 tr.lsel td{background:color-mix(in srgb,var(--pri) 8%,transparent)}
+
+/* ================= design v3 — pine / brass / signal red (overrides everything above) ================= */
+@font-face{font-family:"Serif Thai";font-weight:600;font-display:swap;src:url(fonts/serif-thai-thai-600.woff2) format("woff2");unicode-range:U+0E01-0E5B,U+200C-200D,U+25CC}
+@font-face{font-family:"Serif Thai";font-weight:600;font-display:swap;src:url(fonts/serif-thai-latin-600.woff2) format("woff2");unicode-range:U+0000-00FF,U+2000-206F,U+20AC,U+2122}
+:root{--bg:#edf0ee;--card:#fff;--ink:#17201e;--mut:#5e6b67;--bd:#d8dfdb;--soft:#f4f6f5;--line:#c5cec9;
+  --pri:#1f6f5c;--pri3:#1f6f5c;--pri2:#dcebe4;--pine:#12302c;--pine2:#1a3d38;--brass:#a8834a;--brass2:#d6b47c;
+  --red:#c62f2f;--red2:#fbe9e7;--amb:#b7791f;--amb2:#f6ecd6;--grn:#2f7d4f;--grn2:#e0efe5;
+  --sh:none;--sh2:0 18px 50px #0b1a1733;--r:12px;--serif:"Serif Thai","Noto Serif Thai","Plex Thai",serif}
+@media(prefers-color-scheme:dark){:root{--bg:#0c1513;--card:#121e1b;--ink:#e4ebe8;--mut:#8fa19b;--bd:#22332f;--soft:#162420;--line:#2c403b;
+  --pri:#2f8a72;--pri3:#2f8a72;--pri2:#173a31;--pine:#0a1a17;--pine2:#11241f;--red:#e0524f;--red2:#3a1918;--amb:#d69a3a;--amb2:#33270f;--grn:#4fa673;--grn2:#132e1f;--sh2:0 18px 50px #0008}}
+body{background:var(--bg);color:var(--ink);letter-spacing:0}
+h1,h2,h3,h4,.acn,.kv,.pt{font-family:var(--serif);font-weight:600;letter-spacing:0}
+a{color:var(--pri)}
+::selection{background:var(--brass2);color:#17201e}
+:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+
+/* buttons & inputs */
+.btn,nav button{min-height:38px}
+.btn{border-radius:8px;font-weight:600;background:var(--card);border:1px solid var(--line);box-shadow:none;transition:background .15s,border-color .15s}
+.btn:hover:not(:disabled){border-color:var(--ink);box-shadow:none}
+.btn.p,.btn.p:hover:not(:disabled){background:var(--pri);border:1px solid var(--pri);color:#fff;box-shadow:none}
+.btn.p:hover:not(:disabled){background:color-mix(in srgb,var(--pri) 86%,#000)}
+.btn.g{background:var(--grn);border:1px solid var(--grn);color:#fff;box-shadow:none}
+.btn.r{background:var(--red);border:1px solid var(--red);color:#fff;box-shadow:none}
+.btn.sm{border-radius:6px}
+input,select,textarea{border-radius:8px;border:1px solid var(--line);background:var(--card)}
+input:focus,select:focus,textarea:focus,.fld input:focus{border-color:var(--pri);box-shadow:0 0 0 3px color-mix(in srgb,var(--pri) 22%,transparent)}
+
+/* surfaces */
+.card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);box-shadow:none;padding:20px 22px}
+.card h3{font-size:18px;margin:0 0 14px}
+table th{background:transparent;color:var(--mut);font-size:13px;font-weight:600;letter-spacing:0;border-bottom:1px solid var(--line);padding:10px}
+table td{padding:11px 10px;border-bottom:1px solid var(--bd)}
+th:first-child,th:last-child{border-radius:0}
+tr:hover td{background:color-mix(in srgb,var(--pri) 4%,transparent)}
+.tag{border-radius:6px;padding:2px 9px;font-weight:600;background:var(--soft);color:var(--mut)}
+.tag.new{background:var(--red);color:#fff}
+.tag.accepted{background:var(--amb2);color:color-mix(in srgb,var(--amb) 70%,var(--ink))}
+.tag.closed{background:var(--grn2);color:var(--grn)}
+.warn{border-radius:10px;background:var(--amb2);border:1px solid color-mix(in srgb,var(--amb) 35%,transparent);color:color-mix(in srgb,var(--amb) 60%,var(--ink))}
+#toast{background:var(--pine);color:#eef3f1;border-radius:10px;border:1px solid #ffffff1a}
+.savebar{background:var(--pine);color:#eef3f1;border-radius:12px}
+.pills{border-radius:10px;box-shadow:none}.pills button{border-radius:7px}.pills button.on{background:var(--pine);color:#fff}
+.chip input:checked+span{background:var(--pri);border-color:var(--pri)}
+.chead .ci{background:var(--pri2);color:var(--pri);border-radius:8px}
+.hchip{background:transparent;box-shadow:none;border:1px solid var(--bd);color:var(--mut);font-size:13px;padding:5px 11px;border-radius:99px}
+.hchip.tm{font-variant-numeric:tabular-nums}
+.sdot.on{background:var(--grn);box-shadow:0 0 0 3px color-mix(in srgb,var(--grn) 25%,transparent)}
+
+/* KPI strip: one panel with hairline dividers */
+.kpis{gap:1px;background:var(--bd);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:20px}
+.kpi{background:var(--card);border:0;border-radius:0;box-shadow:none;padding:18px 22px;display:block}
+.kpi::after,.ki{display:none}
+.kl{font-size:13.5px;color:var(--mut);font-weight:500}
+.kv{font-size:36px;line-height:1.2;margin:4px 0 2px;font-variant-numeric:tabular-nums lining-nums}
+.kv small{font-family:"Plex Thai",system-ui,sans-serif;font-size:14px}
+.kpi.red{box-shadow:inset 0 3px 0 var(--red)}.kpi.red .kv{color:var(--red)}
+.kpi.grn .kv{color:var(--ink)}.kpi.amb .kv{color:var(--amb)}
+.bar span{background:var(--pri)}
+
+/* open cases */
+.alarm{border:1px solid var(--red);box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 14%,transparent)}
+.ac{border-radius:10px;border:1px solid var(--bd);border-left:4px solid var(--amb);box-shadow:none;padding:14px 16px 16px}
+.ac.new{border-left-color:var(--red);background:color-mix(in srgb,var(--red) 4%,var(--card));box-shadow:none}
+.acn{font-size:21px;margin:10px 0 2px}
+.empty{padding:34px 10px}.empty .big{font-size:0;width:56px;height:56px;background:var(--grn2);position:relative}
+.empty .big::after{content:"";position:absolute;left:20px;top:14px;width:12px;height:22px;border:solid var(--grn);border-width:0 3px 3px 0;transform:rotate(45deg)}
+.empty h4{font-size:20px}
+
+/* app shell */
+.top{background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:var(--ink);box-shadow:none;border-bottom:1px solid var(--bd);padding:12px 28px;padding-top:calc(12px + env(safe-area-inset-top));gap:12px}
+.pt{flex:1;min-width:0;margin:0;font-size:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.phr{display:flex;gap:8px;align-items:center}
+.top .btn.snd{background:var(--card);color:var(--ink);border:1px solid var(--line);display:inline-flex;gap:6px;align-items:center}
+.top .btn.snd.on{background:var(--pri2);color:var(--pri);border-color:color-mix(in srgb,var(--pri) 40%,transparent)}
+.ham{background:var(--card);color:var(--ink);border:1px solid var(--line);width:40px;height:40px;border-radius:8px}
+#side{background:var(--pine);color:#d5e0dc;border-right:0;padding:0 12px 12px;gap:0}
+.sbrand{display:flex;gap:12px;align-items:center;padding:20px 8px 18px;margin-bottom:6px;border-bottom:1px solid #ffffff14}
+.sbrand b{display:block;font-family:var(--serif);font-weight:600;font-size:17px;color:#fff;line-height:1.3}
+.sbrand span{font-size:12.5px;color:#93aca4}
+.ng{font-size:12.5px;color:var(--brass2);opacity:.8;padding:16px 12px 6px}
+#side nav{gap:1px}
+#side nav button{color:#c9d6d1;font-weight:500;padding:9px 12px;border-radius:7px;gap:12px}
+#side nav button svg.i{width:18px;height:18px;stroke-width:1.7;color:#7fa196}
+#side nav button:hover{background:#ffffff0d;color:#fff}
+#side nav button.on{background:#ffffff14;color:#fff;font-weight:600;box-shadow:inset 3px 0 0 var(--brass2)}
+#side nav button.on svg.i{color:var(--brass2)}
+.me{border-top:1px solid #ffffff14;padding:14px 6px 2px;margin-top:auto}
+.who{display:flex;gap:10px;align-items:center;margin-bottom:10px}.who b{color:#fff;font-weight:600}.who span:not(.av){font-size:12.5px;color:#93aca4;display:block}
+.av{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--brass);color:#fff;font-weight:700;font-size:15px}
+.me .btn{background:transparent;color:#dce6e2;border:1px solid #ffffff2b;font-weight:500}.me .btn:hover:not(:disabled){border-color:#ffffff66;background:#ffffff0d}
+main{padding:24px 28px 40px;max-width:1240px}
+@media(min-width:1024px){
+  .shell{grid-template-columns:260px minmax(0,1fr);grid-template-areas:"side top" "side main"}
+  #side{grid-row:1/3;position:sticky;top:0;height:100vh;height:100dvh}
+}
+@media(max-width:1023px){
+  .shell.nav-open #side{box-shadow:8px 0 40px #0006}
+  #side{padding-top:env(safe-area-inset-top)}
+  .top{padding-left:14px;padding-right:14px}
+}
+@media(max-width:640px){
+  main{padding:14px 12px 32px}.card{padding:16px}.pt{font-size:20px}
+  .hchip.tm,#conn{display:none}.top .btn.snd .lbl{display:none}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi{padding:14px}.kv{font-size:28px}
+}
+
+/* sign-in: pine field with brass radio rings from the button */
+.auth{position:relative;overflow:hidden;background:var(--pine);gap:56px;padding:32px 20px}
+.auth::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-radial-gradient(circle at 22% 46%,transparent 0 38px,color-mix(in srgb,var(--brass2) 22%,transparent) 38px 39px);
+  -webkit-mask-image:radial-gradient(circle at 22% 46%,#000 0,#000 18%,transparent 62%);mask-image:radial-gradient(circle at 22% 46%,#000 0,#000 18%,transparent 62%)}
+.auth>*{position:relative}
+.auth-side{max-width:400px;color:#e7efec}
+.auth-side h2{font-size:40px;line-height:1.25;margin:22px 0 12px;color:#fff}
+.auth-side p{color:#a9bfb7;font-size:16px;line-height:1.7;margin:0;max-width:34ch}
+.auth-card{border-radius:14px;box-shadow:var(--sh2);padding:34px 30px 26px;border:1px solid #ffffff10}
+.auth-card h1{font-size:26px}
+.fld input{border-radius:8px;border:1px solid var(--line);background:var(--card)}
+.btn.big{border-radius:8px}
+.auth .err{background:var(--red2);color:var(--red);border-radius:8px}
+.shield{border-radius:12px;background:var(--pine);box-shadow:none}.shield.ok{background:var(--grn)}
+@media(min-width:900px){.auth .auth-logo{display:none}}
+@media(max-width:899px){.auth{flex-direction:column;gap:22px;justify-content:flex-start;padding-top:calc(36px + env(safe-area-inset-top))}
+  .auth::before{background:repeating-radial-gradient(circle at 50% 70px,transparent 0 34px,color-mix(in srgb,var(--brass2) 22%,transparent) 34px 35px);-webkit-mask-image:radial-gradient(circle at 50% 70px,#000 0,transparent 260px);mask-image:radial-gradient(circle at 50% 70px,#000 0,transparent 260px)}
+  .auth-side{text-align:center}.auth-side h2{font-size:24px;margin:12px 0 0}.auth-side p{display:none}.auth .auth-logo{display:none}}
+
+.tag{white-space:nowrap}
+.btn svg.i{width:16px;height:16px;vertical-align:-3px;margin-right:6px}
+a.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+.kpis{gap:0;background:var(--card)}
+.kpi{box-shadow:-1px 0 0 var(--bd),0 -1px 0 var(--bd)}
+.kpi.red{box-shadow:-1px 0 0 var(--bd),0 -1px 0 var(--bd),inset 0 3px 0 var(--red)}
+#side nav button{padding:8px 12px}.ng{padding:14px 12px 5px}
+td .btn{white-space:nowrap}.auth-side p{max-width:40ch}
 </style></head>
 <body>
 <div id="app"></div><div id="toast"></div>
@@ -223,7 +358,7 @@ function connectWS(){
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
 const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",integrations:"🔗",settings:"⚙️",audit:"📜",account:"👤"};
 const LS={get:k=>{try{return localStorage.getItem(k)||""}catch{return""}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
-function authShell(inner){$("#app").innerHTML=`<div class="auth">${inner}</div>`}
+function authShell(inner){$("#app").innerHTML=`<div class="auth"><div class="auth-side">${LOGO(52)}<h2>ระบบแจ้งเหตุฉุกเฉิน</h2><p>ปุ่มแจ้งเหตุสำหรับผู้ป่วยติดบ้าน ส่งเรื่องถึงเจ้าหน้าที่ รพ.สต. และ อสม. ในพื้นที่ทันที</p></div>${inner}</div>`}
 function busyBtn(b,on,label){b.disabled=on;b.innerHTML=on?`<span class="spin"></span> กำลังดำเนินการ…`:label}
 function eyeToggle(btn,input){btn.onclick=()=>{const s=input.type==="password";input.type=s?"text":"password";btn.textContent=s?"🙈":"👁";btn.setAttribute("aria-label",s?"ซ่อนรหัสผ่าน":"แสดงรหัสผ่าน");input.focus()}}
 function capsWatch(input,el){const f=e=>{if(e.getModifierState)el.hidden=!e.getModifierState("CapsLock")};input.addEventListener("keydown",f);input.addEventListener("keyup",f)}
@@ -233,7 +368,7 @@ new MutationObserver(()=>document.querySelectorAll("main table").forEach(t=>{if(
 let wsUp=false;
 const nowTH=()=>new Date().toLocaleString("th-TH",{weekday:"short",day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
 function setConn(up){wsUp=up;const c=$("#conn");if(c)c.innerHTML=`<span class="sdot ${up?"on":"off"}"></span>${up?"เชื่อมต่อสด":"ขาดการเชื่อมต่อ — กำลังลองใหม่"}`}
-setInterval(()=>{const c=$("#clk");if(c)c.textContent="🕒 "+nowTH()},20000);
+setInterval(()=>{const c=$("#clk");if(c)c.textContent=nowTH()},20000);
 const dur=s=>s==null?"-":s<60?Math.round(s)+"<small>วินาที</small>":Math.floor(s/60)+":"+String(Math.round(s%60)).padStart(2,"0")+"<small>นาที</small>";
 
 function render(){
@@ -243,7 +378,7 @@ function render(){
     if(sessionStorage.getItem("mt")){mfaLogin(sessionStorage.getItem("mt"));return}
     authShell(`<form class="auth-card" id="lf" novalidate>
       <div class="auth-logo">${LOGO(64)}</div>
-      <h1>ระบบแจ้งเหตุฉุกเฉิน</h1><p class="sub">ปุ่มแจ้งเหตุผู้ป่วยติดบ้าน · สำหรับเจ้าหน้าที่และผู้ดูแลระบบ</p>
+      <h1>เข้าสู่ระบบ</h1><p class="sub">สำหรับเจ้าหน้าที่และผู้ดูแลระบบ</p>
       <div class="err" id="lerr" role="alert" hidden></div>
       <label class="fld"><span>ชื่อผู้ใช้</span><input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
       <label class="fld"><span>รหัสผ่าน</span><div class="pwbox"><input id="p" name="password" type="password" autocomplete="current-password" required><button type="button" class="eye" id="eye" aria-label="แสดงรหัสผ่าน">👁</button></div></label>
@@ -264,12 +399,18 @@ function render(){
     return}
   const tabs=[["cases","เคสฉุกเฉิน"],["map","แผนที่"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["selftest","ทดสอบปุ่ม"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["chirpstack","ChirpStack"],["integrations","เชื่อมต่อ LINE"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
   const RN={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
-  $("#app").innerHTML=`<div class="shell" id="shell"><header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">☰</button>
-    <div class="brand">${LOGO(32)}<span>ระบบแจ้งเหตุฉุกเฉิน</span></div>
-    <button class="btn ${audioOn?"on":""}" id="snd" title="เสียงเตือนเคสใหม่">${audioOn?"🔔":"🔕"}<span class="lbl"> ${audioOn?"เสียงเปิด":"เปิดเสียงเตือน"}</span></button></header>
-   <aside id="side" aria-label="เมนู"><nav>${tabs.map(t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}"><span class="ic">${ICON[t[0]]||"•"}</span><span>${t[1]}</span></button>`).join("")}</nav>
-    <div class="me"><b>👤 ${esc(sessionStorage.getItem("nm")||"")}</b><span class="mut">${RN[role]||role}</span><div class="row"><button class="btn" id="pw">👤 บัญชี</button><button class="btn" id="out">ออก</button></div></div></aside>
-   <div class="scrim" id="scrim"></div><main><div class="ph"><h1>${ICON[page]||""} ${(tabs.find(t=>t[0]===page)||["","บัญชีของฉัน"])[1]}</h1><div class="phr"><span class="hchip" id="conn"><span class="sdot ${wsUp?"on":"off"}"></span>${wsUp?"เชื่อมต่อสด":"กำลังเชื่อมต่อ…"}</span><span class="hchip" id="clk">🕒 ${nowTH()}</span></div></div><div id="main"></div></main></div>`;
+  const NG=[["งานประจำวัน",["cases","map","selftest"]],["ข้อมูล",["patients","caregivers","devices","gateways","reports"]]],inG=k=>NG.some(g=>g[1].includes(k));
+  const groups=[...NG.map(g=>[g[0],tabs.filter(t=>g[1].includes(t[0]))]),["ระบบ",tabs.filter(t=>!inG(t[0]))]].filter(g=>g[1].length);
+  const navb=t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}"${page===t[0]?' aria-current="page"':""}>${IC[t[0]]?ico(t[0]):""}<span>${t[1]}</span></button>`;
+  const title=(tabs.find(t=>t[0]===page)||["","บัญชีของฉัน"])[1];
+  $("#app").innerHTML=`<div class="shell" id="shell">
+   <aside id="side" aria-label="เมนู"><div class="sbrand">${LOGO(34)}<div><b>ระบบแจ้งเหตุฉุกเฉิน</b><span>ปุ่มแจ้งเหตุผู้ป่วยติดบ้าน</span></div></div>
+    <nav>${groups.map(g=>`<div class="ng">${g[0]}</div>${g[1].map(navb).join("")}`).join("")}</nav>
+    <div class="me"><div class="who"><span class="av">${esc((sessionStorage.getItem("nm")||"?").trim().charAt(0).toUpperCase())}</span><div><b>${esc(sessionStorage.getItem("nm")||"")}</b><span>${RN[role]||role}</span></div></div><div class="row"><button class="btn" id="pw">บัญชี</button><button class="btn" id="out">ออกจากระบบ</button></div></div></aside>
+   <header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">${ico("menu")}</button><h1 class="pt">${title}</h1>
+    <div class="phr"><span class="hchip" id="conn"><span class="sdot ${wsUp?"on":"off"}"></span>${wsUp?"เชื่อมต่อสด":"กำลังเชื่อมต่อ…"}</span><span class="hchip tm" id="clk">${nowTH()}</span>
+    <button class="btn snd ${audioOn?"on":""}" id="snd" title="เสียงเตือนเคสใหม่">${ico(audioOn?"bell":"bellOff")}<span class="lbl">${audioOn?"เสียงเปิด":"เปิดเสียงเตือน"}</span></button></div></header>
+   <div class="scrim" id="scrim"></div><main><div id="main"></div></main></div>`;
   document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(setDirty()&&!confirm("มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ออกจากหน้านี้?"))return;setDirty=()=>false;page=b.dataset.p;render();scrollTo(0,0)});
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>{page="account";render()};$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
@@ -331,14 +472,14 @@ function lister(key,root,o={}){
 const loadCases=guard(async()=>{
   const [open,recent,st,gw]=await Promise.all([api("/cases?state=new,accepted"),api("/cases?limit=200"),api("/stats"),api("/gateways")]);
   if(page!=="cases")return;
-  const row=c=>`<tr><td>#${c.id}</td><td>${esc(c.patient?c.patient.full_name:"(ไม่ทราบผู้ป่วย) "+c.device.dev_eui)}<div class="mut">${esc(c.patient?.address||"")} ${c.patient?.phone?`📞 ${esc(c.patient.phone)}`:""}</div></td><td><span class="tag ${c.state}">${ST[c.state]}</span>${c.overdue&&c.state==="new"?' <b style="color:var(--red)">เกินเวลา!</b>':""}${c.after_hours?' <span class="tag">นอกเวลา</span>':""}</td><td>${fmt(c.created_at)}</td><td>${esc(c.accepted_by)}</td><td><button class="btn" data-id="${c.id}" data-a="view">รายละเอียด</button></td></tr>`;
+  const row=c=>`<tr><td>#${c.id}</td><td>${esc(c.patient?c.patient.full_name:"(ไม่ทราบผู้ป่วย) "+c.device.dev_eui)}<div class="mut">${esc(c.patient?.address||"")} ${c.patient?.phone?`${esc(c.patient.phone)}`:""}</div></td><td><span class="tag ${c.state}">${ST[c.state]}</span>${c.overdue&&c.state==="new"?' <b style="color:var(--red)">เกินเวลา!</b>':""}${c.after_hours?' <span class="tag">นอกเวลา</span>':""}</td><td>${fmt(c.created_at)}</td><td>${esc(c.accepted_by)}</td><td><button class="btn" data-id="${c.id}" data-a="view">รายละเอียด</button></td></tr>`;
   const gwBad=gw.filter(g=>g.offline),gwWarn=gw.filter(g=>g.status==="warning");
   const nNew=open.filter(c=>c.state==="new").length,nAcc=open.length-nNew,gwOn=gw.length-gwBad.length;
   const kpi=(ic,label,val,sub,cls)=>`<div class="kpi ${cls}"><div class="ki">${ic}</div><div><div class="kl">${label}</div><div class="kv">${val}</div>${sub?`<div class="ks">${sub}</div>`:""}</div></div>`;
   const card=c=>`<div class="ac ${c.state}"><div class="ach"><span class="tag ${c.state}">${ST[c.state]}</span><span>#${c.id} · ${ago(c.created_at)}</span></div>
     <div class="acn">${esc(c.patient?c.patient.full_name:"ไม่ทราบผู้ป่วย")}</div><div class="mut">${esc(c.patient?.address||c.device.dev_eui)}</div>
-    <div class="mut" style="font-size:13px">${c.overdue&&c.state==="new"?'<b style="color:var(--red)">⏰ เกินเวลารับเรื่อง</b> · ':""}${c.after_hours?"นอกเวลาทำการ · ":""}${c.accepted_by?"รับเรื่องโดย "+esc(c.accepted_by):"ยังไม่มีผู้รับเรื่อง"}</div>
-    <div class="row">${c.patient?.phone?`<a class="btn" href="tel:${esc(c.patient.phone)}">📞 โทร</a>`:""}<button class="btn ${c.state==="new"?"r":"p"}" data-id="${c.id}" data-a="view">เปิดเคส →</button></div></div>`;
+    <div class="mut" style="font-size:13px">${c.overdue&&c.state==="new"?'<b style="color:var(--red)">เกินเวลารับเรื่อง</b> · ':""}${c.after_hours?"นอกเวลาทำการ · ":""}${c.accepted_by?"รับเรื่องโดย "+esc(c.accepted_by):"ยังไม่มีผู้รับเรื่อง"}</div>
+    <div class="row">${c.patient?.phone?`<a class="btn" href="tel:${esc(c.patient.phone)}">${ico("phone")}โทร</a>`:""}<button class="btn ${c.state==="new"?"r":"p"}" data-id="${c.id}" data-a="view">เปิดเคส</button></div></div>`;
   $("#main").innerHTML=`${gwBad.length?`<div class="warn" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">⚠️ เกตเวย์ขาดการเชื่อมต่อ: ${gwBad.map(g=>esc(g.label||g.gateway_id)+(g.reason==="radio"?" (ตัวรับสัญญาณ LoRa เสีย)":"")).join(", ")} — ปุ่มของผู้ป่วยในระยะนี้อาจส่งไม่ถึง · <a href="#" id="gwgo">ดูรายละเอียด</a></div>`:""}${gwWarn.length&&!gwBad.length?`<div class="warn">เกตเวย์มีข้อควรตรวจ: ${gwWarn.map(g=>esc(g.label||g.gateway_id)+" — "+esc(g.critical.concat(g.warnings).join(", ")||"ตรวจสอบ")).join(" · ")}</div>`:""}
   <div class="kpis">${kpi("🚨","รอรับเรื่อง",nNew,nNew?"ต้องดำเนินการทันที":"ไม่มีเคสรอ",nNew?"red":"grn")}${kpi("🩺","กำลังดูแล",nAcc,"รับเรื่องแล้ว ยังไม่ปิด","amb")}${kpi("📈","เคส 30 วัน",st.cases_30d,`ผิดพลาด ${st.false_alarm} · นอกเวลา ${st.after_hours}`,"ind")}${kpi("⏱️","รับเรื่องเฉลี่ย",dur(st.avg_accept_s),"ตั้งแต่กดปุ่มถึงมีคนรับ","")}${kpi("📡","เกตเวย์ออนไลน์",gw.length?`${gwOn}/${gw.length}`:"0",!gw.length?"ยังไม่มีเกตเวย์":gwBad.length?"มีเกตเวย์ขาดการเชื่อมต่อ":"ทำงานปกติ",gwBad.length?"red":gw.length?"grn":"")}</div>
   <div class="card ${nNew?"alarm":""}"><h3>เคสที่ยังเปิดอยู่ (${open.length})</h3>${open.length?`<div class="acs">${open.map(card).join("")}</div>`:`<div class="empty"><div class="big">✅</div><h4>ทุกบ้านปลอดภัย</h4><p class="mut">ไม่มีเคสค้าง — ระบบจะแจ้งเตือนพร้อมเสียงทันทีเมื่อมีการกดปุ่ม${audioOn?"":" (เปิดเสียงเตือนที่มุมขวาบน)"}</p></div>`}</div>
@@ -349,7 +490,7 @@ const loadCases=guard(async()=>{
 const showCase=guard(async id=>{
   const c=await api("/cases/"+id);
   $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h2>เคส #${c.id} <span class="tag ${c.state}">${ST[c.state]}</span></h2>
-  <p><b>${esc(c.patient?.full_name||"ไม่ทราบผู้ป่วย")}</b><br>${esc(c.patient?.address||"")} ${esc(c.patient?.village||"")}<br>${c.patient?.phone?`📞 <a href="tel:${esc(c.patient.phone)}">${esc(c.patient.phone)}</a>`:""} ${c.patient?.lat!=null?`· <a target="_blank" rel="noopener" href="https://maps.google.com/?q=${c.patient.lat},${c.patient.lon}">แผนที่</a>`:""}</p>
+  <p><b>${esc(c.patient?.full_name||"ไม่ทราบผู้ป่วย")}</b><br>${esc(c.patient?.address||"")} ${esc(c.patient?.village||"")}<br>${c.patient?.phone?`<a href="tel:${esc(c.patient.phone)}">${esc(c.patient.phone)}</a>`:""} ${c.patient?.lat!=null?`· <a target="_blank" rel="noopener" href="https://maps.google.com/?q=${c.patient.lat},${c.patient.lon}">แผนที่</a>`:""}</p>
   <p class="mut">${esc(c.patient?.notes||"")}</p>
   ${c.loc?`<p>📍 <b>ตำแหน่งอุปกรณ์ขณะแจ้งเหตุ:</b> ${gmap(c.loc.lat,c.loc.lon,"เปิดแผนที่")} <span class="mut">(${ago(c.loc.at)} · ดาวเทียม ${c.loc.sats} · HDOP ${c.loc.hdop})</span>${c.loc.home_distance_m!=null?` · ห่างจากที่อยู่ที่ลงทะเบียน <b>${dist(c.loc.home_distance_m)}</b>`:""}<br><span class="mut">GPS ในอาคารคลาดเคลื่อนได้หลายสิบเมตร — ใช้เป็นแนวทางประกอบ ไม่ใช่ตำแหน่งที่แน่นอน</span></p>`:""}
   <p>อุปกรณ์ ${esc(c.device.label)} (${c.device.dev_eui}) · แบต ${c.device.battery??"-"}% · ไฟบ้าน ${c.device.mains_ok===false?"ดับ":"ปกติ"}</p>
@@ -531,6 +672,14 @@ const loadDevices=guard(async()=>{
   }))});
 
 const IC={
+phone:'<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2"/>',
+menu:'<path d="M4 7h16M4 12h16M4 17h10"/>',
+map:'<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+selftest:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+chirpstack:'<circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/>',
+integrations:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+update:'<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4"/>',
+account:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
 cases:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
 patients:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
 caregivers:'<circle cx="9" cy="8" r="3.5"/><path d="M2 21c0-3.5 3.2-5.5 7-5.5s7 2 7 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18.5 15.8c2 .7 3.5 2.2 3.5 5.2"/>',
@@ -970,7 +1119,7 @@ function mapPinUI(d){const box=$("#mpin");if(!box)return;const list=d.no_locatio
   sel.onchange=()=>{const id=+sel.value,c=$("#mapc");if(!id){c.classList.remove("picking");return}const p=list.find(x=>x.id===id);c.classList.add("picking");$("#mapnote").innerHTML=`<b>คลิกบนแผนที่ตรงบ้านของ ${esc(p.name)}</b> (ซูมเข้าให้ใกล้ก่อนเพื่อความแม่นยำ)`;
     mapObj.once("click",guard(async e=>{c.classList.remove("picking");$("#mapnote").textContent="";if(!confirm(`ปักหมุดบ้าน ${p.name} ที่ ${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)} ?`)){sel.value="";return}
       await api(`/patients/${id}/location`,{method:"PUT",body:{lat:e.latlng.lat,lon:e.latlng.lng}});toast("บันทึกตำแหน่งแล้ว");loadMap()}))}}
-const mapActions=(phone,lat,lon,cs)=>`<div class="row" style="margin-top:8px">${phone?`<a class="btn sm" href="tel:${esc(phone)}">📞 โทร</a>`:""}${cs?`<button class="btn sm ${cs.state==="new"?"r":"p"}" data-case="${cs.id}">เปิดเคส →</button>`:""}<a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}">🧭 นำทาง</a></div>`;
+const mapActions=(phone,lat,lon,cs)=>`<div class="row" style="margin-top:8px">${phone?`<a class="btn sm" href="tel:${esc(phone)}">${ico("phone")}โทร</a>`:""}${cs?`<button class="btn sm ${cs.state==="new"?"r":"p"}" data-case="${cs.id}">เปิดเคส</button>`:""}<a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}">🧭 นำทาง</a></div>`;
 function mapFit(){const p=mapPts();if(p.length>1)mapObj.fitBounds(p,{padding:[40,40],maxZoom:17});else if(p.length===1)mapObj.setView(p[0],15)}
 function mapRedraw(){
   const d=window._mapData,lg=mapObj._lg;lg.clearLayers();
