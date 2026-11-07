@@ -397,7 +397,7 @@ function render(){
       catch(x){const m=/bad credentials/.test(x.message)?"ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง":/locked/.test(x.message)?"บัญชีถูกล็อกชั่วคราว 15 นาที เพราะใส่รหัสผิดหลายครั้ง":/Failed to fetch|NetworkError/.test(x.message)?"ติดต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ต":x.message;
         err.textContent=m;err.hidden=false;busyBtn($("#go"),false,"เข้าสู่ระบบ");p.select()}};
     return}
-  const tabs=[["cases","เคสฉุกเฉิน"],["map","แผนที่"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["selftest","ทดสอบปุ่ม"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["chirpstack","ChirpStack"],["integrations","เชื่อมต่อ LINE"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  const tabs=[["cases","เคสฉุกเฉิน"],["map","แผนที่"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["selftest","ทดสอบปุ่ม"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["chirpstack","ChirpStack"],["integrations","เชื่อมต่อ LINE/AI"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
   const RN={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
   const NG=[["งานประจำวัน",["cases","map","selftest"]],["ข้อมูล",["patients","caregivers","devices","gateways","reports"]]],inG=k=>NG.some(g=>g[1].includes(k));
   const groups=[...NG.map(g=>[g[0],tabs.filter(t=>g[1].includes(t[0]))]),["ระบบ",tabs.filter(t=>!inG(t[0]))]].filter(g=>g[1].length);
@@ -1176,7 +1176,7 @@ const RTH={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน�
 /* ---- integrations (admin): LINE credentials. Values are never shown back, only the last 4 characters. ---- */
 const loadIntegrations=guard(async()=>{
   if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
-  const [l,cs]=await Promise.all([api("/integrations/line"),api("/caregivers")]);if(page!=="integrations")return;
+  const [l,cs,ai]=await Promise.all([api("/integrations/line"),api("/caregivers"),api("/integrations/ai")]);if(page!=="integrations")return;
   const src={dashboard:"ตั้งจากแดชบอร์ด",env:"ตั้งจากไฟล์ .env บนเซิร์ฟเวอร์",none:"ยังไม่ได้ตั้งค่า"};
   const st=(set,hint,so)=>set?`<span class="ok">● ตั้งแล้ว</span> <code>${esc(hint)}</code> <span class="mut">(${src[so]})</span>`:'<span class="bad">● ยังไม่ได้ตั้งค่า</span>';
   $("#main").innerHTML=`<div class="card"><h3>LINE Messaging API</h3>
@@ -1194,9 +1194,22 @@ const loadIntegrations=guard(async()=>{
     <li>ปิด <b>Auto-reply messages</b> และ <b>Greeting messages</b> (ไม่เช่นนั้นบอตจะตอบทับ)</li></ol>
     <div class="row">Webhook URL: <code id="lwh" style="user-select:all">${esc(l.webhook_url)}</code><button class="btn" id="lcp">คัดลอก</button></div>
     ${l.webhook_url.startsWith("https://")?"":'<div class="warn">LINE ต้องการ URL แบบ https — ตั้งค่า SOS_PUBLIC_URL ของเซิร์ฟเวอร์ให้เป็นโดเมนจริงก่อน</div>'}</div>
+  <div class="card"><h3>AI — Google Gemini (ใช้ฟรีได้)</h3>
+    <div class="row">API key: ${ai.key_set?`<span class="ok">● ตั้งแล้ว</span> <code>${esc(ai.key_hint)}</code>`:'<span class="bad">● ยังไม่ได้ตั้งค่า</span>'}</div>
+    <div class="row"><input id="ak" type="password" size="50" placeholder="วาง Gemini API key ใหม่ที่นี่ (ขึ้นต้นด้วย AIza…)" autocomplete="off"></div>
+    <div class="row">โมเดล <input id="am" list="aml" value="${esc(ai.model)}" size="28"><datalist id="aml"></datalist><button class="btn" id="aml-b">ดูรายชื่อโมเดล</button>
+      <label><input type="checkbox" id="aen" ${ai.enabled?"checked":""}> เปิดใช้ AI</label></div>
+    <div class="row"><button class="btn p" id="asv">บันทึก</button><button class="btn" id="ats">ทดสอบ AI</button>${ai.key_set?'<button class="btn r" id="arm">ลบ API key</button>':""}<span id="ares" class="mut"></span></div>
+    <p class="hint">ขอคีย์ฟรีที่ <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> (ล็อกอินบัญชี Google → Create API key) · ตอนนี้ AI ใช้ในหน้า <b>รายงาน</b> ปุ่ม “AI สรุปเป็นข้อความ”</p>
+    <div class="warn">⚠️ PDPA: แพ็กเกจฟรีของ Google อาจนำข้อความที่ส่งไปปรับปรุงบริการของตน ระบบนี้จึงส่งเฉพาะ <b>ตัวเลขรวม</b> เท่านั้น (จำนวนเคส เวลารับเรื่อง ชั่วโมง/วันที่เกิดเหตุ สถานะอุปกรณ์) — ไม่ส่งชื่อ ที่อยู่ เบอร์โทร ชื่อหมู่บ้าน หรือรหัสเครื่อง · ตรวจทานข้อความของ AI ก่อนใช้ทุกครั้ง</div></div>
   <div class="card"><h3>ส่งข้อความทดสอบ</h3><p class="mut">ส่งข้อความสั้น ๆ ไปหา อสม. ที่ผูก LINE แล้ว เพื่อเช็กว่าแจ้งเตือนถึงจริง</p>
     <div class="row"><select id="ltc">${cs.filter(c=>c.line_bound).map(c=>`<option value="${c.id}">${esc(c.full_name)}</option>`).join("")||'<option value="">(ยังไม่มีใครผูก LINE)</option>'}</select><button class="btn" id="ltp" ${cs.some(c=>c.line_bound)?"":"disabled"}>ส่งทดสอบ</button></div></div>`;
   const val=id=>$("#"+id).value.trim();
+  $("#asv").onclick=guard(async()=>{const b={enabled:$("#aen").checked};if(val("am"))b.model=val("am");if(val("ak"))b.key=val("ak");await api("/integrations/ai",{method:"PUT",body:b});toast("บันทึกแล้ว");loadIntegrations()});
+  $("#ats").onclick=guard(async()=>{$("#ares").textContent="กำลังทดสอบ…";const r=await api("/integrations/ai/test",{method:"POST"});
+    $("#ares").innerHTML=r.ok?`<span class="ok">✔ ${esc(r.detail)} (${esc(r.model)}): “${esc(r.reply)}”</span>`:`<span class="bad">✖ ${esc(r.detail)}</span>`});
+  $("#aml-b").onclick=guard(async()=>{const r=await api("/integrations/ai/models");$("#aml").innerHTML=r.models.map(m=>`<option value="${esc(m)}">`).join("");toast(`พบ ${r.models.length} โมเดล — คลิกช่องโมเดลเพื่อเลือก`);$("#am").value="";$("#am").focus()});
+  if($("#arm"))$("#arm").onclick=guard(async()=>{if(!confirm("ลบ Gemini API key?"))return;await api("/integrations/ai",{method:"PUT",body:{key:""}});toast("ลบแล้ว");loadIntegrations()});
   $("#lsv").onclick=guard(async()=>{const b={};if(val("lt"))b.token=val("lt");if(val("ls"))b.secret=val("ls");if(!Object.keys(b).length){toast("ยังไม่ได้กรอกค่าใหม่");return}
     await api("/integrations/line",{method:"PUT",body:b});toast("บันทึกแล้ว — มีผลทันที");loadIntegrations()});
   $("#lts").onclick=guard(async()=>{$("#lres").textContent="กำลังตรวจ…";const r=await api("/integrations/line/test",{method:"POST"});
@@ -1290,7 +1303,7 @@ const loadReports=guard(async()=>{
   const c=r.cases,rs=r.response,mx=Math.max(1,...r.by_hour);
   const tbl=(h,rows)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join("")}</tr>${rows.map(x=>`<tr>${x.map(y=>`<td>${y}</td>`).join("")}</tr>`).join("")}</table>`:'<p class="mut">ไม่มีข้อมูล</p>';
   $("#main").innerHTML=`<div class="card"><div class="row"><b>รายงานเดือน</b><select id="rm">${MTH.map((n,i)=>`<option value="${i+1}" ${rq.m===i+1?"selected":""}>${n}</option>`).join("")}</select><select id="ry">${ys.map(y=>`<option value="${y}" ${rq.y===y?"selected":""}>${y+543}</option>`).join("")}</select>
-   <button class="btn p" id="rpdf">📄 รายงาน PDF (มีหัวหน่วยงาน + ลงนาม)</button><button class="btn" id="rprint">🖨 พิมพ์หน้านี้</button>${canEdit()?'<button class="btn" id="rcsv">⬇ ดาวน์โหลด CSV (เปิดใน Excel ได้)</button>':""}</div></div>
+   <button class="btn" id="rai" title="AI สรุปจากตัวเลขรวม (ไม่ส่งชื่อ/ที่อยู่ผู้ป่วย)">✨ AI สรุปเป็นข้อความ</button><button class="btn p" id="rpdf">📄 รายงาน PDF (มีหัวหน่วยงาน + ลงนาม)</button><button class="btn" id="rprint">🖨 พิมพ์หน้านี้</button>${canEdit()?'<button class="btn" id="rcsv">⬇ ดาวน์โหลด CSV (เปิดใน Excel ได้)</button>':""}</div></div>
   <div id="rpt"><div class="card"><h2 style="margin-top:0">รายงานสรุปเหตุฉุกเฉิน ${MTH[rq.m-1]} ${rq.y+543}</h2><p class="mut">ช่วง ${esc(r.period.from_be)} – ${esc(r.period.to_be)} (เวลาประเทศไทย)</p>
    <div class="row"><span class="tag">เคสทั้งหมด <b>${c.total}</b></span><span class="tag">ช่วยเหลือสำเร็จ ${c.resolved}</span><span class="tag">เหตุผิดพลาด ${c.false_alarm}</span><span class="tag">ผู้ป่วยยกเลิกเอง ${c.cancelled_by_device}</span><span class="tag">นอกเวลาทำการ ${c.after_hours}</span><span class="tag">เกินเวลา ${c.overdue}</span><span class="tag">ต้องแจ้งต่อคนถัดไป ${c.escalated}</span><span class="tag">ยังเปิดอยู่ ${c.still_open}</span><span class="tag">ทดสอบ ${c.tests}</span></div></div>
   <div class="card"><h3>ความเร็วในการรับเรื่อง</h3>${rs.accepted?`<div class="row"><span class="tag">รับเรื่อง ${rs.accepted} เคส</span><span class="tag">เฉลี่ย ${sec(rs.accept_avg_s)}</span><span class="tag">มัธยฐาน ${sec(rs.accept_median_s)}</span><span class="tag">P90 ${sec(rs.accept_p90_s)}</span><span class="tag">ภายในเป้า ${rs.target_s} วินาที: <b>${rs.within_target_pct}%</b></span><span class="tag">ปิดเคสเฉลี่ย ${rs.close_avg_min??"-"} นาที</span></div>`:'<p class="mut">ยังไม่มีเคสที่รับเรื่องในช่วงนี้</p>'}</div>
@@ -1301,6 +1314,11 @@ const loadReports=guard(async()=>{
   <div class="card"><h3>ระบบ</h3><div class="row"><span class="tag">LINE ส่งสำเร็จ ${r.line.sent}</span><span class="tag">LINE ล้มเหลว ${r.line.failed}</span><span class="tag">อุปกรณ์ใช้งาน ${r.devices.active}</span><span class="tag">ออฟไลน์ตอนนี้ ${r.devices.offline_now}</span><span class="tag">แบตต่ำ ${r.devices.low_battery}</span><span class="tag">ไฟบ้านดับ ${r.devices.mains_lost}</span></div>
    <h4>เกตเวย์ขาดการเชื่อมต่อในช่วงนี้</h4>${r.gateways.length?tbl(["เกตเวย์","จำนวนครั้ง","รวม (นาที)",""],r.gateways.map(g=>[esc(g.label||g.gateway_id),g.outages,g.downtime_min,g.ongoing?"<b class='bad'>ยังขาดอยู่</b>":""])):'<p class="ok">ไม่มี</p>'}</div></div>`;
   $("#rm").onchange=()=>{rq.m=+$("#rm").value;loadReports()};$("#ry").onchange=()=>{rq.y=+$("#ry").value;loadReports()};
+  $("#rai").onclick=guard(async()=>{const b=$("#rai");b.disabled=true;b.textContent="AI กำลังเขียน…";
+    try{const r=await api("/reports/ai-summary?"+q,{method:"POST"});let o=$("#raiout");if(!o){o=document.createElement("div");o.id="raiout";o.className="card";$("#rpt").parentNode.insertBefore(o,$("#rpt"))}
+      o.innerHTML=`<h3>✨ สรุปโดย AI</h3><p style="white-space:pre-wrap">${esc(r.text)}</p><p class="hint">${esc(r.note)} · โมเดล ${esc(r.model)}</p><div class="row"><button class="btn" id="raicp">คัดลอกข้อความ</button></div>`;
+      $("#raicp").onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(r.text).then(()=>toast("คัดลอกแล้ว"))}
+    finally{b.disabled=false;b.textContent="✨ AI สรุปเป็นข้อความ"}});
   $("#rpdf").onclick=guard(async()=>{busyBtn($("#rpdf"),true);try{const x=await fetch("/api/reports/monthly.pdf?"+q,{headers:{authorization:"Bearer "+token}});if(!x.ok)throw new Error("สร้าง PDF ไม่สำเร็จ ("+x.status+")");
     const a=document.createElement("a");a.href=URL.createObjectURL(await x.blob());a.download=`sos-report-${rq.y+543}-${String(rq.m).padStart(2,"0")}.pdf`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
     finally{busyBtn($("#rpdf"),false,"📄 รายงาน PDF (มีหัวหน่วยงาน + ลงนาม)")}});

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .config import env
 from .models import Secret
 
-_K = {"token": "line_channel_token", "secret": "line_channel_secret"}
+_K = {"token": "line_channel_token", "secret": "line_channel_secret", "gemini": "gemini_api_key"}
 _cache: dict[str, str] = {}
 
 
@@ -55,3 +55,20 @@ def save(db: Session, name: str, value: str | None) -> None:
 
 def hint(v: str) -> str:
     return ("…" + v[-4:]) if len(v) >= 8 else ("•" * len(v))
+
+
+def gemini_key() -> str:
+    return _cache.get("gemini", "")
+
+
+def flag(db: Session, key: str, default: str = "") -> str:
+    """Plain (non-secret) integration flags kept in sos_secrets next to the keys, e.g. the Gemini model name."""
+    row = db.get(Secret, key)
+    return row.value if row else default
+
+
+def set_flag(db: Session, key: str, value: str) -> None:
+    row = db.get(Secret, key)
+    if row: row.value = value
+    else: db.add(Secret(key=key, value=value))
+    db.commit()
