@@ -195,14 +195,22 @@ const loadAudit=guard(async()=>{
 
 // ---------------------------------------------------------------- USB provisioning (Web Serial)
 class SerialLink{
-  constructor(){this.port=null;this.lines=[];this.waiters=[];this.buf="";this.writer=null;this.reader=null;this.closed=false}
+  constructor(){this.port=null;this.lines=[];this.waiters=[];this.buf="";this.writer=null;this.reader=null;this.closed=false;this.stopping=false}
   static supported(){return "serial" in navigator}
   async open(){
     this.port=await navigator.serial.requestPort();await this.port.open({baudRate:115200});
-    this.writer=this.port.writable.getWriter();this.reader=this.port.readable.getReader();this._pump()}
+    this.writer=this.port.writable.getWriter();this._pump()}
+  // Boards with a separate USB-UART chip (Heltec V2 / CP2102) produce a BREAK/framing error when the ESP32 restarts.
+  // Web Serial reports that as a non-fatal read error and hands out a fresh readable stream — so keep reading
+  // until the port is really gone (readable === null) or close() was called.
   async _pump(){const dec=new TextDecoder();
-    try{for(;;){const {value,done}=await this.reader.read();if(done)break;this.buf+=dec.decode(value,{stream:true});
-      let i;while((i=this.buf.search(/\r?\n/))>=0){const l=this.buf.slice(0,i).trim();this.buf=this.buf.slice(i).replace(/^\r?\n/,"");if(l){this.lines.push(l);this._wake()}}}}catch{}
+    while(!this.stopping&&this.port&&this.port.readable){
+      this.reader=this.port.readable.getReader();let ended=false;
+      try{for(;;){const {value,done}=await this.reader.read();if(done){ended=true;break}this.buf+=dec.decode(value,{stream:true});
+        let i;while((i=this.buf.search(/\r?\n/))>=0){const l=this.buf.slice(0,i).trim();this.buf=this.buf.slice(i).replace(/^\r?\n/,"");if(l){this.lines.push(l);this._wake()}}}}catch{this.buf=""}
+      finally{try{this.reader.releaseLock()}catch{}}
+      if(ended||this.stopping)break;
+      await new Promise(r=>setTimeout(r,100))}
     this.closed=true;this._wake()}
   _wake(){this.waiters.splice(0).forEach(f=>f())}
   async send(cmd){await this.writer.write(new TextEncoder().encode(cmd+"\n"))}
@@ -213,7 +221,7 @@ class SerialLink{
       const left=end-Date.now();if(left<=0)throw new Error("ไม่มีคำตอบ "+prefix+" จากเครื่อง");if(this.closed)throw new Error("ขาดการเชื่อมต่อ USB");
       await new Promise(r=>{const t=setTimeout(r,left);this.waiters.push(()=>{clearTimeout(t);r()})})}}
   async ping(){for(let i=0;i<5;i++){this.flush();await this.send("PING");try{return await this.expect("PONG",1500)}catch{}}throw new Error("เครื่องไม่ตอบ PING — ตรวจสาย USB (ต้องเป็นสายข้อมูล) และว่าอัปโหลดเฟิร์มแวร์แล้ว")}
-  async close(){try{await this.reader.cancel()}catch{}try{this.writer.releaseLock()}catch{}try{await this.port.close()}catch{}}
+  async close(){this.stopping=true;try{await this.reader.cancel()}catch{}try{this.writer.releaseLock()}catch{}try{await this.port.close()}catch{}}
 }
 let link=null;
 const loadInstall=guard(async()=>{
@@ -239,7 +247,9 @@ const loadInstall=guard(async()=>{
     try{
       link=new SerialLink();await link.open();mark("usb","wait");await new Promise(r=>setTimeout(r,1500));await link.ping();mark("usb","ok","ตอบ PONG");
       cur="reg";mark("reg","wait");reg=await api("/provision/start",{method:"POST",body:{label}});mark("reg","ok",reg.dev_eui);
-      cur="flash";mark("flash","wait");link.flush();await link.send(`PROV ${reg.dev_eui} ${reg.app_key} ${reg.join_eui}`);await link.expect("OK",6000);reg.app_key=null;mark("flash","ok","เครื่องกำลังรีสตาร์ท");
+      cur="flash";mark("flash","wait");link.flush();await link.send(`PROV ${reg.dev_eui} ${reg.app_key} ${reg.join_eui}`);let okLine=null;try{okLine=await link.expect("OK",6000)}catch(e){if(/^เครื่องตอบ/.test(e.message))throw e}reg.app_key=null;
+      if(link.closed)throw new Error("ขาดการเชื่อมต่อ USB (ถอดสายหรือพอร์ตหาย)");
+      mark("flash","ok",okLine?"เครื่องกำลังรีสตาร์ท":"ไม่เห็นคำตอบ OK — จะยืนยันด้วยการอ่านค่ากลับ");
       cur="verify";mark("verify","wait");await new Promise(r=>setTimeout(r,3000));let info=null;
       for(let i=0;i<6&&!info;i++){link.flush();await link.send("INFO");try{info=await link.expect("INFO",2500)}catch{}}
       if(!info)throw new Error("อ่านค่ากลับไม่ได้");
