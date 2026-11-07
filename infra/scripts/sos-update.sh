@@ -16,6 +16,8 @@ trap 'rm -rf "$SOS_UPD_COPY"' EXIT
 
 [ -f /etc/default/sos-update ] && . /etc/default/sos-update
 REPO="${SOS_REPO_DIR:?}"; BRANCH="${SOS_BRANCH:-main}"
+# systemd runs us without a usable $HOME, so the global "safe.directory" from setup-updater.sh is not seen → "dubious ownership". Pass it explicitly.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO"
 INFRA="$REPO/infra"; UPD="$INFRA/update"; STATUS="$UPD/status.json"; LOG="$UPD/update.log"; REQ="$UPD/request.json"
 HEALTH_TIMEOUT="${SOS_HEALTH_TIMEOUT:-180}"
 mkdir -p "$UPD"

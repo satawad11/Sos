@@ -52,6 +52,7 @@ cat /opt/sos/infra/update/status.json
 |---|---|
 | หน้าอัปเดตขึ้น "ยังไม่ได้ติดตั้งตัวอัปเดต" | ยังไม่ได้รัน `setup-updater.sh` หรือ backend ยังไม่ได้ build ใหม่ (`docker compose up -d --build backend`) |
 | "เขียนคำขอไม่ได้" | `sudo chown 10001:10001 /opt/sos/infra/update` |
+| log ขึ้น `detected dubious ownership in repository at '/opt/sos'` | `sudo git config --system --add safe.directory /opt/sos` แล้วกด "ตรวจหาอัปเดต" อีกครั้ง (เวอร์ชันใหม่ของสคริปต์แก้ให้อัตโนมัติ) |
 | "ติดต่อ GitHub ไม่ได้" | อินเทอร์เน็ต/DNS ของเครื่อง หรือ Deploy key ถูกลบ: `sudo git -C /opt/sos fetch` ดู error |
 | "มีไฟล์ในเซิร์ฟเวอร์ถูกแก้เอง" | ดู `sudo git -C /opt/sos status` · ถ้าต้องการใช้ของ GitHub: `sudo git -C /opt/sos checkout -- <ไฟล์>` · ถ้าต้องการเก็บ: นำการแก้ไปแก้ใน GitHub แทน |
 | "อัปเดตและย้อนกลับไม่สำเร็จ" | ระบบอาจหยุด: `cd /opt/sos/infra && sudo docker compose ps` / `logs backend` · กู้ข้อมูลจาก `/var/backups/sos` ได้ (`pg_restore`) · Proxmox backup ของ CT ก็ใช้ได้ |

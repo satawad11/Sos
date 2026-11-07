@@ -37,7 +37,7 @@ if [[ "$URL" == git@* || "$URL" == ssh://* ]]; then
 fi
 
 say "3/5 git checkout of $BRANCH in $REPO"
-git config --global --get-all safe.directory | grep -qx "$REPO" || git config --global --add safe.directory "$REPO"
+git config --system --get-all safe.directory | grep -qx "$REPO" || git config --system --add safe.directory "$REPO"   # --system: systemd has no $HOME
 cd "$REPO"
 if [ ! -d .git ]; then
   git init -q -b "$BRANCH"
