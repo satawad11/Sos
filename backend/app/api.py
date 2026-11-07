@@ -460,6 +460,58 @@ def gateways(db: Session = Depends(get_db), u=Depends(current_user)):
     return [gw_dict(g, now, off, n_dev, mv, u.role) for g in db.query(Gateway).order_by(Gateway.id).all()]
 
 
+def _quality(rssi, snr):
+    """Rough LoRa link grade from the last uplink (SF9-ish): good / fair / weak / None when unknown."""
+    if rssi is None: return None
+    if rssi >= -105 and (snr is None or snr >= 0): return "good"
+    if rssi >= -115 and (snr is None or snr >= -7): return "fair"
+    return "weak"
+
+
+@router.get("/map")
+def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
+    """Gateways, devices and which gateway heard each device last — for the dashboard map.
+    Patient/home coordinates and GPS fixes are never sent to the read-only role (PDPA); the connectivity table still is."""
+    now = utcnow(); viewer = u.role == "viewer"
+    goff = settings_store.get(db, "offline")["gateway_offline_min"]
+    doff = settings_store.get(db, "offline")["device_offline_min"]
+    gcfg = settings_store.get(db, "geo")
+    n_dev: dict[str, int] = {}
+    devs = db.query(Device).filter(Device.lifecycle != "retired").order_by(Device.id).all()
+    for d in devs:
+        if d.lifecycle == "active" and d.last_gateway: n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
+    gws, gpos = [], {}
+    for g in db.query(Gateway).filter(Gateway.enabled.isnot(False)).order_by(Gateway.id).all():
+        x = gw_dict(g, now, goff, n_dev, gcfg["gateway_move_m"], u.role)
+        loc = x["loc"]; pos = loc["registered"] or (loc["gps"] if loc["gps"] and loc["gps"]["fresh"] else None)
+        src = "registered" if loc["registered"] else ("gps" if pos else None)
+        if pos: gpos[g.gateway_id] = (pos["lat"], pos["lon"])
+        gws.append({"gateway_id": g.gateway_id, "label": g.label, "status": x["status"], "offline": x["offline"], "reason": x["reason"],
+                    "last_seen": x["last_seen"], "devices": x["devices"], "lat": pos["lat"] if pos else None,
+                    "lon": pos["lon"] if pos else None, "pos_src": src})
+    dvs, links = [], []
+    for d in devs:
+        ls = aware(d.last_seen)
+        offline = d.lifecycle == "active" and (ls is None or (now - ls).total_seconds() > doff * 60)
+        lat = lon = src = None; home = None
+        if not viewer:
+            fresh = d.loc_lat is not None and d.loc_at is not None and (now - aware(d.loc_at)).total_seconds() <= gcfg["gps_fresh_min"] * 60
+            if fresh: lat, lon, src = d.loc_lat, d.loc_lon, "gps"
+            elif d.patient and d.patient.lat is not None and d.patient.lon is not None: lat, lon, src = d.patient.lat, d.patient.lon, "home"
+            elif d.loc_lat is not None: lat, lon, src = d.loc_lat, d.loc_lon, "gps_old"
+        q = _quality(d.last_rssi, d.last_snr)
+        dvs.append({"id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,
+                    "patient": d.patient.full_name if d.patient else None, "battery": d.battery, "mains_ok": d.mains_ok,
+                    "offline": offline, "last_seen": iso(d.last_seen), "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
+                    "gateway_id": d.last_gateway or None, "lat": lat, "lon": lon, "pos_src": src})
+        if d.last_gateway:
+            gp = gpos.get(d.last_gateway)
+            dist = round(geo.distance_m(lat, lon, gp[0], gp[1])) if lat is not None and gp else None
+            links.append({"device_id": d.id, "gateway_id": d.last_gateway, "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
+                          "offline": offline, "distance_m": dist})
+    return {"gateways": gws, "devices": dvs, "links": links, "restricted": viewer}
+
+
 class GatewayIn(BaseModel):
     gateway_id: str
     label: str = Field(default="", max_length=64)

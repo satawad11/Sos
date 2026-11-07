@@ -102,6 +102,11 @@ main>.card:first-child{margin-top:0}main{max-width:1200px;width:100%}
 .hol{display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--bd)}.hol:first-of-type{border-top:0}.hol span:nth-child(2){flex:1}
 @media(max-width:640px){.sf{grid-template-columns:1fr}.pills{flex-wrap:nowrap;width:100%}.kpi b{font-size:22px}}
 .warn.bad2{background:var(--red2);color:var(--red)}
+.mk{box-sizing:border-box}.mk-gw{width:34px;height:34px;border-radius:10px;background:#fff;border:2px solid #16a34a;display:grid;place-items:center;font-size:18px;box-shadow:0 2px 8px #0004}.mk-gw.off{border-color:#dc2626;background:#fee2e2}
+.mk-dv{width:22px;height:22px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px #0003,0 2px 6px #0004}.mk-dv.off{box-shadow:0 0 0 3px #dc2626}
+.leaflet-tooltip.mk-tip{background:#fff;border:0;color:#111;font-weight:600;box-shadow:0 1px 4px #0003;padding:1px 6px;font-size:12px}.mk-tip:before{display:none}
+.leaflet-popup-content{color:#16202e;font:14px/1.5 inherit}.leaflet-popup-content .mut{color:#64748b}
+@media(prefers-color-scheme:dark){#mapc .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9)}}
 </style></head>
 <body>
 <div id="app"></div><div id="toast"></div>
@@ -126,7 +131,7 @@ function connectWS(){
   ws.onclose=()=>{if(token)setTimeout(connectWS,3000)}}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
-const ICON={cases:"🚨",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",users:"👥",update:"⬆️",settings:"⚙️",audit:"📜"};
+const ICON={cases:"🚨",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",gateways:"📡",map:"🗺️",reports:"📊",privacy:"🔒",install:"🔌",users:"👥",update:"⬆️",settings:"⚙️",audit:"📜"};
 const LS={get:k=>{try{return localStorage.getItem(k)||""}catch{return""}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 function authShell(inner){$("#app").innerHTML=`<div class="auth">${inner}</div>`}
 function busyBtn(b,on,label){b.disabled=on;b.innerHTML=on?`<span class="spin"></span> กำลังดำเนินการ…`:label}
@@ -157,7 +162,7 @@ function render(){
       catch(x){const m=/bad credentials/.test(x.message)?"ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง":/locked/.test(x.message)?"บัญชีถูกล็อกชั่วคราว 15 นาที เพราะใส่รหัสผิดหลายครั้ง":/Failed to fetch|NetworkError/.test(x.message)?"ติดต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ต":x.message;
         err.textContent=m;err.hidden=false;busyBtn($("#go"),false,"เข้าสู่ระบบ");p.select()}};
     return}
-  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["map","แผนที่"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
   const RN={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
   $("#app").innerHTML=`<div class="shell" id="shell"><header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">☰</button>
     <div class="brand">${LOGO(32)}<span>ระบบแจ้งเหตุฉุกเฉิน</span></div>
@@ -168,7 +173,7 @@ function render(){
   document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(setDirty()&&!confirm("มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ออกจากหน้านี้?"))return;setDirty=()=>false;page=b.dataset.p;render();scrollTo(0,0)});
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>pwScreen(false);$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
-  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,update:loadUpdate,settings:loadSettings,audit:loadAudit})[page])();
+  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,map:loadMap,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,update:loadUpdate,settings:loadSettings,audit:loadAudit})[page])();
   if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
   if(!ws||ws.readyState>1)connectWS()}
 
@@ -636,4 +641,65 @@ const loadReports=guard(async()=>{
   $("#rprint").onclick=()=>{document.body.classList.add("rpt");window.print();setTimeout(()=>document.body.classList.remove("rpt"),500)};
   if($("#rcsv"))$("#rcsv").onclick=guard(async()=>{const x=await fetch("/api/reports/cases.csv?"+q,{headers:{authorization:"Bearer "+token}});if(!x.ok)throw new Error("ดาวน์โหลดไม่สำเร็จ ("+x.status+")");dl(await x.blob(),`sos-cases-${rq.y+543}-${String(rq.m).padStart(2,"0")}.csv`)})});
 
+
+/* ---- map: devices, gateways and the links between them (Leaflet, vendored in /vendor/leaflet) ---- */
+let _lf=null;
+function loadLeaflet(){
+  if(window.L)return Promise.resolve();
+  if(_lf)return _lf;
+  _lf=new Promise((ok,no)=>{const c=document.createElement("link");c.rel="stylesheet";c.href="/vendor/leaflet/leaflet.css";document.head.appendChild(c);
+    const s=document.createElement("script");s.src="/vendor/leaflet/leaflet.js";s.onload=ok;s.onerror=()=>{_lf=null;no(new Error("โหลดไลบรารีแผนที่ไม่สำเร็จ"))};document.head.appendChild(s)});
+  return _lf}
+const QCOL={good:"#16a34a",fair:"#d97706",weak:"#dc2626"},QTH={good:"ดี",fair:"พอใช้",weak:"อ่อน"};
+const PSRC={gps:"GPS (ล่าสุด)",home:"ที่อยู่ที่ลงทะเบียน",gps_old:"GPS (เก่ากว่ากำหนด)"};
+const kmTxt=m=>m==null?"-":m>=1000?(m/1000).toFixed(2)+" กม.":m+" ม.";
+const mapOpt={links:true,names:true,onlyOn:false};let mapObj=null,mapFitted=false;
+const loadMap=guard(async()=>{
+  const [d]=await Promise.all([api("/map"),loadLeaflet()]);
+  if(page!=="map")return;
+  const gwById=Object.fromEntries(d.gateways.map(g=>[g.gateway_id,g])),dvById=Object.fromEntries(d.devices.map(x=>[x.id,x]));
+  const noPosDev=d.devices.filter(x=>x.lat==null&&x.lifecycle!=="ready"),noPosGw=d.gateways.filter(g=>g.lat==null);
+  if(!$("#mapc")){mapFitted=false;
+    $("#main").innerHTML=`${d.restricted?'<div class="warn">บัญชี "ดูอย่างเดียว" ไม่แสดงตำแหน่งบ้านผู้ป่วย/อุปกรณ์ตามนโยบาย PDPA — เห็นเฉพาะเกตเวย์และตารางการเชื่อมต่อ</div>':""}
+    <div class="card"><div class="row"><label class="chip"><input type="checkbox" id="mo1" ${mapOpt.links?"checked":""}><span>เส้นเชื่อมต่อ</span></label><label class="chip"><input type="checkbox" id="mo2" ${mapOpt.names?"checked":""}><span>ชื่อบนแผนที่</span></label><label class="chip"><input type="checkbox" id="mo3" ${mapOpt.onlyOn?"checked":""}><span>เฉพาะที่ออนไลน์</span></label><button class="btn" id="mfit">จัดให้พอดี</button><span class="mut" id="mupd"></span></div>
+    <div class="row mut" style="font-size:13px"><b>เส้น:</b> <span style="color:${QCOL.good}">━ สัญญาณดี</span> <span style="color:${QCOL.fair}">━ พอใช้</span> <span style="color:${QCOL.weak}">━ อ่อน</span> <span>┅ อุปกรณ์ออฟไลน์/ไม่ทราบสัญญาณ</span> · <b>จุด:</b> 📡 เกตเวย์ · ● อุปกรณ์ (ขอบแดง = ออฟไลน์)</div>
+    <div id="mapc" style="height:62vh;min-height:380px;border-radius:12px;margin-top:8px;overflow:hidden;background:var(--bg)"></div><div class="hint" id="mapnote"></div></div><div id="maptb"></div>`;
+    if(mapObj){try{mapObj.remove()}catch{}}
+    mapObj=L.map("mapc",{zoomControl:true,attributionControl:true}).setView([13.9,100.6],11);
+    let bad=0;const tl=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"});
+    tl.on("tileerror",()=>{if(++bad===3)$("#mapnote").textContent="โหลดแผนที่พื้นหลังไม่ได้ (เครื่องนี้อาจไม่มีอินเทอร์เน็ต) — ยังแสดงตำแหน่งและเส้นเชื่อมต่อได้"});tl.addTo(mapObj);
+    mapObj._lg=L.layerGroup().addTo(mapObj);
+    ["mo1","mo2","mo3"].forEach((id,i)=>$("#"+id).onchange=e=>{mapOpt[["links","names","onlyOn"][i]]=e.target.checked;mapRedraw()});
+    $("#mfit").onclick=()=>mapFit()}
+  window._mapData=d;mapRedraw();
+  $("#mupd").textContent="อัปเดต "+new Date().toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"});
+  const row=x=>{const g=gwById[x.gateway_id],lk=d.links.find(l=>l.device_id===x.id);
+    return `<tr><td>${esc(x.label||x.dev_eui)}</td><td>${d.restricted?"":esc(x.patient||"-")}</td><td>${g?esc(g.label||g.gateway_id):'<span class="mut">-</span>'}</td><td>${lk&&lk.quality?`<span style="color:${QCOL[lk.quality]}">● ${QTH[lk.quality]}</span>`:"-"}</td><td>${x.rssi??"-"} / ${x.snr??"-"}</td><td>${kmTxt(lk?.distance_m)}</td><td>${x.lat!=null?PSRC[x.pos_src]:'<span class="mut">ไม่มีพิกัด</span>'}</td><td>${x.offline?'<span class="bad">ออฟไลน์</span>':'<span class="ok">ปกติ</span>'}</td></tr>`};
+  $("#maptb").innerHTML=`<div class="card"><h3>การเชื่อมต่ออุปกรณ์ → เกตเวย์</h3>${d.devices.length?`<table><tr><th>อุปกรณ์</th><th>ผู้ป่วย</th><th>เกตเวย์ที่ได้ยินล่าสุด</th><th>สัญญาณ</th><th>RSSI/SNR</th><th>ระยะ</th><th>ที่มาของพิกัด</th><th>สถานะ</th></tr>${d.devices.map(row).join("")}</table>`:'<p class="mut">ยังไม่มีอุปกรณ์</p>'}
+   ${noPosGw.length?`<p class="warn" style="margin-top:10px">เกตเวย์ที่ยังไม่มีตำแหน่ง (ไม่แสดงบนแผนที่): ${noPosGw.map(g=>esc(g.label||g.gateway_id)).join(", ")} — ตั้งพิกัดที่เมนูเกตเวย์</p>`:""}
+   ${!d.restricted&&noPosDev.length?`<p class="warn" style="margin-top:10px">อุปกรณ์ที่ไม่มีพิกัด (ไม่แสดงบนแผนที่): ${noPosDev.map(x=>esc(x.label||x.dev_eui)).join(", ")} — ใส่ละติจูด/ลองจิจูดที่หน้าผู้ป่วย หรือใช้ชุด GPS</p>`:""}
+   <p class="mut" style="font-size:13px">สีของเส้นคิดจาก RSSI/SNR ของข้อมูลล่าสุดที่เกตเวย์ได้ยิน (ดี ≥ −105 dBm, พอใช้ ≥ −115 dBm) · พิกัดอุปกรณ์ใช้ GPS ล่าสุดถ้ามี ไม่งั้นใช้ที่อยู่ที่ลงทะเบียน · ระยะเป็นเส้นตรง</p></div>`;
+  if(!mapObj||mapObj._container!==$("#mapc"))return;
+  clearInterval(timer);timer=setInterval(()=>{if(page==="map")loadMap();else clearInterval(timer)},30000)});
+function mapPts(){const d=window._mapData;return [...d.gateways,...d.devices].filter(x=>x.lat!=null).map(x=>[x.lat,x.lon])}
+function mapFit(){const p=mapPts();if(p.length>1)mapObj.fitBounds(p,{padding:[40,40],maxZoom:17});else if(p.length===1)mapObj.setView(p[0],15)}
+function mapRedraw(){
+  const d=window._mapData,lg=mapObj._lg;lg.clearLayers();
+  const gw=Object.fromEntries(d.gateways.map(g=>[g.gateway_id,g]));
+  const devs=d.devices.filter(x=>x.lat!=null&&(!mapOpt.onlyOn||!x.offline));
+  if(mapOpt.links)d.links.forEach(l=>{const x=d.devices.find(v=>v.id===l.device_id),g=gw[l.gateway_id];if(!x||!g||x.lat==null||g.lat==null)return;if(mapOpt.onlyOn&&x.offline)return;
+    const col=QCOL[l.quality]||"#94a3b8";
+    L.polyline([[x.lat,x.lon],[g.lat,g.lon]],{color:col,weight:l.quality?3:2,opacity:l.offline?.5:.85,dashArray:l.offline||!l.quality?"6 8":null})
+     .bindTooltip(`${esc(x.label||x.dev_eui)} → ${esc(g.label||g.gateway_id)}<br>RSSI ${l.rssi??"-"} dBm · SNR ${l.snr??"-"} dB${l.quality?" · "+QTH[l.quality]:""}<br>ระยะ ${kmTxt(l.distance_m)}`,{sticky:true}).addTo(lg)});
+  d.gateways.filter(g=>g.lat!=null).forEach(g=>{
+    const ic=L.divIcon({className:"",iconSize:[34,34],iconAnchor:[17,17],html:`<div class="mk mk-gw ${g.offline?"off":""}">📡</div>`});
+    const m=L.marker([g.lat,g.lon],{icon:ic,zIndexOffset:500}).addTo(lg);
+    m.bindPopup(`<b>${esc(g.label||g.gateway_id)}</b><br>สถานะ: ${g.offline?'<span class="bad">ออฟไลน์'+(g.reason==="radio"?" (ตัวรับสัญญาณเสีย)":"")+"</span>":'<span class="ok">ออนไลน์</span>'}<br>อุปกรณ์ที่ใช้: ${g.devices} เครื่อง<br><span class="mut">${g.gateway_id}<br>พิกัดจาก${g.pos_src==="gps"?" GPS ของเกตเวย์":"ที่ลงทะเบียน"}</span>`);
+    if(mapOpt.names)m.bindTooltip(esc(g.label||g.gateway_id),{permanent:true,direction:"bottom",offset:[0,16],className:"mk-tip"})});
+  devs.forEach(x=>{const col=x.offline?"#dc2626":(QCOL[x.quality]||"#2f5bea");
+    const ic=L.divIcon({className:"",iconSize:[22,22],iconAnchor:[11,11],html:`<div class="mk mk-dv ${x.offline?"off":""}" style="background:${col}"></div>`});
+    const m=L.marker([x.lat,x.lon],{icon:ic,zIndexOffset:300}).addTo(lg);
+    m.bindPopup(`<b>${esc(x.label||x.dev_eui)}</b>${x.patient?`<br>${esc(x.patient)}`:""}<br>${x.offline?'<span class="bad">ออฟไลน์</span>':'<span class="ok">ออนไลน์</span>'} · แบต ${x.battery??"-"}% · ไฟบ้าน ${x.mains_ok===false?"ดับ":"ปกติ"}<br>สัญญาณ ${x.quality?QTH[x.quality]+" ("+(x.rssi??"-")+" dBm)":"-"}${x.gateway_id&&gw[x.gateway_id]?` → ${esc(gw[x.gateway_id].label||x.gateway_id)}`:""}<br><span class="mut">พิกัดจาก${PSRC[x.pos_src]}</span><br><a target="_blank" rel="noopener" href="https://maps.google.com/?q=${x.lat},${x.lon}">เปิดใน Google Maps</a>`);
+    if(mapOpt.names)m.bindTooltip(esc(x.label||x.dev_eui),{permanent:true,direction:"bottom",offset:[0,12],className:"mk-tip"})});
+  if(!mapFitted){mapFitted=true;mapFit()}}
 </script></body></html>

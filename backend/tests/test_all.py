@@ -1228,3 +1228,33 @@ def test_system_update_request_flow(env_, tmp_path, monkeypatch):
     with SessionLocal() as db:
         a = db.query(AuditLog).filter_by(action="system_update_requested").all()
         assert len(a) == 1 and a[0].actor == "admin"
+
+
+def test_map_endpoint_positions_links_and_viewer_masking(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer")
+    from app.models import Gateway, Patient, utcnow
+    with SessionLocal() as db:
+        db.add(Gateway(gateway_id=GW, label="GW-บ้านผู้ใหญ่", lat=13.9000, lon=100.5900, last_seen=utcnow(), uplinks_total=1))
+        p = db.get(Patient, ids["p"]); p.lat, p.lon = 13.9100, 100.5900
+        d = db.query(Device).one(); d.last_gateway, d.last_rssi, d.last_snr, d.last_seen = GW, -92, 6.0, utcnow(); db.commit()
+    m = client.get("/api/map", headers=h).json()
+    assert m["restricted"] is False and len(m["gateways"]) == 1 and m["gateways"][0]["lat"] == 13.9
+    dv = m["devices"][0]
+    assert dv["pos_src"] == "home" and dv["lat"] == 13.91 and dv["quality"] == "good" and dv["gateway_id"] == GW
+    lk = m["links"][0]
+    assert lk["gateway_id"] == GW and lk["quality"] == "good" and 1000 < lk["distance_m"] < 1200
+    # a fresh GPS fix wins over the registered home
+    with SessionLocal() as db:
+        d = db.query(Device).one(); d.loc_lat, d.loc_lon, d.loc_at = 13.9200, 100.6000, utcnow(); db.commit()
+    assert client.get("/api/map", headers=h).json()["devices"][0]["pos_src"] == "gps"
+    # weak link grading
+    with SessionLocal() as db:
+        d = db.query(Device).one(); d.last_rssi, d.last_snr = -118, -10.0; db.commit()
+    assert client.get("/api/map", headers=h).json()["links"][0]["quality"] == "weak"
+    # read-only role: connectivity yes, any coordinates of people/devices no
+    mv = client.get("/api/map", headers=hv).json()
+    assert mv["restricted"] is True and mv["devices"][0]["lat"] is None and mv["devices"][0]["lon"] is None and mv["devices"][0]["pos_src"] is None
+    assert mv["links"][0]["gateway_id"] == GW and mv["links"][0]["distance_m"] is None
+    assert mv["gateways"][0]["lat"] == 13.9                                                     # gateways are infrastructure, not personal data
+    assert client.get("/api/map").status_code in (401, 403)
