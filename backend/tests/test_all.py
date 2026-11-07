@@ -1506,3 +1506,37 @@ def test_chirpstack_rest_management_calls():
     bad = ChirpStackRest("http://cs", "k", "nope", "prof", client=httpx.Client(transport=httpx.MockTransport(handler))).status()
     assert bad["configured"] and not bad["reachable"] and "404" in bad["error"]
     assert ChirpStackRest("http://cs", "", "", "").status()["configured"] is False
+
+
+def test_delete_rules_for_caregiver_patient_device_gateway_user(env_):
+    eng, downs, notif, client, ids = env_
+    from app.models import User
+    from app.auth import hash_pw
+    with SessionLocal() as db:
+        db.add(User(username="staff", password_hash=hash_pw("password12345"), role="staff")); db.commit(); gid = _gw_row(db)
+    h, hs = login(client), login(client, "staff")
+    # caregiver: staff may not delete; a fresh one can be removed, also from gateway recipient lists
+    cg = client.post("/api/caregivers", json={"full_name": "ลบได้", "role": "อสม.", "phone": ""}, headers=h).json()["id"]
+    assert client.delete(f"/api/caregivers/{cg}", headers=hs).status_code == 403
+    assert client.put(f"/api/gateways/{gid}", json={"alert_ids": [cg]}, headers=h).status_code == 200
+    assert client.delete(f"/api/caregivers/{cg}", headers=h).status_code == 200
+    assert [g for g in client.get("/api/gateways", headers=h).json() if g["id"] == gid][0]["alert_ids"] in (None, [])
+    assert client.delete(f"/api/caregivers/{cg}", headers=h).status_code == 404
+    # patient / device: unlinked and without history -> deletable; with device -> 409
+    p = client.post("/api/patients", json={"full_name": "ทดลองลบ"}, headers=h).json()["id"]
+    d = client.post("/api/devices", json={"dev_eui": "0016c001f1999999", "label": "x"}, headers=h).json()["id"]
+    assert client.put(f"/api/devices/{d}", json={"dev_eui": "0016c001f1999999", "label": "x", "lifecycle": "ready", "patient_id": p}, headers=h).status_code == 200
+    assert client.delete(f"/api/patients/{p}", headers=h).status_code == 409
+    assert client.delete(f"/api/devices/{d}", headers=hs).status_code == 403
+    assert client.delete(f"/api/devices/{d}", headers=h).status_code == 200
+    assert client.delete(f"/api/patients/{p}", headers=h).status_code == 200
+    # gateway
+    assert client.delete(f"/api/gateways/{gid}", headers=hs).status_code == 403
+    assert client.delete(f"/api/gateways/{gid}", headers=h).status_code == 200
+    # user: must be disabled first, never yourself
+    me = [u for u in client.get("/api/users", headers=h).json() if u["username"] == "admin"][0]["id"]
+    st = [u for u in client.get("/api/users", headers=h).json() if u["username"] == "staff"][0]["id"]
+    assert client.delete(f"/api/users/{me}", headers=h).status_code == 409
+    assert client.delete(f"/api/users/{st}", headers=h).status_code == 409
+    client.put(f"/api/users/{st}", json={"active": False}, headers=h)
+    assert client.delete(f"/api/users/{st}", headers=h).status_code == 200

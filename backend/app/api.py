@@ -285,6 +285,19 @@ def edit_patient(pid: int, b: PatientIn, db: Session = Depends(get_db), u=Depend
     return pat_dict(p, db)
 
 
+@router.delete("/patients/{pid}")
+def delete_patient(pid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    p = db.get(Patient, pid)
+    if not p: raise HTTPException(404)
+    if db.query(Device).filter_by(patient_id=pid).first():
+        raise HTTPException(409, "ผู้ป่วยรายนี้ยังมีอุปกรณ์ผูกอยู่ — ถอดอุปกรณ์ออกก่อน")
+    if db.query(Case).filter_by(patient_id=pid).first():
+        raise HTTPException(409, "ผู้ป่วยรายนี้มีประวัติเคสแล้ว ลบทิ้งตรง ๆ ไม่ได้ — ใช้ 'ข้อมูล/PDPA → ลบข้อมูลที่ระบุตัวตน' หรือปิดใช้งานแทน")
+    db.query(Assignment).filter_by(patient_id=pid).delete()
+    db.delete(p); audit(db, u.username, "patient_delete", str(pid)); db.commit()
+    return {"ok": True}
+
+
 class ConsentIn(BaseModel):
     given: bool
     note: str = Field(default="", max_length=128)      # e.g. consent form no., or "ผู้ดูแล: นางสมหญิง (บุตร)" when a guardian consents
@@ -403,6 +416,21 @@ def edit_cg(cid: int, b: CaregiverIn, db: Session = Depends(get_db), u=Depends(s
     return cg_dict(c)
 
 
+@router.delete("/caregivers/{cid}")
+def delete_cg(cid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    c = db.get(Caregiver, cid)
+    if not c: raise HTTPException(404)
+    if db.query(Notification).filter_by(caregiver_id=cid).first():
+        raise HTTPException(409, "ผู้ดูแลคนนี้มีประวัติการแจ้งเตือนในเคสแล้ว ลบไม่ได้ (เพื่อรักษาประวัติ) — ใช้ปุ่ม 'ปิดใช้งาน' แทน")
+    db.query(Assignment).filter_by(caregiver_id=cid).delete()
+    db.query(BindCode).filter_by(caregiver_id=cid).delete()
+    for g in db.query(Gateway).all():                     # drop him from per-gateway recipient lists too
+        if g.alert_ids and cid in g.alert_ids: g.alert_ids = [x for x in g.alert_ids if x != cid] or None
+    name = c.full_name; db.delete(c)
+    audit(db, u.username, "caregiver_delete", str(cid), name=name); db.commit()
+    return {"ok": True}
+
+
 @router.post("/caregivers/{cid}/bind-code")
 def bind_code(cid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
     if not db.get(Caregiver, cid): raise HTTPException(404)
@@ -511,6 +539,16 @@ def _cs_device_disabled(db: Session, who: str, eui: str, disabled: bool) -> str:
     if changed:
         audit(db, who, "chirpstack_device_disabled" if disabled else "chirpstack_device_enabled", eui); db.commit()
     return "disabled" if disabled else "enabled"
+
+
+@router.delete("/devices/{did}")
+def delete_device(did: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    d = db.get(Device, did)
+    if not d: raise HTTPException(404)
+    if db.query(Case).filter_by(device_id=did).first():
+        raise HTTPException(409, "อุปกรณ์นี้มีประวัติเคสแล้ว ลบไม่ได้ — เปลี่ยนสถานะเป็น 'ปลดระวาง/สูญหาย' แทน")
+    eui = d.dev_eui; db.delete(d); audit(db, u.username, "device_delete", eui); db.commit()
+    return {"ok": True}
 
 
 class DeviceConfigIn(BaseModel):
@@ -696,6 +734,16 @@ def _cs_gateway(db: Session, who: str, g: Gateway) -> str:
     if res == "created":
         audit(db, who, "chirpstack_gateway_add", g.gateway_id); db.commit()
     return res
+
+
+@router.delete("/gateways/{gid}")
+def delete_gateway(gid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    gw = g.gateway_id
+    db.query(GatewayCommand).filter_by(gateway_id=gw).delete()
+    db.delete(g); audit(db, u.username, "gateway_delete", gw); db.commit()
+    return {"ok": True, "note": "ถ้าเกตเวย์ยังเปิดอยู่ มันจะถูกเพิ่มกลับเองเมื่อส่งข้อมูลครั้งถัดไป — ปิดการเฝ้าระวังแทนถ้าแค่ไม่ต้องการแจ้งเตือน"}
 
 
 @router.put("/gateways/{gid}")
@@ -997,6 +1045,16 @@ def patch_user(uid: int, b: UserPatch, db: Session = Depends(get_db), u=Depends(
     if changed: audit(db, u.username, "user_update", t.username, **changed)
     db.commit()
     return user_dict(t)
+
+
+@router.delete("/users/{uid}")
+def delete_user(uid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    t = db.get(User, uid)
+    if not t: raise HTTPException(404)
+    if t.id == u.id: raise HTTPException(409, "ลบบัญชีตัวเองไม่ได้")
+    if t.active: raise HTTPException(409, "ต้องปิดบัญชีก่อนจึงจะลบได้")
+    db.delete(t); audit(db, u.username, "user_delete", t.username); db.commit()
+    return {"ok": True}
 
 
 @router.post("/users/{uid}/reset-password")
