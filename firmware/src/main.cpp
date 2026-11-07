@@ -11,7 +11,11 @@
 #endif
 
 // ---------------------------------------------------------------- radio
+#ifdef SOS_BOARD_V2
+SX1276 radio = new Module(LORA_NSS, LORA_DIO0, LORA_RST, LORA_DIO1);
+#else
 SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY);
+#endif
 LoRaWANNode node(&radio, &AS923);           // Thailand = AS923-1 (923.2/923.4 MHz); ChirpStack region "as923"
 
 // ---------------------------------------------------------------- storage
@@ -80,10 +84,10 @@ void setUi(UiMode m) { g_ui = m; g_uiSince = millis(); }
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
 
 uint8_t readBatteryPct(bool* charging = nullptr) {
-  pinMode(PIN_ADC_CTRL, OUTPUT); digitalWrite(PIN_ADC_CTRL, ADC_CTRL_ACTIVE_LEVEL);
+  if (PIN_ADC_CTRL >= 0) { pinMode(PIN_ADC_CTRL, OUTPUT); digitalWrite(PIN_ADC_CTRL, ADC_CTRL_ACTIVE_LEVEL); }
   delay(5);
   uint32_t mv = 0; for (int i = 0; i < 8; i++) { mv += analogReadMilliVolts(PIN_VBAT_ADC); delay(2); }
-  digitalWrite(PIN_ADC_CTRL, !ADC_CTRL_ACTIVE_LEVEL);
+  if (PIN_ADC_CTRL >= 0) digitalWrite(PIN_ADC_CTRL, !ADC_CTRL_ACTIVE_LEVEL);
   float v = (mv / 8.0f) * VBAT_DIVIDER / 1000.0f;
   if (charging) *charging = v > 4.25f;
   if (v < 2.0f) return 255;                // no battery fitted / reading invalid
@@ -377,9 +381,15 @@ void setup() {
   if (!g_provisioned) { setUi(UI_NOT_PROVISIONED); return; }
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
   // frequency/SF are overridden by the LoRaWAN band; Heltec V3 SX1262 has a 1.8 V TCXO on DIO3
+#ifdef SOS_BOARD_V2
+  int16_t s = radio.begin(923.2, 125.0, 9, 7, RADIOLIB_SX127X_SYNC_WORD, 10, 8, 0);   // SX1276 (PA_BOOST on V2)
+#else
   int16_t s = radio.begin(923.2, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 1.8);
+#endif
   if (s != RADIOLIB_ERR_NONE) { Serial.printf("[radio] begin failed %d\n", s); setUi(UI_JOIN_FAIL); return; }
+#ifndef SOS_BOARD_V2
   radio.setDio2AsRfSwitch(true);                   // V3 switches the RF path via DIO2
+#endif
   Serial.printf("INFO fw=%d.%d deveui=%016llx\n", FW_MAJOR, FW_MINOR, (unsigned long long)g_devEui);
 }
 

@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        env: [heltec_v3, heltec_v3_gps]
+        env: [heltec_v3, heltec_v3_gps, heltec_v2]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

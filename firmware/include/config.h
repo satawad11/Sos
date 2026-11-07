@@ -1,4 +1,28 @@
 #pragma once
+#ifdef SOS_BOARD_V2
+// ===== Heltec WiFi LoRa 32 V2 (ESP32 + SX1276/SX1278, SSD1306 OLED) — EXPERIMENTAL port, verify against your board's pin map =====
+#define LORA_NSS   18
+#define LORA_SCK   5
+#define LORA_MOSI  27
+#define LORA_MISO  19
+#define LORA_RST   14
+#define LORA_DIO0  26
+#define LORA_DIO1  35
+#define PIN_VEXT   21   // LOW = Vext (OLED power) ON
+#define OLED_SDA   4
+#define OLED_SCL   15
+#define OLED_RST   16
+// External parts: GPIOs that are free on the V2 header (CHECK them against your board before wiring)
+#define PIN_BUTTON    13   // button -> GND (INPUT_PULLUP)
+#define PIN_LED_RED   2
+#define PIN_LED_GREEN 17
+#define PIN_BUZZER    22   // active buzzer via NPN
+#define PIN_MAINS     36   // input-only pin: 5V sense via divider 10k/20k, HIGH = mains present
+#define PIN_VBAT_ADC  37   // on-board battery divider
+#define PIN_ADC_CTRL  -1   // V2: no switch pin assumed (set if your revision has one)
+#define ADC_CTRL_ACTIVE_LEVEL LOW
+#define VBAT_DIVIDER  2.0f // CALIBRATE with a multimeter (V2 ADC is noisy/nonlinear)
+#else
 // ===== Heltec WiFi LoRa 32 V3 pins (verified against Heltec pin map) =====
 #define LORA_NSS   8
 #define LORA_SCK   9
@@ -22,6 +46,7 @@
 #define PIN_ADC_CTRL  37   // Heltec V3: enables battery divider. CHECK your board revision (see README)
 #define ADC_CTRL_ACTIVE_LEVEL LOW
 #define VBAT_DIVIDER  4.9f // calibrate with a multimeter
+#endif
 
 // ===== Protocol (must match docs/contract) =====
 #define PROTO_VER 1
