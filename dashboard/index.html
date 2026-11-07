@@ -545,7 +545,7 @@ const loadMap=guard(async()=>{
     <div id="mapc" style="height:62vh;min-height:380px;border-radius:12px;margin-top:8px;overflow:hidden;background:var(--bg)"></div><div class="hint" id="mapnote"></div></div><div id="maptb"></div>`;
     if(mapObj){try{mapObj.remove()}catch{}}
     mapObj=L.map("mapc",{zoomControl:true,attributionControl:true}).setView([13.9,100.6],11);
-    let bad=0;const tl=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"});
+    let bad=0;const tl=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap",referrerPolicy:"strict-origin-when-cross-origin"});
     tl.on("tileerror",()=>{if(++bad===3)$("#mapnote").textContent="โหลดแผนที่พื้นหลังไม่ได้ (เครื่องนี้อาจไม่มีอินเทอร์เน็ต) — ยังแสดงตำแหน่งและเส้นเชื่อมต่อได้"});tl.addTo(mapObj);
     mapObj._lg=L.layerGroup().addTo(mapObj);
     ["mo1","mo2","mo3"].forEach((id,i)=>$("#"+id).onchange=e=>{mapOpt[["links","names","onlyOn"][i]]=e.target.checked;mapRedraw()});
