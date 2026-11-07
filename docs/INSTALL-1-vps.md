@@ -69,7 +69,7 @@ sudo docker compose up -d backend
 ```bash
 cd /opt/sos/infra && sudo bash scripts/add-gateway.sh 0016c001ff10abcd
 ```
-จดรหัสผ่านที่แสดง (ครั้งเดียว) · แล้วที่ ChirpStack UI → **Gateways → Add gateway** ใส่ Gateway ID เดียวกัน
+จดรหัสผ่านที่แสดง (ครั้งเดียว) · สคริปต์เพิ่มเกตเวย์ใน ChirpStack ให้อัตโนมัติ (ถ้าขึ้น `[!!]` ให้เพิ่มเองที่ **Gateways → Add gateway**) — หรือใช้ `gateway\windows\INSTALL-GATEWAY.bat` ซึ่งทำข้อนี้ให้ทั้งหมด
 
 ## 7. สำรองข้อมูล + เฝ้าระวัง
 ```bash
