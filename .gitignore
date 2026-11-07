@@ -13,5 +13,6 @@ provisioned_devices.csv
 gateway/windows/logs/
 gateway/windows/gateway-settings.json
 infra/update/
+infra/caddy/sites/*.caddy
 !dashboard/vendor/**/*.png
 !dashboard/icons/*.png

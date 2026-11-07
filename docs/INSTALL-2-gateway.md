@@ -9,8 +9,8 @@
 2. ประกอบ WM1302 + **เสาอากาศ** → เสียบการ์ด → **สาย LAN** → เปิดเครื่อง รอ 2 นาที
 3. ในโฟลเดอร์ repo ดับเบิลคลิก **`gateway\windows\INSTALL-GATEWAY.bat`** แล้วตอบคำถาม (ส่วนใหญ่กด Enter)
 
-สคริปต์ทำให้ทั้งหมด: ฝากกุญแจ SSH (ถามรหัสผ่าน Pi/VPS ครั้งเดียว), ส่งชุดติดตั้ง (แก้ CRLF ให้), อ่าน Gateway ID, สร้างบัญชี MQTT **และเพิ่มเกตเวย์ใน ChirpStack อัตโนมัติ**, ใส่ **คีย์เอเจนต์สั่งงานระยะไกล** (docs/GATEWAY-REMOTE.md) ให้เอง, คัดลอก CA, ติดตั้ง, **รีบูตให้เองแล้วติดตั้งต่อ**, ตรวจสุขภาพ — รันซ้ำได้ปลอดภัย (รันซ้ำ = หมุนรหัส MQTT ใหม่) · ค่าที่ตอบเก็บใน `gateway-settings.json` (ไม่มีรหัสผ่าน) · log อยู่ที่ `gateway\windows\logs\`
-> เพิ่มเกตเวย์ใน ChirpStack อัตโนมัติได้เมื่อ `.env` บน VPS มี `CHIRPSTACK_API_KEY` และ `CHIRPSTACK_APP_ID` (INSTALL-1 ข้อ 5) — ถ้าไม่มี สคริปต์จะบอกให้เพิ่มเองใน UI
+สคริปต์ทำให้ทั้งหมด: ฝากกุญแจ SSH (ถามรหัสผ่าน Pi/VPS ครั้งเดียว), ส่งชุดติดตั้ง (แก้ CRLF ให้), อ่าน Gateway ID, สร้างบัญชี MQTT **และเพิ่มเกตเวย์ในแดชบอร์ด + ChirpStack อัตโนมัติ**, ใส่ **คีย์เอเจนต์สั่งงานระยะไกล** (docs/GATEWAY-REMOTE.md) ให้เอง, คัดลอก CA, ติดตั้ง, **รีบูตให้เองแล้วติดตั้งต่อ**, ตรวจสุขภาพ — รันซ้ำได้ปลอดภัย (รันซ้ำ = หมุนรหัส MQTT ใหม่) · ค่าที่ตอบเก็บใน `gateway-settings.json` (ไม่มีรหัสผ่าน) · log อยู่ที่ `gateway\windows\logs\`
+> การเพิ่มใน ChirpStack ใช้ค่า ChirpStack ของ backend (`CHIRPSTACK_API_KEY` / `CHIRPSTACK_APP_ID` / `CHIRPSTACK_PROFILE_ID` ใน `.env`, INSTALL-1 ข้อ 5) — ถ้ายังไม่ได้ตั้ง สคริปต์จะบอกให้เพิ่มเองที่แดชบอร์ด > เกตเวย์
 
 ถ้าติดปัญหาหรืออยากทำทีละขั้น ใช้ขั้นตอนด้านล่าง
 
@@ -37,7 +37,7 @@ cd ~/gw && sudo ./install-gateway.sh --show-id        # พิมพ์ Gateway 
 ```bash
 cd /opt/sos/infra && sudo bash scripts/add-gateway.sh <GATEWAY_ID>    # ได้รหัสผ่าน MQTT (ครั้งเดียว)
 ```
-สคริปต์จะเพิ่มเกตเวย์ใน ChirpStack ให้ด้วย (ถ้าแจ้ง `[!!]` ให้เพิ่มเองที่ ChirpStack UI: Gateways → Add gateway ใส่ ID เดียวกัน) · คัดลอก CA ลง Pi: `scp sos@sos.โดเมน:/opt/sos/infra/certs/ca.crt ~/gw/ca.crt` (ผ่านเครื่องคุณ)
+สคริปต์เพิ่มเกตเวย์ในแดชบอร์ด SOS (หน้า **เกตเวย์**) และ ChirpStack ให้เอง — หรือเพิ่มที่แดชบอร์ดเอง (ถ้าสคริปต์แจ้ง `[!!]`) · คัดลอก CA ลง Pi: `scp sos@sos.โดเมน:/opt/sos/infra/certs/ca.crt ~/gw/ca.crt` (ผ่านเครื่องคุณ)
 
 ## 5. ติดตั้ง
 ```bash

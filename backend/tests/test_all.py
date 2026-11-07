@@ -1396,3 +1396,147 @@ def test_gateway_agent_dryrun_accepts_only_valid_signed_commands(tmp_path):
     assert [r["id"] for r in results] == ["a" * 16, "e" * 16]          # replay, stale, bad sig and unknown action all ignored
     assert "DRYRUN systemctl reboot" not in out.stdout
     assert "BAD SIGNATURE" in out.stderr and "replayed" in out.stderr and "stale" in out.stderr and "unknown action" in out.stderr
+
+
+# ---------- ChirpStack management from the dashboard ----------
+class FakeCSMgmt(FakeCS):
+    def __init__(self):
+        super().__init__()
+        self.cs_devices = {"70b3d57ed0000001": {"devEui": "70B3D57ED0000001", "name": "A1", "isDisabled": False},
+                           "02aaaaaaaaaaaaaa": {"devEui": "02aaaaaaaaaaaaaa", "name": "stray", "isDisabled": False}}
+        self.cs_gws = {}; self.boom = False
+    def status(self): return {"configured": True, "reachable": True, "error": "", "application": "sos-patients"}
+    def list_devices(self): return list(self.cs_devices.values())
+    def list_gateways(self): return [{"gatewayId": g} for g in self.cs_gws]
+    def set_disabled(self, eui, disabled):
+        if self.boom: raise RuntimeError("down")
+        d = self.cs_devices[eui]; ch = d["isDisabled"] != disabled; d["isDisabled"] = disabled; return ch
+    def ensure_gateway(self, gid, name, lat=None, lon=None):
+        if gid in self.cs_gws: return "exists"
+        self.cs_gws[gid] = name; return "created"
+
+
+def test_chirpstack_page_compare_and_sync(env_, monkeypatch):
+    *_, client, ids = env_
+    cs = FakeCSMgmt(); monkeypatch.setattr("app.provision.get_cs", lambda: cs)
+    h = login(client)
+    assert client.get("/api/chirpstack", headers=login(client, "viewer")).status_code == 403
+    with SessionLocal() as db:
+        from app.models import Gateway
+        db.add(Device(dev_eui="70b3d57ed0000002", lifecycle="ready", label="B2"))          # never registered in CS
+        db.add(Gateway(gateway_id="0016c001ff10aaaa", label="รพ.สต. ม.3", enabled=True, state="unknown", uplinks_total=0))
+        db.commit()
+        db.query(Device).filter_by(dev_eui="70b3d57ed0000001").update({"lifecycle": "retired"}); db.commit()
+    st = client.get("/api/chirpstack", headers=h).json()
+    c = st["compare"]
+    assert st["reachable"] and c["devices_cs"] == 2 and c["devices_sos"] == 2
+    assert [x["dev_eui"] for x in c["missing_in_cs"]] == ["70b3d57ed0000002"]
+    assert [x["dev_eui"] for x in c["unknown_in_sos"]] == ["02aaaaaaaaaaaaaa"]
+    assert c["disabled_mismatch"] == ["70b3d57ed0000001"]
+    assert [g["gateway_id"] for g in c["gateways_missing_in_cs"]] == ["0016c001ff10aaaa"]
+    r = client.post("/api/chirpstack/sync", headers=h).json()
+    assert r == {"gateways_added": ["0016c001ff10aaaa"], "devices_disabled": ["70b3d57ed0000001"], "devices_enabled": [], "errors": []}
+    assert cs.cs_devices["70b3d57ed0000001"]["isDisabled"] is True
+    c2 = client.get("/api/chirpstack", headers=h).json()["compare"]
+    assert c2["disabled_mismatch"] == [] and c2["gateways_missing_in_cs"] == []
+    # nothing is created/deleted for devices
+    assert cs.reg == [] and cs.deleted == [] and "02aaaaaaaaaaaaaa" in cs.cs_devices
+    cs.configured = False
+    assert client.post("/api/chirpstack/sync", headers=h).status_code == 503
+
+
+def test_retire_device_disables_in_chirpstack(env_, monkeypatch):
+    *_, client, ids = env_
+    cs = FakeCSMgmt(); monkeypatch.setattr("app.provision.get_cs", lambda: cs)
+    h = login(client)
+    with SessionLocal() as db: did = db.query(Device).filter_by(dev_eui="70b3d57ed0000001").one().id
+    r = client.put(f"/api/devices/{did}", json={"dev_eui": "70b3d57ed0000001", "label": "A1", "lifecycle": "retired"}, headers=h)
+    assert r.json()["chirpstack"] == "disabled" and cs.cs_devices["70b3d57ed0000001"]["isDisabled"] is True
+    r = client.put(f"/api/devices/{did}", json={"dev_eui": "70b3d57ed0000001", "label": "A1", "lifecycle": "ready"}, headers=h)
+    assert r.json()["chirpstack"] == "enabled" and cs.cs_devices["70b3d57ed0000001"]["isDisabled"] is False
+    r = client.put(f"/api/devices/{did}", json={"dev_eui": "70b3d57ed0000001", "label": "A2", "lifecycle": "repair"}, headers=h)
+    assert r.json()["chirpstack"] == "unchanged"
+    cs.boom = True       # ChirpStack down: the dashboard change still saves, error is reported + audited
+    r = client.put(f"/api/devices/{did}", json={"dev_eui": "70b3d57ed0000001", "label": "A1", "lifecycle": "retired"}, headers=h)
+    assert r.status_code == 200 and r.json()["chirpstack"].startswith("error")
+    assert any(a["action"] == "chirpstack_device_failed" for a in client.get("/api/audit", headers=h).json())
+
+
+def test_add_gateway_registers_in_chirpstack(env_, monkeypatch):
+    *_, client, ids = env_
+    cs = FakeCSMgmt(); monkeypatch.setattr("app.provision.get_cs", lambda: cs)
+    h = login(client)
+    r = client.post("/api/gateways", json={"gateway_id": "00:16:C0:01:FF:10:BB:BB", "label": "GW-B"}, headers=h).json()
+    assert r["chirpstack"] == "created" and cs.cs_gws == {"0016c001ff10bbbb": "GW-B"}
+
+
+def test_chirpstack_rest_management_calls():
+    import httpx, json as _j, pytest
+    from app.provision import ChirpStackRest, ProvisionError
+    calls = []
+    dev = {"devEui": "02aaaaaaaaaaaaaa", "name": "x", "isDisabled": False}
+    def handler(req):
+        calls.append((req.method, req.url.path, dict(req.url.params), _j.loads(req.content) if req.content else None))
+        assert req.headers["authorization"] == "Bearer k"
+        p = req.url.path
+        if p == "/api/applications/app": return httpx.Response(200, json={"application": {"name": "sos-patients", "tenantId": "t1"}})
+        if p == "/api/device-profiles/prof": return httpx.Response(200, json={"deviceProfile": {"name": "SOS-button", "region": "AS923"}})
+        if p == "/api/devices" and req.method == "GET":
+            off = int(req.url.params["offset"])
+            return httpx.Response(200, json={"totalCount": 150, "result": [{"devEui": f"{i:016x}"} for i in range(off, min(off + 100, 150))]})
+        if p == "/api/devices/02aaaaaaaaaaaaaa" and req.method == "GET": return httpx.Response(200, json={"device": dict(dev)})
+        if p == "/api/devices/02aaaaaaaaaaaaaa" and req.method == "PUT": return httpx.Response(200, json={})
+        if p == "/api/gateways" and req.method == "POST":
+            gid = _j.loads(req.content)["gateway"]["gatewayId"]
+            return httpx.Response(409, json={"code": 6, "message": "Object already exists"}) if gid.endswith("ff") else httpx.Response(200, json={})
+        return httpx.Response(404, json={"code": 5, "message": "Object does not exist"})
+    c = ChirpStackRest("http://cs", "k", "app", "prof", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    st = c.status()
+    assert st["reachable"] and st["application"] == "sos-patients" and st["device_profile"] == "SOS-button"
+    assert len(c.list_devices()) == 150
+    assert c.set_disabled("02aaaaaaaaaaaaaa", True) is True and calls[-1][3]["device"]["isDisabled"] is True
+    assert c.set_disabled("02aaaaaaaaaaaaaa", False) is False                  # already enabled: no PUT
+    assert calls[-1][0] == "GET"
+    assert c.ensure_gateway("00000000000000aa", "GW", 13.9, 100.6) == "created"
+    body = calls[-1][3]["gateway"]
+    assert body["tenantId"] == "t1" and body["location"]["latitude"] == 13.9
+    assert c.ensure_gateway("00000000000000ff", "GW") == "exists"
+    with pytest.raises(ProvisionError) as e: c.set_disabled("0000000000000001", True)
+    assert e.value.not_found
+    bad = ChirpStackRest("http://cs", "k", "nope", "prof", client=httpx.Client(transport=httpx.MockTransport(handler))).status()
+    assert bad["configured"] and not bad["reachable"] and "404" in bad["error"]
+    assert ChirpStackRest("http://cs", "", "", "").status()["configured"] is False
+
+
+def test_delete_rules_for_caregiver_patient_device_gateway_user(env_):
+    eng, downs, notif, client, ids = env_
+    from app.models import User
+    from app.auth import hash_pw
+    with SessionLocal() as db:
+        db.add(User(username="staff", password_hash=hash_pw("password12345"), role="staff")); db.commit(); gid = _gw_row(db)
+    h, hs = login(client), login(client, "staff")
+    # caregiver: staff may not delete; a fresh one can be removed, also from gateway recipient lists
+    cg = client.post("/api/caregivers", json={"full_name": "ลบได้", "role": "อสม.", "phone": ""}, headers=h).json()["id"]
+    assert client.delete(f"/api/caregivers/{cg}", headers=hs).status_code == 403
+    assert client.put(f"/api/gateways/{gid}", json={"alert_ids": [cg]}, headers=h).status_code == 200
+    assert client.delete(f"/api/caregivers/{cg}", headers=h).status_code == 200
+    assert [g for g in client.get("/api/gateways", headers=h).json() if g["id"] == gid][0]["alert_ids"] in (None, [])
+    assert client.delete(f"/api/caregivers/{cg}", headers=h).status_code == 404
+    # patient / device: unlinked and without history -> deletable; with device -> 409
+    p = client.post("/api/patients", json={"full_name": "ทดลองลบ"}, headers=h).json()["id"]
+    d = client.post("/api/devices", json={"dev_eui": "0016c001f1999999", "label": "x"}, headers=h).json()["id"]
+    assert client.put(f"/api/devices/{d}", json={"dev_eui": "0016c001f1999999", "label": "x", "lifecycle": "ready", "patient_id": p}, headers=h).status_code == 200
+    assert client.delete(f"/api/patients/{p}", headers=h).status_code == 409
+    assert client.delete(f"/api/devices/{d}", headers=hs).status_code == 403
+    assert client.delete(f"/api/devices/{d}", headers=h).status_code == 200
+    assert client.delete(f"/api/patients/{p}", headers=h).status_code == 200
+    # gateway
+    assert client.delete(f"/api/gateways/{gid}", headers=hs).status_code == 403
+    assert client.delete(f"/api/gateways/{gid}", headers=h).status_code == 200
+    # user: must be disabled first, never yourself
+    me = [u for u in client.get("/api/users", headers=h).json() if u["username"] == "admin"][0]["id"]
+    st = [u for u in client.get("/api/users", headers=h).json() if u["username"] == "staff"][0]["id"]
+    assert client.delete(f"/api/users/{me}", headers=h).status_code == 409
+    assert client.delete(f"/api/users/{st}", headers=h).status_code == 409
+    client.put(f"/api/users/{st}", json={"active": False}, headers=h)
+    assert client.delete(f"/api/users/{st}", headers=h).status_code == 200

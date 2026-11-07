@@ -184,7 +184,7 @@ try {
   if ($r.Out -notmatch 'BEGIN CERTIFICATE') { Fail 'อ่าน ca.crt จาก VPS ไม่ได้' }
   $Ca = $r.Out
   Ok 'ได้บัญชี MQTT และใบรับรอง CA แล้ว'
-  if ($CsOk) { Ok 'เพิ่มเกตเวย์ใน ChirpStack แล้ว' } else { Warn "ต้องเพิ่มเกตเวย์ใน ChirpStack เอง: Gateways > Add gateway > ID $GwId" }
+  if ($CsOk) { Ok 'เพิ่มเกตเวย์ในแดชบอร์ดและ ChirpStack แล้ว' } else { Warn "ยังไม่ได้เพิ่มใน ChirpStack: เปิดแดชบอร์ด > เกตเวย์ > เพิ่ม (ID $GwId)" }
   if ($AgentKey) { Ok 'ได้คีย์เอเจนต์ (สั่งงานเกตเวย์จากแดชบอร์ดได้)' } else { Warn 'ไม่ได้คีย์เอเจนต์ — การสั่งงานระยะไกลจะยังปิดอยู่ (ดู docs/GATEWAY-REMOTE.md)' }
 
   # ---------------------------------------------------------------- 7

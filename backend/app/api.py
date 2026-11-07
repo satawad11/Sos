@@ -285,6 +285,19 @@ def edit_patient(pid: int, b: PatientIn, db: Session = Depends(get_db), u=Depend
     return pat_dict(p, db)
 
 
+@router.delete("/patients/{pid}")
+def delete_patient(pid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    p = db.get(Patient, pid)
+    if not p: raise HTTPException(404)
+    if db.query(Device).filter_by(patient_id=pid).first():
+        raise HTTPException(409, "ผู้ป่วยรายนี้ยังมีอุปกรณ์ผูกอยู่ — ถอดอุปกรณ์ออกก่อน")
+    if db.query(Case).filter_by(patient_id=pid).first():
+        raise HTTPException(409, "ผู้ป่วยรายนี้มีประวัติเคสแล้ว ลบทิ้งตรง ๆ ไม่ได้ — ใช้ 'ข้อมูล/PDPA → ลบข้อมูลที่ระบุตัวตน' หรือปิดใช้งานแทน")
+    db.query(Assignment).filter_by(patient_id=pid).delete()
+    db.delete(p); audit(db, u.username, "patient_delete", str(pid)); db.commit()
+    return {"ok": True}
+
+
 class ConsentIn(BaseModel):
     given: bool
     note: str = Field(default="", max_length=128)      # e.g. consent form no., or "ผู้ดูแล: นางสมหญิง (บุตร)" when a guardian consents
@@ -403,6 +416,21 @@ def edit_cg(cid: int, b: CaregiverIn, db: Session = Depends(get_db), u=Depends(s
     return cg_dict(c)
 
 
+@router.delete("/caregivers/{cid}")
+def delete_cg(cid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    c = db.get(Caregiver, cid)
+    if not c: raise HTTPException(404)
+    if db.query(Notification).filter_by(caregiver_id=cid).first():
+        raise HTTPException(409, "ผู้ดูแลคนนี้มีประวัติการแจ้งเตือนในเคสแล้ว ลบไม่ได้ (เพื่อรักษาประวัติ) — ใช้ปุ่ม 'ปิดใช้งาน' แทน")
+    db.query(Assignment).filter_by(caregiver_id=cid).delete()
+    db.query(BindCode).filter_by(caregiver_id=cid).delete()
+    for g in db.query(Gateway).all():                     # drop him from per-gateway recipient lists too
+        if g.alert_ids and cid in g.alert_ids: g.alert_ids = [x for x in g.alert_ids if x != cid] or None
+    name = c.full_name; db.delete(c)
+    audit(db, u.username, "caregiver_delete", str(cid), name=name); db.commit()
+    return {"ok": True}
+
+
 @router.post("/caregivers/{cid}/bind-code")
 def bind_code(cid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
     if not db.get(Caregiver, cid): raise HTTPException(404)
@@ -490,8 +518,36 @@ def edit_device(did: int, b: DeviceIn, db: Session = Depends(get_db), u=Depends(
     _require_consent(db, b.lifecycle, b.patient_id)
     if d.patient_id != b.patient_id:                      # a fix from the old patient's home says nothing about the new one
         d.loc_lat = d.loc_lon = d.loc_at = d.loc_sats = d.loc_hdop = None
+    was_retired = d.lifecycle == "retired"
     d.label, d.lifecycle, d.patient_id = b.label, b.lifecycle, b.patient_id
     audit(db, u.username, "device_update", d.dev_eui, lifecycle=b.lifecycle, patient=b.patient_id); db.commit()
+    cs_res = "unchanged"
+    if was_retired != (b.lifecycle == "retired"):
+        cs_res = _cs_device_disabled(db, u.username, d.dev_eui, b.lifecycle == "retired")
+    return {"ok": True, "chirpstack": cs_res}
+
+
+def _cs_device_disabled(db: Session, who: str, eui: str, disabled: bool) -> str:
+    """A retired button is disabled in ChirpStack (its uplinks are dropped there); un-retiring enables it again."""
+    cs = prov.get_cs()
+    if not cs.configured: return "not_configured"
+    try:
+        changed = cs.set_disabled(eui, disabled)
+    except Exception as e:
+        audit(db, who, "chirpstack_device_failed", eui, err=str(e)[:150]); db.commit()
+        return "error: " + str(e)[:150]
+    if changed:
+        audit(db, who, "chirpstack_device_disabled" if disabled else "chirpstack_device_enabled", eui); db.commit()
+    return "disabled" if disabled else "enabled"
+
+
+@router.delete("/devices/{did}")
+def delete_device(did: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    d = db.get(Device, did)
+    if not d: raise HTTPException(404)
+    if db.query(Case).filter_by(device_id=did).first():
+        raise HTTPException(409, "อุปกรณ์นี้มีประวัติเคสแล้ว ลบไม่ได้ — เปลี่ยนสถานะเป็น 'ปลดระวาง/สูญหาย' แทน")
+    eui = d.dev_eui; db.delete(d); audit(db, u.username, "device_delete", eui); db.commit()
     return {"ok": True}
 
 
@@ -662,7 +718,32 @@ def add_gateway(b: GatewayIn, db: Session = Depends(get_db), u=Depends(admin_onl
     if db.query(Gateway).filter_by(gateway_id=gid).first(): raise HTTPException(409, "already registered")
     g = Gateway(gateway_id=gid, label=b.label.strip(), enabled=True, state="unknown", uplinks_total=0)
     db.add(g); audit(db, u.username, "gateway_add", gid); db.commit()
-    return {"ok": True, "id": g.id}
+    cs_res = _cs_gateway(db, u.username, g)
+    return {"ok": True, "id": g.id, "chirpstack": cs_res}
+
+
+def _cs_gateway(db: Session, who: str, g: Gateway) -> str:
+    """Best effort: also register the gateway in ChirpStack so it shows up there (stats, live frames)."""
+    cs = prov.get_cs()
+    if not cs.configured: return "not_configured"
+    try:
+        res = cs.ensure_gateway(g.gateway_id, g.label, g.lat, g.lon)
+    except Exception as e:
+        audit(db, who, "chirpstack_gateway_failed", g.gateway_id, err=str(e)[:150]); db.commit()
+        return "error: " + str(e)[:150]
+    if res == "created":
+        audit(db, who, "chirpstack_gateway_add", g.gateway_id); db.commit()
+    return res
+
+
+@router.delete("/gateways/{gid}")
+def delete_gateway(gid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    gw = g.gateway_id
+    db.query(GatewayCommand).filter_by(gateway_id=gw).delete()
+    db.delete(g); audit(db, u.username, "gateway_delete", gw); db.commit()
+    return {"ok": True, "note": "ถ้าเกตเวย์ยังเปิดอยู่ มันจะถูกเพิ่มกลับเองเมื่อส่งข้อมูลครั้งถัดไป — ปิดการเฝ้าระวังแทนถ้าแค่ไม่ต้องการแจ้งเตือน"}
 
 
 @router.put("/gateways/{gid}")
@@ -966,6 +1047,16 @@ def patch_user(uid: int, b: UserPatch, db: Session = Depends(get_db), u=Depends(
     return user_dict(t)
 
 
+@router.delete("/users/{uid}")
+def delete_user(uid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    t = db.get(User, uid)
+    if not t: raise HTTPException(404)
+    if t.id == u.id: raise HTTPException(409, "ลบบัญชีตัวเองไม่ได้")
+    if t.active: raise HTTPException(409, "ต้องปิดบัญชีก่อนจึงจะลบได้")
+    db.delete(t); audit(db, u.username, "user_delete", t.username); db.commit()
+    return {"ok": True}
+
+
 @router.post("/users/{uid}/reset-password")
 def reset_password(uid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
     """Admin issues a one-time temporary password (shown ONCE). The user must choose a new one at next login."""
@@ -1212,6 +1303,67 @@ def prov_label(eui: str, db: Session = Depends(get_db), u=Depends(staff_or_admin
     return Response(buf.getvalue(), media_type="image/svg+xml")
 
 
+# ---------------- ChirpStack (network server) — status, compare and sync from the dashboard ----------------
+def _cs_compare(db: Session, cs) -> dict:
+    cs_devs = {d["devEui"].lower(): d for d in cs.list_devices()}
+    sos_devs = {d.dev_eui: d for d in db.query(Device).all()}
+    cs_gws = {g["gatewayId"].lower() for g in cs.list_gateways()}
+    sos_gws = db.query(Gateway).filter(Gateway.enabled.isnot(False)).all()
+    return {
+        "devices_cs": len(cs_devs), "devices_sos": len(sos_devs),
+        # registered in SOS but ChirpStack does not know it: the button cannot join -> provision it again
+        "missing_in_cs": [{"dev_eui": e, "label": d.label, "lifecycle": d.lifecycle}
+                          for e, d in sos_devs.items() if e not in cs_devs and d.lifecycle != "retired"],
+        # in ChirpStack but not in SOS: its alarms reach nobody
+        "unknown_in_sos": [{"dev_eui": e, "name": d.get("name", ""), "last_seen": d.get("lastSeenAt")}
+                           for e, d in cs_devs.items() if e not in sos_devs],
+        "disabled_mismatch": [e for e, d in sos_devs.items()
+                              if e in cs_devs and bool(cs_devs[e].get("isDisabled")) != (d.lifecycle == "retired")],
+        "gateways_cs": len(cs_gws),
+        "gateways_missing_in_cs": [{"gateway_id": g.gateway_id, "label": g.label} for g in sos_gws if g.gateway_id not in cs_gws],
+    }
+
+
+@router.get("/chirpstack")
+def chirpstack_status(db: Session = Depends(get_db), u=Depends(admin_only)):
+    cs = prov.get_cs()
+    st = cs.status()
+    st["ui_url"] = f"https://{env.cs_domain}" if env.cs_domain else ""
+    if st.get("reachable"):
+        try: st["compare"] = _cs_compare(db, cs)
+        except Exception as e: st["compare_error"] = str(e)[:200]
+    return st
+
+
+@router.post("/chirpstack/sync")
+def chirpstack_sync(db: Session = Depends(get_db), u=Depends(admin_only)):
+    """Make ChirpStack match the dashboard: register missing gateways, disable retired buttons / enable the rest.
+    Never creates or deletes devices (keys only exist on the button + ChirpStack; use the install page for that)."""
+    cs = prov.get_cs()
+    if not cs.configured: raise HTTPException(503, "ChirpStack is not configured (CS API key / app id / profile id)")
+    try:
+        cmp_ = _cs_compare(db, cs)
+    except prov.ProvisionError as e:
+        raise HTTPException(502, str(e))
+    done = {"gateways_added": [], "devices_disabled": [], "devices_enabled": [], "errors": []}
+    for g in cmp_["gateways_missing_in_cs"]:
+        gw = db.query(Gateway).filter_by(gateway_id=g["gateway_id"]).one()
+        try:
+            if cs.ensure_gateway(gw.gateway_id, gw.label, gw.lat, gw.lon) == "created":
+                done["gateways_added"].append(gw.gateway_id)
+        except Exception as e:
+            done["errors"].append(f"gateway {gw.gateway_id}: {str(e)[:120]}")
+    for eui in cmp_["disabled_mismatch"]:
+        d = db.query(Device).filter_by(dev_eui=eui).one()
+        try:
+            cs.set_disabled(eui, d.lifecycle == "retired")
+            done["devices_disabled" if d.lifecycle == "retired" else "devices_enabled"].append(eui)
+        except Exception as e:
+            done["errors"].append(f"device {eui}: {str(e)[:120]}")
+    audit(db, u.username, "chirpstack_sync", "", gateways=len(done["gateways_added"]),
+          disabled=len(done["devices_disabled"]), enabled=len(done["devices_enabled"]), errors=len(done["errors"]))
+    db.commit()
+    return done
 # ---------------- Web Push / installed app (app/push.py) ----------------
 from . import push as pushmod
 from .models import PushSub

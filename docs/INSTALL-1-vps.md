@@ -47,6 +47,8 @@ sudo docker compose logs chirpstack | tail -20
 ถ้า log ของ chirpstack ฟ้อง password/MQTT ว่าว่าง: การแทนค่า `$ตัวแปร` ใน toml ไม่ทำงานกับเวอร์ชันที่ดึงมา → ให้แทนค่าจริงลงใน `chirpstack/chirpstack.toml` และ `chirpstack/region_as923.toml` โดยตรง (ค่าอยู่ใน `.env`) แล้ว `docker compose restart chirpstack`
 
 ## 5. ตั้งค่า ChirpStack (ครั้งเดียว) — ผ่าน SSH tunnel
+> อยากเปิดผ่านโดเมน (เช่น `https://lns.dmtc.ac.th`) และจัดการจากแดชบอร์ด → ดู [CHIRPSTACK-WEB.md](CHIRPSTACK-WEB.md)
+
 ```bash
 # จากเครื่องคุณ
 ssh -L 8080:localhost:8080 -L 8090:localhost:8090 sos@sos.โดเมนของคุณ
