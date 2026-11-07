@@ -57,6 +57,7 @@ curl https://sos.dmtc.ac.th/healthz                                   # ต้�
 ssh -L 8080:localhost:8080 -L 8090:localhost:8090 sos@192.168.x.50
 ```
 เปิด http://localhost:8080 (admin/admin → เปลี่ยนรหัสทันที) → Device profile `SOS-button` (AS923, LoRaWAN 1.0.4, OTAA) · Application `sos-patients` · API key `provision` → ใส่ `CHIRPSTACK_APP_ID=<uuid>` ใน `infra/.env` → `sudo docker compose up -d backend`
+**C5b (ถ้าต้องการ)** เปิดหน้า ChirpStack ผ่านโดเมน `lns.dmtc.ac.th` แทน SSH tunnel → [CHIRPSTACK-WEB.md](CHIRPSTACK-WEB.md)
 **C6** เปิด https://sos.dmtc.ac.th → ล็อกอิน admin → ระบบบังคับตั้งรหัสใหม่
 **C7** ใส่ LINE token/secret (INSTALL-5 ข้อ 3) · เพิ่ม อสม. แล้วให้ อสม. ผูก LINE
 

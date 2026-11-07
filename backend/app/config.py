@@ -15,6 +15,7 @@ class Env(BaseSettings):
     cs_rest_url: str = "http://chirpstack-rest-api:8090"   # ChirpStack REST proxy (docker network)
     cs_api_key: str = ""          # tenant API key named "provision"
     cs_profile_id: str = ""       # ChirpStack device profile id (SOS-button)
+    cs_domain: str = ""           # optional admin web UI of ChirpStack, e.g. lns.dmtc.ac.th (scripts/enable-chirpstack-domain.sh)
     jwt_secret: str = "CHANGE_ME"
     jwt_hours: int = 12
     line_channel_token: str = ""

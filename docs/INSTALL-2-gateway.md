@@ -25,7 +25,7 @@ cd ~/gw && sudo ./install-gateway.sh --show-id        # พิมพ์ Gateway 
 ```bash
 cd /opt/sos/infra && sudo bash scripts/add-gateway.sh <GATEWAY_ID>    # ได้รหัสผ่าน MQTT (ครั้งเดียว)
 ```
-แล้วใน ChirpStack UI: Gateways → Add gateway ใส่ ID เดียวกัน · คัดลอก CA ลง Pi: `scp sos@sos.โดเมน:/opt/sos/infra/certs/ca.crt ~/gw/ca.crt` (ผ่านเครื่องคุณ)
+แล้วเพิ่มเกตเวย์ที่แดชบอร์ด SOS หน้า **เกตเวย์** (ระบบลงทะเบียนใน ChirpStack ให้เอง — หรือทำเองใน ChirpStack UI: Gateways → Add gateway ใส่ ID เดียวกัน) · คัดลอก CA ลง Pi: `scp sos@sos.โดเมน:/opt/sos/infra/certs/ca.crt ~/gw/ca.crt` (ผ่านเครื่องคุณ)
 
 ## 5. ติดตั้ง
 ```bash

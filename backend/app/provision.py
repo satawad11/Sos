@@ -14,7 +14,17 @@ from .config import env
 
 
 class ProvisionError(Exception):
-    pass
+    def __init__(self, msg: str, status: int = 0):
+        super().__init__(msg)
+        self.status = status
+
+    @property
+    def not_found(self) -> bool:
+        return self.status == 404
+
+    @property
+    def exists(self) -> bool:
+        return self.status == 409
 
 
 def gen_identity() -> tuple[str, str]:
@@ -51,6 +61,76 @@ class ChirpStackRest:
 
     def delete(self, dev_eui: str) -> None:
         self.http.delete(f"{self.base}/api/devices/{dev_eui}", headers=self._h()).raise_for_status()
+
+    # ---- management from the dashboard (ChirpStack page / gateway + device sync) ----
+    def _call(self, method: str, path: str, **kw) -> dict:
+        try:
+            r = self.http.request(method, f"{self.base}{path}", headers=self._h(), **kw)
+        except httpx.HTTPError as e:
+            raise ProvisionError(f"ChirpStack: {e.__class__.__name__}") from e
+        if r.status_code >= 400:
+            try: msg = r.json().get("message") or r.text
+            except ValueError: msg = r.text
+            raise ProvisionError(f"ChirpStack {r.status_code}: {str(msg)[:200]}", r.status_code)
+        try: return r.json() if r.content else {}
+        except ValueError: return {}
+
+    def _pages(self, path: str, params: dict, limit: int = 100, cap: int = 5000) -> list[dict]:
+        out: list[dict] = []
+        while len(out) < cap:
+            res = self._call("GET", path, params={**params, "limit": limit, "offset": len(out)}).get("result") or []
+            out += res
+            if len(res) < limit: break
+        return out
+
+    def application(self) -> dict:
+        return self._call("GET", f"/api/applications/{self.app_id}").get("application") or {}
+
+    def tenant_id(self) -> str:
+        if not getattr(self, "_tenant", None):
+            self._tenant = self.application().get("tenantId", "")
+        return self._tenant
+
+    def status(self) -> dict:
+        """Connectivity check for the dashboard. Never raises."""
+        if not self.configured:
+            return {"configured": False, "reachable": False, "error": "ยังไม่ได้ตั้งค่า CHIRPSTACK_API_KEY / APP_ID / PROFILE_ID"}
+        try:
+            app = self.application()
+            prof = self._call("GET", f"/api/device-profiles/{self.profile_id}").get("deviceProfile") or {}
+            return {"configured": True, "reachable": True, "error": "", "application": app.get("name", ""),
+                    "tenant_id": app.get("tenantId", ""), "device_profile": prof.get("name", ""),
+                    "region": prof.get("region", ""), "mac_version": prof.get("macVersion", "")}
+        except ProvisionError as e:
+            return {"configured": True, "reachable": False, "error": str(e)}
+
+    def list_devices(self) -> list[dict]:
+        return self._pages("/api/devices", {"applicationId": self.app_id})
+
+    def set_disabled(self, dev_eui: str, disabled: bool) -> bool:
+        """Returns True if ChirpStack was changed."""
+        dev = self._call("GET", f"/api/devices/{dev_eui}").get("device") or {}
+        if bool(dev.get("isDisabled")) == disabled:
+            return False
+        dev["isDisabled"] = disabled
+        self._call("PUT", f"/api/devices/{dev_eui}", json={"device": dev})
+        return True
+
+    def list_gateways(self) -> list[dict]:
+        return self._pages("/api/gateways", {"tenantId": self.tenant_id()})
+
+    def ensure_gateway(self, gateway_id: str, name: str, lat: float | None = None, lon: float | None = None) -> str:
+        """Register the gateway in ChirpStack. Returns "created" or "exists"."""
+        gw = {"gatewayId": gateway_id, "name": (name or gateway_id)[:100], "description": "added from SOS dashboard",
+              "tenantId": self.tenant_id(), "statsInterval": 30, "tags": {"source": "sos-dashboard"}}
+        if lat is not None and lon is not None:
+            gw["location"] = {"latitude": lat, "longitude": lon, "altitude": 0}
+        try:
+            self._call("POST", "/api/gateways", json={"gateway": gw})
+            return "created"
+        except ProvisionError as e:
+            if e.exists: return "exists"
+            raise
 
 
 _cs = {"client": None}

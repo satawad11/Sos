@@ -7,9 +7,10 @@ services:
     environment: [DOMAIN]
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/sites:/etc/caddy/sites:ro     # optional extra sites (scripts/enable-chirpstack-domain.sh)
       - caddy_data:/data
       - caddy_config:/config
-    depends_on: [backend]
+    depends_on: [backend, chirpstack]
 
   backend:
     build: { context: .., dockerfile: backend/Dockerfile }
@@ -25,6 +26,7 @@ services:
       SOS_CS_REST_URL: http://chirpstack-rest-api:8090
       SOS_CS_API_KEY: ${CHIRPSTACK_API_KEY}
       SOS_CS_PROFILE_ID: ${CHIRPSTACK_PROFILE_ID}
+      SOS_CS_DOMAIN: ${CS_DOMAIN:-}
       SOS_JWT_SECRET: ${JWT_SECRET}
       SOS_LINE_CHANNEL_TOKEN: ${LINE_CHANNEL_TOKEN}
       SOS_LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET}
@@ -46,7 +48,7 @@ services:
       CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET}
       MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD}
     depends_on: [postgres, redis, mosquitto]
-    ports: ["127.0.0.1:8080:8080"]      # web UI: reach with  ssh -L 8080:localhost:8080 user@vps
+    ports: ["127.0.0.1:8080:8080"]      # web UI: ssh -L 8080:localhost:8080 user@vps  — or a domain: scripts/enable-chirpstack-domain.sh
 
   chirpstack-rest-api:
     image: chirpstack/chirpstack-rest-api:4

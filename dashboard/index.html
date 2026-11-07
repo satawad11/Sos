@@ -131,7 +131,7 @@ function connectWS(){
   ws.onclose=()=>{if(token)setTimeout(connectWS,3000)}}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
-const ICON={cases:"🚨",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",gateways:"📡",map:"🗺️",reports:"📊",privacy:"🔒",install:"🔌",users:"👥",update:"⬆️",settings:"⚙️",audit:"📜"};
+const ICON={cases:"🚨",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",gateways:"📡",map:"🗺️",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",settings:"⚙️",audit:"📜"};
 const LS={get:k=>{try{return localStorage.getItem(k)||""}catch{return""}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 function authShell(inner){$("#app").innerHTML=`<div class="auth">${inner}</div>`}
 function busyBtn(b,on,label){b.disabled=on;b.innerHTML=on?`<span class="spin"></span> กำลังดำเนินการ…`:label}
@@ -162,7 +162,7 @@ function render(){
       catch(x){const m=/bad credentials/.test(x.message)?"ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง":/locked/.test(x.message)?"บัญชีถูกล็อกชั่วคราว 15 นาที เพราะใส่รหัสผิดหลายครั้ง":/Failed to fetch|NetworkError/.test(x.message)?"ติดต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ต":x.message;
         err.textContent=m;err.hidden=false;busyBtn($("#go"),false,"เข้าสู่ระบบ");p.select()}};
     return}
-  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["map","แผนที่"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["map","แผนที่"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["chirpstack","ChirpStack"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
   const RN={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
   $("#app").innerHTML=`<div class="shell" id="shell"><header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">☰</button>
     <div class="brand">${LOGO(32)}<span>ระบบแจ้งเหตุฉุกเฉิน</span></div>
@@ -173,7 +173,7 @@ function render(){
   document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(setDirty()&&!confirm("มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ออกจากหน้านี้?"))return;setDirty=()=>false;page=b.dataset.p;render();scrollTo(0,0)});
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>pwScreen(false);$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
-  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,map:loadMap,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,update:loadUpdate,settings:loadSettings,audit:loadAudit})[page])();
+  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,map:loadMap,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,chirpstack:loadChirpstack,update:loadUpdate,settings:loadSettings,audit:loadAudit})[page])();
   if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
   if(!ws||ws.readyState>1)connectWS()}
 
@@ -236,7 +236,7 @@ const loadGateways=guard(async()=>{
   $("#main").innerHTML=`${role==="admin"?`<div class="card"><h3>เพิ่มเกตเวย์</h3><div class="row"><input id="gi" placeholder="Gateway ID 16 หลัก" size="24" title="ได้จาก sudo ./install-gateway.sh --show-id"><input id="gl" placeholder="ป้าย เช่น รพ.สต. ม.3"><button class="btn p" id="ga">เพิ่ม</button></div><p class="mut">ไม่ต้องเพิ่มเองก็ได้ ระบบจะเพิ่มให้เองเมื่อเกตเวย์เชื่อมต่อครั้งแรก — เพิ่มล่วงหน้าเพื่อตั้งป้ายชื่อ</p></div>`:""}
   <div class="card">${gs.length?`<table><tr><th>สถานะ</th><th>ป้าย / ID</th><th>เห็นล่าสุด</th><th>รายงานล่าสุด</th><th>อุปกรณ์ active</th><th>เฟรมสะสม</th><th>CPU / ทำงานมาแล้ว</th><th>ตำแหน่ง</th><th>ข้อสังเกต</th><th></th></tr>${gs.map(g=>{const r=g.report||{};return`<tr><td style="white-space:nowrap">${GWS[g.status][0]} ${GWS[g.status][1]}</td><td>${esc(g.label||"-")}<div class="mut"><code>${esc(g.gateway_id)}</code></div></td><td>${ago(g.last_seen)}</td><td>${ago(g.last_report_at)}</td><td>${g.devices}</td><td>${g.uplinks_total}</td><td>${r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-"} / ${upt(r.uptime_s)}</td><td>${g.loc.registered?gmap(g.loc.registered.lat,g.loc.registered.lon,"📍 แผนที่"):'<span class="mut">ยังไม่ระบุ</span>'}${g.loc.moved_m!=null?` <b style="color:var(--amb)">ย้าย ${dist(g.loc.moved_m)}?</b>`:""}</td><td style="color:${g.status==="offline"?"var(--red)":"var(--amb)"}">${esc(why(g))}</td><td>${canEdit()?`<button class="btn" data-g="${g.id}">แก้ไข</button>`:""}</td></tr>`}).join("")}</table>`:'<p class="mut">ยังไม่มีเกตเวย์ — ติดตั้งตาม INSTALL-2 แล้วเกตเวย์จะปรากฏที่นี่เอง</p>'}
   <p class="mut">เกตเวย์ส่งรายงานตัวเองทุก 1 นาที ถ้าเงียบเกินที่ตั้งไว้ (หน้าตั้งค่า → ออฟไลน์) หรือตัวรับสัญญาณ LoRa เสียเกิน 3 นาที ระบบจะส่ง LINE แจ้งผู้รับที่เลือกไว้ในหน้าตั้งค่า</p></div>`;
-  if($("#ga"))$("#ga").onclick=guard(async()=>{await api("/gateways",{method:"POST",body:{gateway_id:$("#gi").value,label:$("#gl").value}});toast("เพิ่มแล้ว");loadGateways()});
+  if($("#ga"))$("#ga").onclick=guard(async()=>{const r=await api("/gateways",{method:"POST",body:{gateway_id:$("#gi").value,label:$("#gl").value}});toast("เพิ่มแล้ว"+csNote(r.chirpstack));loadGateways()});
   document.querySelectorAll("button[data-g]").forEach(b=>b.onclick=guard(async()=>{const g=gs.find(x=>x.id==b.dataset.g),r=g.report||{};devEdit=true;
     const cgs=role==="admin"?await api("/caregivers"):[];
     const row=(k,v)=>`<tr><th style="width:230px">${k}</th><td>${v}</td></tr>`;
@@ -314,7 +314,7 @@ const loadDevices=guard(async()=>{
       <div class="row"><button class="btn p" id="svc">ส่งค่าไปยังเครื่อง</button><button class="btn" id="rsc">กลับไปใช้ค่ากลางทั้งหมด</button></div></div>`:"";
     $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}</option>`).join("")}</select></div><button class="btn p" id="sv">บันทึก</button></div>${cfgCard}`;
     $("#back").onclick=()=>{devEdit=false;render()};
-    $("#sv").onclick=guard(async()=>{await api("/devices/"+d.id,{method:"PUT",body:{dev_eui:d.dev_eui,label:$("#l").value,lifecycle:$("#lc").value,patient_id:$("#pt").value?Number($("#pt").value):null}});toast("บันทึกแล้ว");devEdit=false;render()});
+    $("#sv").onclick=guard(async()=>{const r=await api("/devices/"+d.id,{method:"PUT",body:{dev_eui:d.dev_eui,label:$("#l").value,lifecycle:$("#lc").value,patient_id:$("#pt").value?Number($("#pt").value):null}});toast("บันทึกแล้ว"+csNote(r.chirpstack));devEdit=false;render()});
     document.querySelectorAll(".ck").forEach(c=>c.onchange=()=>{document.querySelector(`.cv[data-k="${c.dataset.k}"]`).disabled=!c.checked});
     if($("#svc")){
       $("#svc").onclick=guard(async()=>{const o={};document.querySelectorAll(".ck:checked").forEach(c=>o[c.dataset.k]=Number(document.querySelector(`.cv[data-k="${c.dataset.k}"]`).value));
@@ -436,6 +436,34 @@ const loadSettings=guard(async()=>{
   const bindHol=()=>document.querySelectorAll("[data-h]").forEach(b=>b.onclick=guard(async()=>{await api("/holidays/"+b.dataset.h,{method:"DELETE"});$("#hol").innerHTML=holRows(await api("/holidays"));bindHol()}));
   $("#ha").onclick=guard(async()=>{if(!$("#hd").value)throw new Error("เลือกวันที่ก่อน");await api("/holidays",{method:"POST",body:{day:$("#hd").value,name:$("#hn").value}});$("#hd").value="";$("#hn").value="";$("#hol").innerHTML=holRows(await api("/holidays"));bindHol();toast("เพิ่มวันหยุดแล้ว")});
   bindHol();refresh()});
+
+// ---------------- ChirpStack (network server) — admin only: status, compare with the dashboard, sync ----------------
+const csNote=r=>!r||r==="unchanged"||r==="not_configured"?"":r==="created"?" · ลงทะเบียนใน ChirpStack แล้ว":r==="exists"?" · มีใน ChirpStack อยู่แล้ว":r==="disabled"?" · ปิดใช้งานใน ChirpStack แล้ว":r==="enabled"?" · เปิดใช้งานใน ChirpStack แล้ว":" · ⚠️ ChirpStack: "+r;
+async function loadChirpstack(){
+  if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
+  $("#main").innerHTML='<div class="card"><span class="spin"></span> กำลังตรวจ ChirpStack…</div>';
+  let s;try{s=await api("/chirpstack")}catch(e){if(page==="chirpstack")$("#main").innerHTML=`<div class="warn">${esc(e.message)}</div>`;return}
+  if(page!=="chirpstack")return;
+  const c=s.compare,li=(a,f)=>a.length?`<ul>${a.map(f).join("")}</ul>`:'<p class="mut">ไม่มี</p>';
+  const ui=s.ui_url?`<a class="btn p" href="${esc(s.ui_url)}" target="_blank" rel="noopener">เปิดหน้า ChirpStack ↗</a> <span class="mut">${esc(s.ui_url)} (เข้าได้เฉพาะเครือข่ายที่อนุญาต)</span>`
+    :'<span class="mut">ยังไม่ได้เปิดโดเมนสำหรับ ChirpStack — บนเซิร์ฟเวอร์รัน <code>sudo bash scripts/enable-chirpstack-domain.sh lns.โดเมน &lt;IP/ช่วงที่อนุญาต&gt;</code> หรือใช้ SSH tunnel</span>';
+  const need=c?c.gateways_missing_in_cs.length+c.disabled_mismatch.length:0;
+  $("#main").innerHTML=`<div class="card"><h3>ChirpStack (LoRaWAN Network Server)</h3>
+    <div class="row"><b>สถานะ:</b> ${!s.configured?'<span class="bad">ยังไม่ได้ตั้งค่า</span>':s.reachable?'<span class="ok">เชื่อมต่อได้</span>':'<span class="bad">เชื่อมต่อไม่ได้</span>'} ${s.error?`<span class="mut">${esc(s.error)}</span>`:""}</div>
+    ${s.reachable?`<div class="row"><b>Application:</b> ${esc(s.application)} · <b>Device profile:</b> ${esc(s.device_profile)} <span class="mut">${esc(s.region)} ${esc(s.mac_version)}</span></div>`:""}
+    <div class="row">${ui}</div></div>
+   ${c?`<div class="card"><h3>เทียบข้อมูลกับแดชบอร์ด</h3>
+    <div class="row">อุปกรณ์: ในแดชบอร์ด <b>${c.devices_sos}</b> · ใน ChirpStack <b>${c.devices_cs}</b> · เกตเวย์ใน ChirpStack <b>${c.gateways_cs}</b></div>
+    <h4>เกตเวย์ที่ยังไม่ได้ลงทะเบียนใน ChirpStack (${c.gateways_missing_in_cs.length})</h4>${li(c.gateways_missing_in_cs,g=>`<li><code>${esc(g.gateway_id)}</code> ${esc(g.label)}</li>`)}
+    <h4>สถานะเปิด/ปิดไม่ตรงกัน (${c.disabled_mismatch.length})</h4><p class="mut">อุปกรณ์ที่ "ปลดระวาง" จะถูกปิดใช้งานใน ChirpStack ส่วนสถานะอื่นจะเปิดใช้งาน</p>${li(c.disabled_mismatch,e=>`<li><code>${esc(e)}</code></li>`)}
+    <div class="row"><button class="btn p" id="cssync" ${need?"":"disabled"}>🔄 ซิงก์ไปที่ ChirpStack${need?` (${need} รายการ)`:""}</button> <button class="btn" id="csre">ตรวจใหม่</button></div>
+    <h4>⚠️ มีในแดชบอร์ดแต่ไม่มีใน ChirpStack (${c.missing_in_cs.length})</h4><p class="mut">ปุ่มเหล่านี้ join เครือข่ายไม่ได้ — ต้องลงทะเบียนใหม่ที่หน้า "ติดตั้งอุปกรณ์" (ระบบไม่สร้างให้อัตโนมัติ เพราะ AppKey อยู่บนตัวปุ่มเท่านั้น)</p>${li(c.missing_in_cs,d=>`<li><code>${esc(d.dev_eui)}</code> ${esc(d.label)} <span class="mut">${esc(d.lifecycle)}</span></li>`)}
+    <h4>⚠️ มีใน ChirpStack แต่ไม่มีในแดชบอร์ด (${c.unknown_in_sos.length})</h4><p class="mut">กดปุ่มแล้วจะไม่มีใครได้รับแจ้ง — เพิ่มที่หน้า "อุปกรณ์" หรือลบออกจาก ChirpStack</p>${li(c.unknown_in_sos,d=>`<li><code>${esc(d.dev_eui)}</code> ${esc(d.name)} <span class="mut">เห็นล่าสุด ${fmt(d.last_seen)}</span></li>`)}
+   </div>`:s.compare_error?`<div class="warn">${esc(s.compare_error)}</div>`:""}`;
+  if($("#csre"))$("#csre").onclick=loadChirpstack;
+  if($("#cssync"))$("#cssync").onclick=guard(async()=>{busyBtn($("#cssync"),true);const r=await api("/chirpstack/sync",{method:"POST"});
+    toast(`ซิงก์แล้ว: เพิ่มเกตเวย์ ${r.gateways_added.length} · ปิด ${r.devices_disabled.length} · เปิด ${r.devices_enabled.length}${r.errors.length?" · ผิดพลาด "+r.errors.length:""}`);loadChirpstack()});
+}
 
 // ---------------- system update (GitHub) — admin only; the host updater does the work (docs/UPDATE.md) ----------------
 let upSawBusy=false;

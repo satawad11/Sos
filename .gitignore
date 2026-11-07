@@ -11,3 +11,4 @@ infra/mosquitto/passwd
 provisioned_devices.csv
 *.png
 infra/update/
+infra/caddy/sites/*.caddy
