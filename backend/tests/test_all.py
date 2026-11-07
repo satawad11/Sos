@@ -1610,3 +1610,66 @@ def test_line_credentials_from_dashboard(env_, monkeypatch):
     finally:
         with SessionLocal() as db:
             linecfg.save(db, "token", ""); linecfg.save(db, "secret", "")
+
+
+def test_ai_gemini_config_and_anonymised_summary(env_, monkeypatch):
+    import json
+    eng, downs, notif, client, ids = env_
+    from app import linecfg, ai
+    from app.models import Patient, User
+    from app.auth import hash_pw
+    patch_now(monkeypatch, NOON_TUE)
+    h = login(client)
+    with SessionLocal() as db:
+        p = db.get(Patient, ids["p"]); p.village = "บ้านลับมาก"; p.address = "99/9 ถนนลับ"; db.commit(); pname = p.full_name
+        db.add(User(username="staff3", password_hash=hash_pw("password12345"), role="staff")); db.add(User(username="v3", password_hash=hash_pw("password12345"), role="viewer")); db.commit()
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT))
+    hs, hv = login(client, "staff3"), login(client, "v3")
+    key = "AIza" + "k" * 35 + "WXYZ"
+    try:
+        assert client.post("/api/reports/ai-summary?month=2026-11", headers=h).status_code == 409          # not configured yet
+        assert client.put("/api/integrations/ai", json={"key": "short"}, headers=h).status_code == 422
+        assert client.put("/api/integrations/ai", json={"model": "../../evil"}, headers=h).status_code == 422
+        r = client.put("/api/integrations/ai", json={"key": key, "model": "gemini-2.5-flash-lite"}, headers=h).json()
+        assert r["key_set"] and r["key_hint"] == "…WXYZ" and r["model"] == "gemini-2.5-flash-lite" and key not in json.dumps(r)
+        assert not any(key in json.dumps(a) for a in client.get("/api/audit", headers=h).json())
+        assert client.get("/api/integrations/ai", headers=hs).status_code == 403
+        assert client.post("/api/reports/ai-summary?month=2026-11", headers=hv).status_code == 403
+        sent = {}
+        class R:
+            status_code = 200
+            def json(s): return {"candidates": [{"content": {"parts": [{"text": "สรุป: มีเคส 1 เคส"}]}}]}
+        def fake_post(url, headers=None, json=None, timeout=None):
+            sent.update(url=url, headers=headers, body=json); return R()
+        monkeypatch.setattr("app.ai.httpx.post", fake_post)
+        monkeypatch.setattr("app.api._ai_last", {"t": 0.0})
+        out = client.post("/api/reports/ai-summary?month=" + NOON_TUE.strftime("%Y-%m"), headers=hs)
+        assert out.status_code == 200 and out.json()["text"].startswith("สรุป")
+        prompt = sent["body"]["contents"][0]["parts"][0]["text"]
+        assert '"เคส": {"total": 1' in prompt and "หมู่บ้าน 1" in prompt        # the case really is in the data, as anonymous numbers
+        assert pname not in prompt and "บ้านลับมาก" not in prompt and "ถนนลับ" not in prompt and EUI not in prompt   # nothing identifying leaves
+        assert "gemini-2.5-flash-lite:generateContent" in sent["url"] and key not in sent["url"] and sent["headers"]["x-goog-api-key"] == key
+        # quota error is turned into a friendly message
+        class R429:
+            status_code = 429
+            def json(s): return {"error": {"message": "quota"}}
+        monkeypatch.setattr("app.ai.httpx.post", lambda *a, **k: R429()); monkeypatch.setattr("app.api._ai_last", {"t": 0.0})
+        assert client.post("/api/integrations/ai/test", headers=h).json()["ok"] is False
+        # switched off by the admin
+        client.put("/api/integrations/ai", json={"enabled": False}, headers=h); monkeypatch.setattr("app.api._ai_last", {"t": 0.0})
+        assert client.post("/api/reports/ai-summary?month=2026-11", headers=hs).status_code == 409
+    finally:
+        with SessionLocal() as db:
+            linecfg.save(db, "gemini", ""); linecfg.set_flag(db, "gemini_enabled", "1")
+
+
+def test_ai_anonymise_drops_identifying_fields():
+    from app import ai
+    s = {"period": {"from_be": "1 พ.ย. 2569", "to_be": "30 พ.ย. 2569"}, "cases": {"total": 2}, "response": {"accepted": 2},
+         "by_hour": [0] * 24, "by_weekday": [{"day": "จ.", "cases": 2}],
+         "by_village": [{"village": "บ้านลับ", "cases": 2, "false_alarm": 0, "accept_avg_s": 30.0}], "line": {"sent": 2, "failed": 0},
+         "devices": {"active": 3, "as_of": "x"}, "gateways": [{"gateway_id": "0016c001f1234567", "label": "รพ.สต.ลับ", "outages": 1, "downtime_min": 5.0}],
+         "top_patients": [{"name": "นายลับ"}]}
+    p = json.dumps(ai.anonymise(s), ensure_ascii=False)
+    for bad in ("บ้านลับ", "0016c001f1234567", "รพ.สต.ลับ", "นายลับ"): assert bad not in p
+    assert "หมู่บ้าน 1" in p and "เกตเวย์ 1" in p
