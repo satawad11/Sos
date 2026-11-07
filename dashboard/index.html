@@ -22,7 +22,7 @@ input,select,textarea{font:inherit;padding:7px;border:1px solid var(--bd);border
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:10px;display:none}
 #login{max-width:340px;margin:12vh auto}.warn{background:#fff3cd;color:#664d03;padding:8px 12px;border-radius:8px}
 @media print{body.rpt *{visibility:hidden}body.rpt #rpt,body.rpt #rpt *{visibility:visible}body.rpt #rpt{position:absolute;left:0;top:0;width:100%;color:#000}body *{visibility:hidden}#plabel,#plabel *{visibility:visible}#plabel{position:absolute;left:0;top:0;border:1px solid #000;padding:6px;width:60mm;color:#000;background:#fff}}
-.step{display:flex;gap:8px;align-items:flex-start;margin:4px 0}.ok{color:var(--grn)}.bad{color:var(--red)}
+.btn:disabled{opacity:.45;cursor:not-allowed}.step{display:flex;gap:8px;align-items:flex-start;margin:4px 0}.ok{color:var(--grn)}.bad{color:var(--red)}
 </style></head>
 <body>
 <div id="app"></div><div id="toast"></div>
@@ -51,11 +51,11 @@ function render(){
   if(!token){$("#app").innerHTML=`<div class="card" id="login"><h2>เข้าสู่ระบบ</h2><div class="row"><input id="u" placeholder="ชื่อผู้ใช้" autocomplete="username"></div><div class="row"><input id="p" type="password" placeholder="รหัสผ่าน" autocomplete="current-password"></div><button class="btn p" id="go">เข้าสู่ระบบ</button></div>`;
     $("#go").onclick=guard(async()=>{const r=await api("/login",{method:"POST",body:{username:$("#u").value,password:$("#p").value}});token=r.token;role=r.role;sessionStorage.setItem("tk",token);sessionStorage.setItem("role",role);if(r.must_change)sessionStorage.setItem("mc","1");else sessionStorage.removeItem("mc");render()});
     $("#p").onkeydown=e=>{if(e.key==="Enter")$("#go").click()};return}
-  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["users","ผู้ใช้"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
   $("#app").innerHTML=`<header><h1>🚑 ระบบแจ้งเหตุฉุกเฉิน</h1><nav>${tabs.map(t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}">${t[1]}</button>`).join("")}</nav><button class="btn" id="snd">${audioOn?"🔔 เสียงเปิด":"🔕 เปิดเสียงเตือน"}</button><button class="btn" id="pw">🔑 รหัสผ่าน</button><button class="btn" id="out">ออก</button></header><main id="main"></main>`;
   document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{page=b.dataset.p;render()});
   $("#out").onclick=logout;$("#pw").onclick=()=>pwScreen(false);$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
-  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,settings:loadSettings,audit:loadAudit})[page])();
+  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,update:loadUpdate,settings:loadSettings,audit:loadAudit})[page])();
   if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
   if(!ws||ws.readyState>1)connectWS()}
 
@@ -185,6 +185,44 @@ const loadSettings=guard(async()=>{
   $("#s6").onclick=guard(async()=>{const r=await api("/system-alert/test",{method:"POST"});alert(r.results.map(x=>x.caregiver+": "+(x.ok?"ส่งแล้ว":"ไม่สำเร็จ ("+x.detail+")")).join("\n"))});
   $("#ha").onclick=guard(async()=>{await api("/holidays",{method:"POST",body:{day:$("#hd").value,name:$("#hn").value}});loadSettings()});
   document.querySelectorAll("[data-h]").forEach(b=>b.onclick=guard(async()=>{await api("/holidays/"+b.dataset.h,{method:"DELETE"});loadSettings()}))});
+
+// ---------------- system update (GitHub) — admin only; the host updater does the work (docs/UPDATE.md) ----------------
+let upSawBusy=false;
+const UPST={idle:["ok","พร้อม"],done:["ok","สำเร็จ"],failed:["bad","ไม่สำเร็จ"],queued:["mut","รอคิว"],checking:["mut","กำลังตรวจ…"],updating:["mut","กำลังอัปเดต…"],rolling_back:["bad","กำลังย้อนกลับ…"]};
+const verLine=v=>v?`<code>${esc(v.short)}</code> ${esc(v.subject)} <span class="mut">· ${fmt(v.date)}</span>`:'<span class="mut">-</span>';
+async function loadUpdate(){
+  if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
+  clearTimeout(timer);let s;
+  try{s=await api("/system/update")}
+  catch(e){if(page!=="update")return;
+    $("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ</h3><p>⏳ ${upSawBusy?"ระบบกำลังรีสตาร์ทหลังอัปเดต รอสักครู่…":"ติดต่อเซิร์ฟเวอร์ไม่ได้ ("+esc(e.message)+")"}</p></div>`;
+    timer=setTimeout(()=>{if(page==="update")loadUpdate()},4000);return}
+  if(page!=="update")return;
+  const st=s.status||{},busy=s.busy,state=s.pending?"queued":(st.state||"idle"),[cls,lbl]=UPST[state]||["mut",state];
+  if(busy)upSawBusy=true;
+  const finished=!busy&&upSawBusy&&(state==="done"||state==="failed");
+  if(!s.installed){$("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ</h3><div class="warn">ยังไม่ได้ติดตั้งตัวอัปเดตบนเซิร์ฟเวอร์ — ให้ผู้ดูแลเซิร์ฟเวอร์รัน <code>sudo bash infra/scripts/setup-updater.sh</code> หนึ่งครั้ง (ดู docs/UPDATE.md)</div></div>`;return}
+  const ch=st.changes||[],n=st.behind||0,lu=st.last_update;
+  $("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ <span class="mut" style="font-weight:normal">(โค้ดจาก GitHub · สาขา ${esc(st.branch||"main")})</span></h3>
+   <div class="row"><b>เวอร์ชันที่ใช้อยู่:</b> ${verLine(st.current)}</div>
+   <div class="row"><b>ล่าสุดบน GitHub:</b> ${verLine(st.latest)}</div>
+   <div class="row mut">ตรวจล่าสุด ${fmt(st.checked_at)}${lu?` · อัปเดตครั้งก่อน ${fmt(lu.at)} <code>${esc(lu.from.slice(0,7))}</code> → <code>${esc(lu.to.slice(0,7))}</code> ${lu.ok?'<span class="ok">สำเร็จ</span>':'<span class="bad">ไม่สำเร็จ (ย้อนกลับ)</span>'}`:""}</div>
+   <div class="row"><b>สถานะ:</b> <span class="${cls}">${busy?"⏳ ":""}${esc(lbl)}</span> ${esc(st.message||"")}</div>
+   ${finished&&state==="done"?'<div class="row"><b class="ok">อัปเดตเสร็จแล้ว</b> — กด "โหลดหน้าใหม่" เพื่อใช้หน้าจอเวอร์ชันใหม่ <button class="btn g" id="uprl">โหลดหน้าใหม่</button></div>':""}
+   <div class="row"><button class="btn" id="upchk" ${busy?"disabled":""}>🔍 ตรวจหาอัปเดต</button>
+     <button class="btn p" id="upgo" ${busy||!n?"disabled":""}>⬆️ อัปเดตตอนนี้${n?` (${n} รายการ)`:""}</button></div>
+   ${n?`<h4>มีอะไรใหม่ (${n})</h4><ul>${ch.map(c=>`<li><code>${esc(c.short)}</code> ${esc(c.subject)} <span class="mut">· ${esc(c.author)} · ${fmt(c.date)}</span></li>`).join("")}</ul>`:'<p class="mut">ไม่มีเวอร์ชันใหม่ (กด "ตรวจหาอัปเดต" เพื่อเช็กกับ GitHub อีกครั้ง — ระบบเช็กเองทุก 6 ชั่วโมง)</p>'}
+   <p class="mut">ขั้นตอนอัปเดต: สำรองฐานข้อมูล → ดึงโค้ด → build ใหม่ → ตรวจว่าระบบทำงาน — ถ้าไม่ผ่าน ระบบจะ<b>ย้อนกลับเวอร์ชันเดิมให้อัตโนมัติ</b> · ระหว่างอัปเดต (ประมาณ 1–5 นาที) หน้าเว็บและการส่ง LINE จะหยุดชั่วคราว ควรทำนอกช่วงที่มีเคสค้าง</p>
+   <details ${busy||state==="failed"?"open":""}><summary>บันทึกการทำงาน (log)</summary><pre style="white-space:pre-wrap;max-height:320px;overflow:auto;font-size:12px;background:#0f1720;color:#d6e2ee;padding:8px;border-radius:8px">${esc((s.log||[]).join("\n"))||"-"}</pre></details></div>`;
+  if($("#uprl"))$("#uprl").onclick=()=>location.reload();
+  const send=action=>guard(async()=>{await api("/system/update",{method:"POST",body:{action}});upSawBusy=action==="update";toast(action==="update"?"ส่งคำขออัปเดตแล้ว":"กำลังตรวจกับ GitHub…");loadUpdate()})();
+  $("#upchk").onclick=()=>send("check");
+  $("#upgo").onclick=guard(async()=>{
+    const open=(await api("/cases?state=new")).length;
+    if(!confirm(`อัปเดตเป็น ${st.latest?st.latest.short:"เวอร์ชันล่าสุด"} (${n} รายการ)?\n\nระหว่างอัปเดตประมาณ 1–5 นาที หน้าเว็บและการแจ้ง LINE จะหยุดชั่วคราว`+(open?`\n\n⚠️ ขณะนี้มีเคสรอรับเรื่อง ${open} เคส — แนะนำให้จัดการก่อน`:"")+"\n\nระบบจะสำรองฐานข้อมูลก่อน และย้อนกลับเองถ้าอัปเดตไม่ผ่าน"))return;
+    send("update")});
+  if(busy)timer=setTimeout(()=>{if(page==="update")loadUpdate()},3000);
+}
 
 const loadAudit=guard(async()=>{
   if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}

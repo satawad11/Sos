@@ -1,0 +1,10 @@
+# Fires when the dashboard asks for a check/update (backend writes infra/update/request.json).
+[Unit]
+Description=SOS: watch for update requests from the dashboard
+
+[Path]
+PathExists=@REPO@/infra/update/request.json
+Unit=sos-update.service
+
+[Install]
+WantedBy=multi-user.target

@@ -10,3 +10,4 @@ infra/mosquitto/passwd
 .venv/
 provisioned_devices.csv
 *.png
+infra/update/
