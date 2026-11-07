@@ -4,6 +4,18 @@
 
 > ⚠️ **สถานะ:** สคริปต์ผ่านการตรวจ syntax และการ render ไฟล์ตั้งค่าแล้ว แต่ **ยังไม่เคยรันบน Pi/WM1302 จริง** และชื่อไฟล์ binary ใน GitHub releases ตรวจไม่ได้จากที่เขียน (สคริปต์ค้นหาอัตโนมัติ ถ้าไม่เจอจะบอกวิธีใส่ลิงก์เอง) — รันครั้งแรกให้เฝ้าดู
 
+## ⚡ แบบคลิกเดียว (แนะนำ — จาก Windows)
+1. เขียนการ์ดด้วย Raspberry Pi Imager: **Raspberry Pi OS Lite (64-bit)** · hostname `sos-gw1` · ตั้งผู้ใช้/รหัสผ่าน · **เปิด SSH** · timezone Asia/Bangkok
+2. ประกอบ WM1302 + **เสาอากาศ** → เสียบการ์ด → **สาย LAN** → เปิดเครื่อง รอ 2 นาที
+3. ในโฟลเดอร์ repo ดับเบิลคลิก **`gateway\windows\INSTALL-GATEWAY.bat`** แล้วตอบคำถาม (ส่วนใหญ่กด Enter)
+
+สคริปต์ทำให้ทั้งหมด: ฝากกุญแจ SSH (ถามรหัสผ่าน Pi/VPS ครั้งเดียว), ส่งชุดติดตั้ง (แก้ CRLF ให้), อ่าน Gateway ID, สร้างบัญชี MQTT **และเพิ่มเกตเวย์ใน ChirpStack อัตโนมัติ**, คัดลอก CA, ติดตั้ง, **รีบูตให้เองแล้วติดตั้งต่อ**, ตรวจสุขภาพ — รันซ้ำได้ปลอดภัย (รันซ้ำ = หมุนรหัส MQTT ใหม่) · ค่าที่ตอบเก็บใน `gateway-settings.json` (ไม่มีรหัสผ่าน) · log อยู่ที่ `gateway\windows\logs\`
+> เพิ่มเกตเวย์ใน ChirpStack อัตโนมัติได้เมื่อ `.env` บน VPS มี `CHIRPSTACK_API_KEY` และ `CHIRPSTACK_APP_ID` (INSTALL-1 ข้อ 5) — ถ้าไม่มี สคริปต์จะบอกให้เพิ่มเองใน UI
+
+ถ้าติดปัญหาหรืออยากทำทีละขั้น ใช้ขั้นตอนด้านล่าง
+
+---
+
 เวลา ~1 ชั่วโมง · ต้องมี: Pi 4B + แหล่งจ่าย 5V/3A คุณภาพดี, microSD ≥ 16 GB, WM1302 Pi HAT + เสา AS923, **สาย LAN** (ID gateway สร้างจาก MAC ของ eth0), VPS พร้อมแล้ว (INSTALL-1)
 > **ห้ามเปิดเครื่องโดยไม่ต่อเสาอากาศ**
 
@@ -25,7 +37,7 @@ cd ~/gw && sudo ./install-gateway.sh --show-id        # พิมพ์ Gateway 
 ```bash
 cd /opt/sos/infra && sudo bash scripts/add-gateway.sh <GATEWAY_ID>    # ได้รหัสผ่าน MQTT (ครั้งเดียว)
 ```
-แล้วใน ChirpStack UI: Gateways → Add gateway ใส่ ID เดียวกัน · คัดลอก CA ลง Pi: `scp sos@sos.โดเมน:/opt/sos/infra/certs/ca.crt ~/gw/ca.crt` (ผ่านเครื่องคุณ)
+สคริปต์จะเพิ่มเกตเวย์ใน ChirpStack ให้ด้วย (ถ้าแจ้ง `[!!]` ให้เพิ่มเองที่ ChirpStack UI: Gateways → Add gateway ใส่ ID เดียวกัน) · คัดลอก CA ลง Pi: `scp sos@sos.โดเมน:/opt/sos/infra/certs/ca.crt ~/gw/ca.crt` (ผ่านเครื่องคุณ)
 
 ## 5. ติดตั้ง
 ```bash

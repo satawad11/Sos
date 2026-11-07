@@ -104,7 +104,8 @@ if ! ls /home/*/.ssh/authorized_keys >/dev/null 2>&1; then
 fi
 
 if [ "${NEED_REBOOT:-0}" = 1 ]; then
-  echo; echo "SPI was just enabled — reboot now:  sudo reboot   (services start automatically afterwards)"; exit 0
+  echo; echo "SPI was just enabled — reboot now:  sudo reboot   (services start automatically afterwards)"
+  exit "${REBOOT_EXIT_CODE:-0}"     # the Windows one-click installer sets 10 so it knows to reboot and re-run
 fi
 systemctl restart chirpstack-concentratord; sleep 5; systemctl restart chirpstack-mqtt-forwarder; sleep 5
 systemctl restart sos-gateway-report.timer
