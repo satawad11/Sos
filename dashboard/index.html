@@ -221,7 +221,7 @@ function connectWS(){
   ws.onopen=()=>setConn(true);ws.onclose=()=>{setConn(false);if(token)setTimeout(connectWS,3000)}}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
-const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",settings:"⚙️",audit:"📜",account:"👤"};
+const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",integrations:"🔗",settings:"⚙️",audit:"📜",account:"👤"};
 const LS={get:k=>{try{return localStorage.getItem(k)||""}catch{return""}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 function authShell(inner){$("#app").innerHTML=`<div class="auth">${inner}</div>`}
 function busyBtn(b,on,label){b.disabled=on;b.innerHTML=on?`<span class="spin"></span> กำลังดำเนินการ…`:label}
@@ -262,7 +262,7 @@ function render(){
       catch(x){const m=/bad credentials/.test(x.message)?"ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง":/locked/.test(x.message)?"บัญชีถูกล็อกชั่วคราว 15 นาที เพราะใส่รหัสผิดหลายครั้ง":/Failed to fetch|NetworkError/.test(x.message)?"ติดต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ต":x.message;
         err.textContent=m;err.hidden=false;busyBtn($("#go"),false,"เข้าสู่ระบบ");p.select()}};
     return}
-  const tabs=[["cases","เคสฉุกเฉิน"],["map","แผนที่"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["selftest","ทดสอบปุ่ม"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["chirpstack","ChirpStack"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  const tabs=[["cases","เคสฉุกเฉิน"],["map","แผนที่"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["selftest","ทดสอบปุ่ม"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["chirpstack","ChirpStack"],["integrations","เชื่อมต่อ LINE"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
   const RN={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
   $("#app").innerHTML=`<div class="shell" id="shell"><header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">☰</button>
     <div class="brand">${LOGO(32)}<span>ระบบแจ้งเหตุฉุกเฉิน</span></div>
@@ -273,7 +273,7 @@ function render(){
   document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(setDirty()&&!confirm("มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ออกจากหน้านี้?"))return;setDirty=()=>false;page=b.dataset.p;render();scrollTo(0,0)});
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>{page="account";render()};$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
-  clearInterval(timer);(({cases:loadCases,map:loadMap,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,selftest:loadSelftest,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,chirpstack:loadChirpstack,update:loadUpdate,account:loadAccount,settings:loadSettings,audit:loadAudit})[page])();
+  clearInterval(timer);(({cases:loadCases,map:loadMap,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,selftest:loadSelftest,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,chirpstack:loadChirpstack,integrations:loadIntegrations,update:loadUpdate,account:loadAccount,settings:loadSettings,audit:loadAudit})[page])();
   if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
   if(!ws||ws.readyState>1)connectWS()}
 
@@ -1023,6 +1023,40 @@ function pwScreen(forced){
 
 /* ---- users (admin) ---- */
 const RTH={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
+
+/* ---- integrations (admin): LINE credentials. Values are never shown back, only the last 4 characters. ---- */
+const loadIntegrations=guard(async()=>{
+  if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
+  const [l,cs]=await Promise.all([api("/integrations/line"),api("/caregivers")]);if(page!=="integrations")return;
+  const src={dashboard:"ตั้งจากแดชบอร์ด",env:"ตั้งจากไฟล์ .env บนเซิร์ฟเวอร์",none:"ยังไม่ได้ตั้งค่า"};
+  const st=(set,hint,so)=>set?`<span class="ok">● ตั้งแล้ว</span> <code>${esc(hint)}</code> <span class="mut">(${src[so]})</span>`:'<span class="bad">● ยังไม่ได้ตั้งค่า</span>';
+  $("#main").innerHTML=`<div class="card"><h3>LINE Messaging API</h3>
+    <div class="row">สถานะ: ${l.ready?'<span class="ok">พร้อมส่งแจ้งเตือนและรับการผูกบัญชี</span>':'<span class="bad">ยังไม่ครบ — ต้องมีทั้ง Channel access token และ Channel secret</span>'}</div>
+    <div class="row"><b>Channel access token</b> ${st(l.token_set,l.token_hint,l.token_source)}</div>
+    <div class="row"><input id="lt" type="password" size="50" placeholder="วาง Channel access token (long-lived) ใหม่ที่นี่" autocomplete="off"></div>
+    <div class="row"><b>Channel secret</b> ${st(l.secret_set,l.secret_hint,l.secret_source)}</div>
+    <div class="row"><input id="ls" type="password" size="50" placeholder="วาง Channel secret ใหม่ที่นี่" autocomplete="off"></div>
+    <div class="row"><button class="btn p" id="lsv">บันทึก</button><button class="btn" id="lts">ทดสอบการเชื่อมต่อ LINE</button>${l.token_source==="dashboard"||l.secret_source==="dashboard"?'<button class="btn r" id="lrm">ลบค่าที่ตั้งจากแดชบอร์ด</button>':""}<span id="lres" class="mut"></span></div>
+    <p class="hint">เว้นช่องว่างไว้ = ไม่เปลี่ยนค่านั้น · ค่าถูกเข้ารหัสในฐานข้อมูล ไม่แสดงกลับมาและไม่อยู่ใน audit · มีผลทันที ไม่ต้องรีสตาร์ท · ถ้าลบค่าที่ตั้งจากแดชบอร์ด ระบบจะกลับไปใช้ค่าในไฟล์ .env (ถ้ามี)</p></div>
+  <div class="card"><h3>ตั้งค่าใน LINE Developers Console</h3>
+    <ol><li>เข้า <a href="https://developers.line.biz/console/" target="_blank" rel="noopener">LINE Developers Console</a> → Provider → ช่อง <b>Messaging API</b> ของ รพ.สต.</li>
+    <li>แท็บ <b>Basic settings</b> → คัดลอก <b>Channel secret</b> · แท็บ <b>Messaging API</b> → กด Issue ที่ <b>Channel access token (long-lived)</b> แล้วคัดลอก</li>
+    <li>ที่แท็บ Messaging API ตั้ง <b>Webhook URL</b> เป็นค่าด้านล่าง แล้วเปิด <b>Use webhook</b> และกด Verify</li>
+    <li>ปิด <b>Auto-reply messages</b> และ <b>Greeting messages</b> (ไม่เช่นนั้นบอตจะตอบทับ)</li></ol>
+    <div class="row">Webhook URL: <code id="lwh" style="user-select:all">${esc(l.webhook_url)}</code><button class="btn" id="lcp">คัดลอก</button></div>
+    ${l.webhook_url.startsWith("https://")?"":'<div class="warn">LINE ต้องการ URL แบบ https — ตั้งค่า SOS_PUBLIC_URL ของเซิร์ฟเวอร์ให้เป็นโดเมนจริงก่อน</div>'}</div>
+  <div class="card"><h3>ส่งข้อความทดสอบ</h3><p class="mut">ส่งข้อความสั้น ๆ ไปหา อสม. ที่ผูก LINE แล้ว เพื่อเช็กว่าแจ้งเตือนถึงจริง</p>
+    <div class="row"><select id="ltc">${cs.filter(c=>c.line_bound).map(c=>`<option value="${c.id}">${esc(c.full_name)}</option>`).join("")||'<option value="">(ยังไม่มีใครผูก LINE)</option>'}</select><button class="btn" id="ltp" ${cs.some(c=>c.line_bound)?"":"disabled"}>ส่งทดสอบ</button></div></div>`;
+  const val=id=>$("#"+id).value.trim();
+  $("#lsv").onclick=guard(async()=>{const b={};if(val("lt"))b.token=val("lt");if(val("ls"))b.secret=val("ls");if(!Object.keys(b).length){toast("ยังไม่ได้กรอกค่าใหม่");return}
+    await api("/integrations/line",{method:"PUT",body:b});toast("บันทึกแล้ว — มีผลทันที");loadIntegrations()});
+  $("#lts").onclick=guard(async()=>{$("#lres").textContent="กำลังตรวจ…";const r=await api("/integrations/line/test",{method:"POST"});
+    $("#lres").innerHTML=r.ok?`<span class="ok">✔ ${esc(r.detail)}: บอต “${esc(r.bot)}” ${esc(r.basic_id)}</span>${r.secret_set?"":' <b class="bad">แต่ยังไม่ได้ตั้ง Channel secret</b>'}`:`<span class="bad">✖ ${esc(r.detail)}</span>`});
+  if($("#lrm"))$("#lrm").onclick=guard(async()=>{if(!confirm("ลบค่า LINE ที่ตั้งจากแดชบอร์ด? ระบบจะกลับไปใช้ค่าใน .env (ถ้าไม่มี การแจ้งเตือน LINE จะหยุดทำงาน)"))return;
+    await api("/integrations/line",{method:"PUT",body:{token:"",secret:""}});toast("ลบแล้ว");loadIntegrations()});
+  $("#lcp").onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(l.webhook_url).then(()=>toast("คัดลอกแล้ว"));
+  $("#ltp").onclick=guard(async()=>{const r=await api("/integrations/line/test-push",{method:"POST",body:{caregiver_id:+$("#ltc").value}});toast(r.ok?"ส่งแล้ว — ตรวจใน LINE":"ส่งไม่สำเร็จ: "+r.detail)})});
+
 const loadUsers=guard(async()=>{
   if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
   const us=await api("/users");if(page!=="users")return;
@@ -1155,7 +1189,7 @@ function bindAppCards(){
   if($("#pst"))$("#pst").onclick=guard(async()=>{const r=await api("/push/test",{method:"POST"});toast(`ส่งแล้ว ${r.sent}/${r.devices} อุปกรณ์`)});
   if($("#pin"))$("#pin").onclick=async()=>{installEvt.prompt();await installEvt.userChoice;installEvt=null;loadAccount()}}
 // deep links from notifications: ./?case=12  ./?page=gateways
-{const q=new URLSearchParams(location.search);if(q.get("case")){openCaseAfter=+q.get("case")||0;page="cases"}else if(["map","patients","caregivers","devices","selftest","gateways","reports","privacy","install","users","update","settings","audit","account"].includes(q.get("page")))page=q.get("page");
+{const q=new URLSearchParams(location.search);if(q.get("case")){openCaseAfter=+q.get("case")||0;page="cases"}else if(["map","patients","caregivers","devices","selftest","gateways","reports","privacy","install","integrations","users","update","settings","audit","account"].includes(q.get("page")))page=q.get("page");
  if(location.search)history.replaceState(null,"",location.pathname)}
 navigator.serviceWorker&&navigator.serviceWorker.addEventListener("message",e=>{if(e.data&&e.data.url)location.href=e.data.url});
 

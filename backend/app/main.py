@@ -71,6 +71,8 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(dbengine)
     ensure_columns()
     bootstrap_admin()
+    from . import linecfg
+    with SessionLocal() as _db: linecfg.load(_db)
     hub.loop = asyncio.get_running_loop()
     from .mqtt_worker import MqttWorker
     from .push import PushSender

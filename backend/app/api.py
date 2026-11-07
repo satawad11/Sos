@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re, secrets
+import httpx
 from datetime import timedelta, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -15,6 +16,7 @@ from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Ga
 from .config import env
 from . import gateways as gwmod
 from . import gwcmd
+from . import linecfg
 from . import geo
 from . import privacy, reports
 from . import provision as prov
@@ -1199,6 +1201,68 @@ def stats(db: Session = Depends(get_db), u=Depends(current_user)):
             "false_alarm": sum(c.close_reason == "false_alarm" for c in cs),
             "after_hours": sum(c.after_hours for c in cs),
             "avg_accept_s": round(sum(acc) / len(acc), 1) if acc else None}
+
+
+# ---------------- LINE credentials (dashboard) ----------------
+class LineCfgIn(BaseModel):
+    token: str | None = Field(default=None, max_length=600)       # None = leave as is, "" = remove the dashboard copy
+    secret: str | None = Field(default=None, max_length=200)
+
+
+def _line_state() -> dict:
+    t, sc = linecfg.token(), linecfg.secret()
+    return {"token_set": bool(t), "token_hint": linecfg.hint(t) if t else "", "token_source": linecfg.source("token"),
+            "secret_set": bool(sc), "secret_hint": linecfg.hint(sc) if sc else "", "secret_source": linecfg.source("secret"),
+            "webhook_url": env.public_url.rstrip("/") + "/api/line/webhook", "ready": bool(t and sc)}
+
+
+@router.get("/integrations/line")
+def line_cfg(u=Depends(admin_only)):
+    return _line_state()
+
+
+@router.put("/integrations/line")
+def line_cfg_put(b: LineCfgIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    changed = []
+    for name, v in (("token", b.token), ("secret", b.secret)):
+        if v is None: continue
+        v = v.strip()
+        if v and (len(v) < 8 or re.search(r"\s", v)): raise HTTPException(422, f"ค่า {name} ไม่ถูกต้อง (สั้นเกินไปหรือมีช่องว่าง)")
+        linecfg.save(db, name, v); changed.append(name + ("_removed" if not v else "_set"))
+    if changed: audit(db, u.username, "line_config_update", "", changed=",".join(changed)); db.commit()     # never the values
+    return _line_state()
+
+
+@router.post("/integrations/line/test")
+def line_test(db: Session = Depends(get_db), u=Depends(admin_only)):
+    """Checks the token against LINE (bot info). Optionally nothing is sent to anyone."""
+    t = linecfg.token()
+    if not t: raise HTTPException(409, "ยังไม่ได้ตั้งค่า Channel access token")
+    try:
+        r = httpx.get("https://api.line.me/v2/bot/info", headers={"Authorization": f"Bearer {t}"}, timeout=10)
+    except httpx.HTTPError as e:
+        return {"ok": False, "detail": "เชื่อมต่อ LINE ไม่ได้: " + e.__class__.__name__}
+    if r.status_code != 200:
+        return {"ok": False, "detail": "LINE ปฏิเสธโทเคน (HTTP %d) — ตรวจว่าคัดลอกครบและเป็น Channel access token (long-lived)" % r.status_code}
+    j = r.json()
+    audit(db, u.username, "line_config_test", "", ok=True); db.commit()
+    return {"ok": True, "detail": "เชื่อมต่อสำเร็จ", "bot": j.get("displayName", ""), "basic_id": j.get("basicId", ""),
+            "secret_set": bool(linecfg.secret())}
+
+
+class LineTestPushIn(BaseModel):
+    caregiver_id: int
+
+
+@router.post("/integrations/line/test-push")
+def line_test_push(b: LineTestPushIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    cg = db.get(Caregiver, b.caregiver_id)
+    if not cg: raise HTTPException(404)
+    if not cg.line_user_id: raise HTTPException(409, "ผู้ดูแลคนนี้ยังไม่ได้ผูก LINE")
+    from .line import LineNotifier
+    ok, detail = LineNotifier().notify_system(db, cg, "✅ ทดสอบการแจ้งเตือนจากระบบแจ้งเหตุฉุกเฉิน — ถ้าเห็นข้อความนี้ แปลว่าการตั้งค่า LINE ถูกต้อง")
+    audit(db, u.username, "line_test_push", str(cg.id), ok=ok); db.commit()
+    return {"ok": ok, "detail": "ส่งแล้ว" if ok else detail}
 
 
 # ---------------- LINE webhook ----------------

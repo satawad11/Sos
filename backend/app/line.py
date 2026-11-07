@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64, hashlib, hmac, logging
 import httpx
 from sqlalchemy.orm import Session
-from .config import env
+from . import linecfg
 from .models import Case, Caregiver
 
 log = logging.getLogger("sos.line")
@@ -12,7 +12,7 @@ REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 
 
 def verify_signature(body: bytes, signature: str, secret: str | None = None) -> bool:
-    secret = secret if secret is not None else env.line_channel_secret
+    secret = secret if secret is not None else linecfg.secret()
     if not secret:               # never accept an HMAC made with an empty key (forgeable)
         return False
     mac = hmac.new(secret.encode(), body, hashlib.sha256).digest()
@@ -49,8 +49,12 @@ def flex_for_case(case: Case, reminder: bool = False, detail: str = "full") -> d
 
 class LineNotifier:
     def __init__(self, token: str | None = None, client: httpx.Client | None = None):
-        self.token = token or env.line_channel_token
+        self._token = token
         self.http = client or httpx.Client(timeout=10)
+
+    @property
+    def token(self) -> str:
+        return self._token or linecfg.token()      # re-read each time: the dashboard can change it live
 
     def _post(self, url: str, payload: dict) -> tuple[bool, str]:
         if not self.token:

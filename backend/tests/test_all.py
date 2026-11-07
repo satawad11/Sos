@@ -286,7 +286,7 @@ def test_line_bind_and_accept(env_, monkeypatch):
 
 def test_line_empty_secret_rejected(monkeypatch):
     from app import line
-    monkeypatch.setattr(line.env, "line_channel_secret", "")
+    monkeypatch.setattr(line.linecfg.env, "line_channel_secret", "")
     forged = base64.b64encode(hmac.new(b"", b"{}", hashlib.sha256).digest()).decode()
     assert line.verify_signature(b"{}", forged) is False
 
@@ -1563,3 +1563,50 @@ def test_delete_device_and_gateway_also_removes_from_chirpstack(env_, monkeypatc
     r = client.delete(f"/api/devices/{d2}", headers=h)
     assert r.status_code == 200 and r.json()["chirpstack"].startswith("error")
     assert any(a["action"] == "chirpstack_device_delete_failed" for a in client.get("/api/audit", headers=h).json())
+
+
+def test_line_credentials_from_dashboard(env_, monkeypatch):
+    import base64, hashlib, hmac, json
+    *_, client, ids = env_
+    from app import linecfg
+    from app.models import Secret
+    h = login(client)
+    try:
+        s0 = client.get("/api/integrations/line", headers=h).json()
+        assert s0["webhook_url"].endswith("/api/line/webhook")
+        tok, sec = "T" * 40 + "wxyz", "S" * 30 + "abcd"
+        assert client.put("/api/integrations/line", json={"token": "short"}, headers=h).status_code == 422
+        r = client.put("/api/integrations/line", json={"token": tok, "secret": sec}, headers=h).json()
+        assert r["token_set"] and r["token_hint"] == "…wxyz" and r["secret_hint"] == "…abcd" and r["ready"]
+        assert tok not in json.dumps(r) and sec not in json.dumps(r)
+        with SessionLocal() as db:                                   # encrypted at rest, not plaintext
+            assert tok not in db.get(Secret, "line_channel_token").value
+        assert not any(tok in json.dumps(a) or sec in json.dumps(a) for a in client.get("/api/audit", headers=h).json())
+        assert linecfg.token() == tok and linecfg.secret() == sec
+        # the webhook now verifies against the dashboard secret
+        body = json.dumps({"events": []}).encode()
+        sig = base64.b64encode(hmac.new(sec.encode(), body, hashlib.sha256).digest()).decode()
+        assert client.post("/api/line/webhook", content=body, headers={"x-line-signature": sig}).status_code == 200
+        assert client.post("/api/line/webhook", content=body, headers={"x-line-signature": "bad"}).status_code == 401
+        # LINE token check (network mocked)
+        class R:  # noqa
+            def __init__(s, c, j=None): s.status_code, s._j = c, j or {}
+            def json(s): return s._j
+        monkeypatch.setattr("app.api.httpx.get", lambda *a, **k: R(200, {"displayName": "SOS Bot", "basicId": "@abc"}))
+        t = client.post("/api/integrations/line/test", headers=h).json()
+        assert t["ok"] and t["bot"] == "SOS Bot"
+        monkeypatch.setattr("app.api.httpx.get", lambda *a, **k: R(401))
+        assert client.post("/api/integrations/line/test", headers=h).json()["ok"] is False
+        # roles: staff may not read/change it
+        from app.models import User
+        from app.auth import hash_pw
+        with SessionLocal() as db: db.add(User(username="staff2", password_hash=hash_pw("password12345"), role="staff")); db.commit()
+        hs = login(client, "staff2")
+        assert client.get("/api/integrations/line", headers=hs).status_code == 403
+        assert client.put("/api/integrations/line", json={"token": tok}, headers=hs).status_code == 403
+        # removing the dashboard copy falls back to .env
+        client.put("/api/integrations/line", json={"token": "", "secret": ""}, headers=h)
+        assert linecfg.token() == linecfg.env.line_channel_token
+    finally:
+        with SessionLocal() as db:
+            linecfg.save(db, "token", ""); linecfg.save(db, "secret", "")
