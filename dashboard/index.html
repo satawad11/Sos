@@ -68,6 +68,40 @@ main>.card:first-child{margin-top:0}main{max-width:1200px;width:100%}
 @media(prefers-color-scheme:dark){.auth .err{background:#4a1515;color:#ffd6d6}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .step{display:flex;gap:8px;align-items:flex-start;margin:4px 0}.ok{color:var(--grn)}.bad{color:var(--red)}
+:root{--pri2:#e3edfb;--red2:#fde8e8;--grn2:#e1f4e3;--amb2:#fff1d6;--sh:0 1px 2px #1018280d,0 4px 16px #1018280a;--r:14px}@media(prefers-color-scheme:dark){:root{--pri2:#16304f;--red2:#3b1a1f;--grn2:#12301f;--amb2:#33270c;--sh:0 1px 2px #0006}}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
+.kpi{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;box-shadow:var(--sh)}
+.kpi small{color:var(--mut);display:block;font-size:12px}.kpi b{font-size:26px;line-height:1.2}.kpi.hot b{color:var(--red)}
+
+/* settings */
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;padding:4px;background:var(--card);border:1px solid var(--bd);border-radius:14px;width:max-content;max-width:100%;overflow-x:auto}
+.pills button{border:0;background:transparent;color:var(--mut);font:inherit;padding:8px 16px;border-radius:10px;cursor:pointer;white-space:nowrap;display:flex;gap:6px;align-items:center}
+.pills button.on{background:var(--pri);color:#fff;font-weight:600}.pills .dot{width:7px;height:7px;border-radius:50%;background:var(--amb);display:none}.pills .dirty .dot{display:inline-block}
+.sec[hidden]{display:none}
+.chead{display:flex;gap:12px;align-items:flex-start;margin-bottom:6px}.chead .ci{width:36px;height:36px;border-radius:10px;background:var(--pri2);color:var(--pri);display:grid;place-items:center;flex:none}
+.chead p{margin:2px 0 0;color:var(--mut);font-size:13px}
+.sf{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:8px 24px;padding:14px 0;border-top:1px solid var(--bd);align-items:center}
+.sf:first-of-type{border-top:0}.fl label{font-weight:600;display:block}.fl p{margin:2px 0 0;color:var(--mut);font-size:13px}
+.inp{display:inline-flex;align-items:center;border:1px solid var(--bd);border-radius:10px;background:var(--card);overflow:hidden}
+.inp:focus-within{border-color:var(--pri);box-shadow:0 0 0 3px var(--pri2)}.inp input{border:0;box-shadow:none!important;width:92px;text-align:right}
+.inp span{padding:0 12px;color:var(--mut);background:var(--bg);align-self:stretch;display:flex;align-items:center;font-size:13px;border-left:1px solid var(--bd)}
+.inp.bad3{border-color:var(--red)}
+.hint{color:var(--mut);font-size:12.5px;margin:6px 0 0}.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chips button{border:1px solid var(--bd);background:var(--card);color:var(--ink);border-radius:99px;padding:3px 12px;font:inherit;font-size:13px;cursor:pointer}
+.chips button:hover{border-color:var(--pri);color:var(--pri)}
+.chip{position:relative;display:inline-block}.chip input{position:absolute;opacity:0;inset:0;cursor:pointer;margin:0}
+.chip span{display:inline-block;padding:6px 14px;border-radius:99px;border:1px solid var(--bd);background:var(--card);cursor:pointer;user-select:none;min-width:44px;text-align:center}
+.chip input:checked+span{background:var(--pri);color:#fff;border-color:var(--pri);font-weight:600}.chip input:focus-visible+span{box-shadow:0 0 0 3px var(--pri2)}
+.chip input:disabled+span{opacity:.6;cursor:not-allowed}
+.sw{display:inline-flex;gap:10px;align-items:center;cursor:pointer}.sw input{position:absolute;opacity:0}
+.sw i{width:42px;height:24px;border-radius:99px;background:var(--bd);position:relative;transition:background .2s;flex:none}
+.sw i:after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px #0004}
+.sw input:checked+i{background:var(--grn)}.sw input:checked+i:after{transform:translateX(18px)}.sw input:focus-visible+i{box-shadow:0 0 0 3px var(--pri2)}
+.savebar{position:sticky;bottom:12px;z-index:20;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--ink);color:var(--bg);border-radius:14px;padding:12px 16px;box-shadow:0 10px 40px #0004;margin-top:14px}
+.savebar[hidden]{display:none}.savebar b{font-weight:600}.savebar .btn{border-color:transparent}
+.hol{display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--bd)}.hol:first-of-type{border-top:0}.hol span:nth-child(2){flex:1}
+@media(max-width:640px){.sf{grid-template-columns:1fr}.pills{flex-wrap:nowrap;width:100%}.kpi b{font-size:22px}}
+.warn.bad2{background:var(--red2);color:var(--red)}
 </style></head>
 <body>
 <div id="app"></div><div id="toast"></div>
@@ -131,7 +165,7 @@ function render(){
    <aside id="side" aria-label="เมนู"><nav>${tabs.map(t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}"><span class="ic">${ICON[t[0]]||"•"}</span><span>${t[1]}</span></button>`).join("")}</nav>
     <div class="me"><b>👤 ${esc(sessionStorage.getItem("nm")||"")}</b><span class="mut">${RN[role]||role}</span><div class="row"><button class="btn" id="pw">🔑 รหัสผ่าน</button><button class="btn" id="out">ออก</button></div></div></aside>
    <div class="scrim" id="scrim"></div><main id="main"></main></div>`;
-  document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{page=b.dataset.p;render();scrollTo(0,0)});
+  document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(setDirty()&&!confirm("มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ออกจากหน้านี้?"))return;setDirty=()=>false;page=b.dataset.p;render();scrollTo(0,0)});
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>pwScreen(false);$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
   clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,update:loadUpdate,settings:loadSettings,audit:loadAudit})[page])();
@@ -145,9 +179,9 @@ const loadCases=guard(async()=>{
   if(page!=="cases")return;
   const row=c=>`<tr><td>#${c.id}</td><td>${esc(c.patient?c.patient.full_name:"(ไม่ทราบผู้ป่วย) "+c.device.dev_eui)}<div class="mut">${esc(c.patient?.address||"")} ${c.patient?.phone?`📞 ${esc(c.patient.phone)}`:""}</div></td><td><span class="tag ${c.state}">${ST[c.state]}</span>${c.overdue&&c.state==="new"?' <b style="color:var(--red)">เกินเวลา!</b>':""}${c.after_hours?' <span class="tag">นอกเวลา</span>':""}</td><td>${fmt(c.created_at)}</td><td>${esc(c.accepted_by)}</td><td><button class="btn" data-id="${c.id}" data-a="view">รายละเอียด</button></td></tr>`;
   const gwBad=gw.filter(g=>g.offline),gwWarn=gw.filter(g=>g.status==="warning");
-  $("#main").innerHTML=`${gwBad.length?`<div class="warn" style="background:#f8d7da;color:#58151c">⚠️ เกตเวย์ขาดการเชื่อมต่อ: ${gwBad.map(g=>esc(g.label||g.gateway_id)+(g.reason==="radio"?" (ตัวรับสัญญาณ LoRa เสีย)":"")).join(", ")} — ปุ่มของผู้ป่วยในระยะนี้อาจส่งไม่ถึง · <a href="#" id="gwgo">ดูรายละเอียด</a></div>`:""}${gwWarn.length&&!gwBad.length?`<div class="warn">เกตเวย์มีข้อควรตรวจ: ${gwWarn.map(g=>esc(g.label||g.gateway_id)+" — "+esc(g.critical.concat(g.warnings).join(", ")||"ตรวจสอบ")).join(" · ")}</div>`:""}
+  $("#main").innerHTML=`${gwBad.length?`<div class="warn bad2">⚠️ เกตเวย์ขาดการเชื่อมต่อ: ${gwBad.map(g=>esc(g.label||g.gateway_id)+(g.reason==="radio"?" (ตัวรับสัญญาณ LoRa เสีย)":"")).join(", ")} — ปุ่มของผู้ป่วยในระยะนี้อาจส่งไม่ถึง · <a href="#" id="gwgo">ดูรายละเอียด</a></div>`:""}${gwWarn.length&&!gwBad.length?`<div class="warn">เกตเวย์มีข้อควรตรวจ: ${gwWarn.map(g=>esc(g.label||g.gateway_id)+" — "+esc(g.critical.concat(g.warnings).join(", ")||"ตรวจสอบ")).join(" · ")}</div>`:""}
   <div class="card ${open.some(c=>c.state==="new")?"alarm":""}"><h3>เคสที่ยังเปิดอยู่ (${open.length})</h3>${open.length?`<table><tr><th>#</th><th>ผู้ป่วย</th><th>สถานะ</th><th>เวลา</th><th>ผู้รับเรื่อง</th><th></th></tr>${open.map(row).join("")}</table>`:'<p class="mut">ไม่มีเคสค้าง</p>'}</div>
-  <div class="card"><b>30 วัน:</b> ${st.cases_30d} เคส · เหตุผิดพลาด ${st.false_alarm} · นอกเวลา ${st.after_hours} · เวลารับเรื่องเฉลี่ย ${st.avg_accept_s??"-"} วินาที</div>
+  <div class="kpis"><div class="kpi ${open.some(c=>c.state==="new")?"hot":""}"><small>เคสที่ยังเปิดอยู่</small><b>${open.length}</b></div><div class="kpi"><small>เคสใน 30 วัน</small><b>${st.cases_30d}</b></div><div class="kpi"><small>เหตุผิดพลาด</small><b>${st.false_alarm}</b></div><div class="kpi"><small>นอกเวลาทำการ</small><b>${st.after_hours}</b></div><div class="kpi"><small>รับเรื่องเฉลี่ย</small><b>${st.avg_accept_s??"-"}<small style="display:inline"> วิ</small></b></div></div>
   <div class="card"><h3>ล่าสุด</h3><table><tr><th>#</th><th>ผู้ป่วย</th><th>สถานะ</th><th>เวลา</th><th>ผู้รับเรื่อง</th><th></th></tr>${recent.map(row).join("")}</table></div>`;
   document.querySelectorAll("[data-a=view]").forEach(b=>b.onclick=()=>showCase(b.dataset.id))});
 const showCase=guard(async id=>{
@@ -242,28 +276,120 @@ const loadDevices=guard(async()=>{
       $("#rsc").onclick=guard(async()=>{if(!confirm("กลับไปใช้ค่ากลางทั้งหมด?"))return;await api(`/devices/${d.id}/config`,{method:"PUT",body:{override:{}}});toast("กลับไปใช้ค่ากลางแล้ว");devEdit=false;render()})}
   }))});
 
+const IC={
+cases:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+patients:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+caregivers:'<circle cx="9" cy="8" r="3.5"/><path d="M2 21c0-3.5 3.2-5.5 7-5.5s7 2 7 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18.5 15.8c2 .7 3.5 2.2 3.5 5.2"/>',
+devices:'<rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/>',
+gateways:'<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0"/><circle cx="12" cy="19.5" r="1"/>',
+install:'<path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/>',
+reports:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
+privacy:'<path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/>',
+users:'<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6M16 19l2 2 4-4"/>',
+settings:'<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+audit:'<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h6"/>',
+bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+bellOff:'<path d="M8.7 3A6 6 0 0 1 18 8c0 3 .5 5.200 1.300 6.800M17 17H3s3-2 3-9c0-.8.1-1.500.4-2.200M10.300 21a1.900 1.900 0 0 0 3.400 0M2 2l20 20"/>',
+key:'<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9m-3 3 3 3m-6-3 2 2"/>',
+out:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+alert:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.700 21a2 2 0 0 1-3.400 0"/>',
+send:'<path d="m22 2-7 20-4-9-9-4zM22 2 11 13"/>',
+chip:'<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>',
+wifi:'<path d="M5 12.500a10 10 0 0 1 14 0M8.500 16a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0"/><circle cx="12" cy="19.500" r="1"/>'};
+const ico=n=>`<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
+let setSec=sessionStorage.getItem("sec")||"hours";
+function setDirty(){return false}
+const human=s=>s>=3600?(s/3600)+" ชั่วโมง":s>=60?(Math.floor(s/60)+" นาที"+(s%60?" "+s%60+" วินาที":"")):s+" วินาที";
+const humanMin=m=>m>=1440&&m%1440===0?(m/1440)+" วัน":m>=60?(Math.floor(m/60)+" ชม."+(m%60?" "+m%60+" นาที":"")):m+" นาที";
 const loadSettings=guard(async()=>{
-  const [s,hs]=await Promise.all([api("/settings"),api("/holidays")]);const adm=role==="admin";const cgs=await api("/caregivers");
+  const [s,hs,cgs]=await Promise.all([api("/settings"),api("/holidays"),api("/caregivers")]);
+  if(page!=="settings")return;
+  const adm=role==="admin",dis=adm?"":"disabled";
   const oh=s.office_hours,es=s.escalation,dd=s.device_defaults,of=s.offline,sa=s.system_alert,da=s.device_alert;
   const DAYS=["จ","อ","พ","พฤ","ศ","ส","อา"];
-  $("#main").innerHTML=`${adm?"":'<div class="warn">เฉพาะผู้ดูแลระบบแก้ไขได้</div>'}
-  <div class="card"><h3>เวลาทำการ</h3><div class="row">${DAYS.map((d,i)=>`<label><input type="checkbox" class="dy" value="${i}" ${oh.days.includes(i)?"checked":""}>${d}</label>`).join(" ")}</div><div class="row">เริ่ม <input id="st" type="time" value="${oh.start}"> ถึง <input id="en" type="time" value="${oh.end}"><button class="btn p" id="s1">บันทึก</button></div></div>
-  <div class="card"><h3>การแจ้งต่อ (escalation)</h3><div class="row">ถ้าไม่ตอบรับใน <input id="ea" type="number" size="4" value="${es.escalate_after_s}"> วินาที → แจ้งคนถัดไป</div><div class="row">ถือว่า "เกินเวลา" เมื่อผ่าน <input id="ov" type="number" value="${es.overdue_after_s}"> วินาที</div><div class="row">ผู้รับสุดท้าย <select id="fin"><option value="">- ไม่ระบุ -</option>${cgs.map(c=>`<option value="${c.id}" ${c.id===es.final_caregiver_id?"selected":""}>${esc(c.full_name)}</option>`).join("")}</select><button class="btn p" id="s2">บันทึก</button></div></div>
-  <div class="card"><h3>ค่าเริ่มต้นอุปกรณ์ (ส่งลงอุปกรณ์ทุกเครื่องอัตโนมัติ)</h3><div class="row">Heartbeat ทุก <input id="hb" type="number" value="${dd.heartbeat_min}"> นาที · Poll ทุก <input id="po" type="number" value="${dd.poll_s}"> วินาที · เสียง(0-3) <input id="bz" type="number" value="${dd.buzzer}" min="0" max="3"> · กดค้าง <input id="ho" type="number" value="${dd.hold_ms}"> ms <button class="btn p" id="s3">บันทึก</button></div></div>
-  <div class="card"><h3>ออฟไลน์</h3><div class="row">อุปกรณ์เงียบเกิน <input id="do" type="number" value="${of.device_offline_min}"> นาที · Gateway เงียบเกิน <input id="go" type="number" value="${of.gateway_offline_min}"> นาที <button class="btn p" id="s4">บันทึก</button></div></div>
-  <div class="card"><h3>ผู้รับแจ้งเตือนระบบ (เกตเวย์ขาดการเชื่อมต่อ)</h3><div class="row">${cgs.filter(c=>c.active).map(c=>`<label><input type="checkbox" class="sa" value="${c.id}" ${sa.caregiver_ids.includes(c.id)?"checked":""}> ${esc(c.full_name)}${c.line_bound?"":' <span class="mut">(ยังไม่ผูก LINE)</span>'}</label>`).join(" ")||'<span class="mut">ยังไม่มี อสม./ผู้ดูแล</span>'}</div><div class="row">เตือนซ้ำทุก <input id="sar" type="number" min="0" max="1440" value="${sa.repeat_min}"> นาที (0 = ไม่เตือนซ้ำ) <button class="btn p" id="s5">บันทึก</button> <button class="btn" id="s6">ส่ง LINE ทดสอบ</button></div><p class="mut">ถ้าไม่เลือกใครเลย ระบบจะแจ้ง "ผู้รับสุดท้าย" ในหัวข้อการแจ้งต่อ · ผู้รับต้องผูก LINE แล้ว · ควรกดทดสอบหลังตั้งค่าทุกครั้ง</p></div>
-  <div class="card"><h3>แจ้งเตือนอุปกรณ์ผู้ป่วย (เงียบหาย / แบตต่ำ / ไฟดับ)</h3><div class="row"><label><input type="checkbox" id="dae" ${da.enabled?"checked":""}> ส่ง LINE ถึงผู้รับแจ้งเตือนระบบ (รายชื่อด้านบน)</label></div><div class="row">แบตต่ำกว่า <input id="dab" type="number" min="5" max="50" value="${da.battery_low_pct}"> % · ไฟบ้านดับนานกว่า <input id="dam" type="number" min="1" max="240" value="${da.mains_grace_min}"> นาที <button class="btn p" id="s7">บันทึก</button></div><p class="mut">"เงียบหาย" ใช้เกณฑ์เวลาจากการ์ด "ออฟไลน์" · ไม่แจ้งผิดตอนเกตเวย์ทั้งหมดขาด (ระบบแจ้งเรื่องเกตเวย์แทน) · เตือนซ้ำตามที่ตั้งไว้ในการ์ดผู้รับแจ้งเตือนระบบ</p></div>
-  <div class="card"><h3>วันหยุดราชการ</h3>${hs.map(h=>`<div class="row">${h.day} ${esc(h.name)} ${adm?`<button class="btn" data-h="${h.id}">ลบ</button>`:""}</div>`).join("")}${adm?`<div class="row"><input id="hd" type="date"><input id="hn" placeholder="ชื่อวันหยุด"><button class="btn p" id="ha">เพิ่ม</button></div>`:""}</div>`;
-  if(!adm)return;const put=(k,v)=>guard(async()=>{await api("/settings/"+k,{method:"PUT",body:v});toast("บันทึกแล้ว")})();
-  $("#s1").onclick=()=>put("office_hours",{days:[...document.querySelectorAll(".dy:checked")].map(x=>+x.value),start:$("#st").value,end:$("#en").value});
-  $("#s2").onclick=()=>put("escalation",{escalate_after_s:+$("#ea").value,overdue_after_s:+$("#ov").value,final_caregiver_id:$("#fin").value?+$("#fin").value:null,max_rounds:1});
-  $("#s3").onclick=()=>put("device_defaults",{heartbeat_min:+$("#hb").value,poll_s:+$("#po").value,buzzer:+$("#bz").value,hold_ms:+$("#ho").value});
-  $("#s4").onclick=()=>put("offline",{device_offline_min:+$("#do").value,gateway_offline_min:+$("#go").value});
-  $("#s7").onclick=()=>put("device_alert",{enabled:$("#dae").checked,battery_low_pct:+$("#dab").value,mains_grace_min:+$("#dam").value});
-  $("#s5").onclick=()=>put("system_alert",{caregiver_ids:[...document.querySelectorAll(".sa:checked")].map(x=>+x.value),repeat_min:+$("#sar").value});
-  $("#s6").onclick=guard(async()=>{const r=await api("/system-alert/test",{method:"POST"});alert(r.results.map(x=>x.caregiver+": "+(x.ok?"ส่งแล้ว":"ไม่สำเร็จ ("+x.detail+")")).join("\n"))});
-  $("#ha").onclick=guard(async()=>{await api("/holidays",{method:"POST",body:{day:$("#hd").value,name:$("#hn").value}});loadSettings()});
-  document.querySelectorAll("[data-h]").forEach(b=>b.onclick=guard(async()=>{await api("/holidays/"+b.dataset.h,{method:"DELETE"});loadSettings()}))});
+  const num=(id,v,min,max,unit,step)=>`<div class="inp"><input id="${id}" type="number" inputmode="decimal" value="${v}" min="${min}" max="${max}" ${step?`step="${step}"`:""} ${dis}><span>${unit}</span></div>`;
+  const fld=(label,help,ctl)=>`<div class="sf"><div class="fl"><label>${label}</label>${help?`<p>${help}</p>`:""}</div><div class="fc">${ctl}</div></div>`;
+  const chips=(id,vals)=>adm?`<div class="chips" data-for="${id}">${vals.map(v=>`<button type="button" data-v="${v[0]}">${v[1]}</button>`).join("")}</div>`:"";
+  const head=(ic,t,d)=>`<div class="chead"><div class="ci">${ico(ic)}</div><div><h3>${t}</h3><p>${d}</p></div></div>`;
+  const active=cgs.filter(c=>c.active);
+  const SECS=[["hours","เวลาทำการ","clock"],["alert","การแจ้งเหตุ","send"],["notify","ผู้รับแจ้งเตือน","alert"],["device","อุปกรณ์และเครือข่าย","chip"]];
+  if(!SECS.some(x=>x[0]===setSec))setSec="hours";
+  const holRows=h=>h.length?h.map(x=>`<div class="hol"><span>${x.day}</span><span>${esc(x.name)}</span>${adm?`<button class="btn" data-h="${x.id}">ลบ</button>`:""}</div>`).join(""):'<p class="mut">ยังไม่มีวันหยุดที่เพิ่มไว้</p>';
+  $("#main").innerHTML=`${adm?"":'<div class="warn">เฉพาะผู้ดูแลระบบแก้ไขได้ (คุณดูได้อย่างเดียว)</div>'}
+  <div class="pills" id="pills">${SECS.map(x=>`<button data-s="${x[0]}" class="${setSec===x[0]?"on":""}">${ico(x[2])}${x[1]}<i class="dot"></i></button>`).join("")}</div>
+  <div id="sr">
+  <div class="sec" data-sec="hours" ${setSec==="hours"?"":"hidden"}>
+   <div class="card">${head("clock","เวลาทำการ","นอกช่วงเวลานี้และในวันหยุด ระบบยังแจ้ง อสม. ตามปกติ แต่จอปุ่มผู้ป่วยจะแสดงให้โทร 1669")}
+    ${fld("วันทำการ","เลือกวันที่เจ้าหน้าที่ รพ.สต. อยู่ปฏิบัติงาน",`<div class="row">${DAYS.map((d,i)=>`<label class="chip"><input type="checkbox" class="dy" value="${i}" ${oh.days.includes(i)?"checked":""} ${dis}><span>${d}</span></label>`).join("")}</div>`)}
+    ${fld("เวลาเปิด–ปิด","ช่วงเวลาทำการในแต่ละวัน",`<div class="row"><input id="st" type="time" value="${oh.start}" ${dis}> <span class="mut">ถึง</span> <input id="en" type="time" value="${oh.end}" ${dis}></div>`)}</div>
+   <div class="card">${head("clock","วันหยุดราชการ","วันที่เพิ่มไว้จะนับเป็นนอกเวลาทำการ (เพิ่ม/ลบมีผลทันที ไม่ต้องกดบันทึก)")}
+    <div id="hol">${holRows(hs)}</div>${adm?`<div class="row" style="margin-top:10px"><input id="hd" type="date"><input id="hn" placeholder="ชื่อวันหยุด เช่น วันสงกรานต์" size="24"><button class="btn p" id="ha">เพิ่มวันหยุด</button></div>`:""}</div>
+  </div>
+  <div class="sec" data-sec="alert" ${setSec==="alert"?"":"hidden"}>
+   <div class="card">${head("send","การแจ้งต่อเมื่อไม่มีคนรับเรื่อง","เมื่อมีเหตุ ระบบแจ้ง อสม. คนที่ 1 ก่อน ถ้าไม่มีใครกดรับตามเวลาที่ตั้ง จะแจ้งคนถัดไป")}
+    ${fld("แจ้งคนถัดไปเมื่อไม่ตอบรับใน","แนะนำ 1–3 นาที สั้นเกินไป อสม. จะตอบไม่ทัน",`${num("ea",es.escalate_after_s,10,3600,"วินาที")}<div class="hint" id="eah"></div>${chips("ea",[[60,"1 นาที"],[120,"2 นาที"],[180,"3 นาที"],[300,"5 นาที"]])}`)}
+    ${fld("ถือว่า “เกินเวลา” เมื่อผ่านไป","เคสที่ไม่มีใครรับเรื่องนานเกินนี้จะแสดงเตือนสีแดงบนแดชบอร์ด",`${num("ov",es.overdue_after_s,30,7200,"วินาที")}<div class="hint" id="ovh"></div>${chips("ov",[[180,"3 นาที"],[300,"5 นาที"],[600,"10 นาที"]])}`)}
+    ${fld("ผู้รับสุดท้าย","คนที่จะถูกแจ้งเป็นคนสุดท้ายถ้าทุกคนไม่ตอบ (แนะนำให้เลือกเสมอ)",`<select id="fin" ${dis}><option value="">- ไม่ระบุ -</option>${cgs.map(c=>`<option value="${c.id}" ${c.id===es.final_caregiver_id?"selected":""}>${esc(c.full_name)}</option>`).join("")}</select>`)}</div>
+  </div>
+  <div class="sec" data-sec="notify" ${setSec==="notify"?"":"hidden"}>
+   <div class="card">${head("alert","ผู้รับแจ้งเตือนระบบ","คนที่ได้รับ LINE เมื่อเกตเวย์ขาดการเชื่อมต่อ และเมื่อปุ่มผู้ป่วยเงียบหาย/แบตต่ำ/ไฟดับ")}
+    ${fld("เลือกผู้รับ","ต้องผูก LINE แล้วจึงจะได้รับ · ถ้าไม่เลือกใครเลย ระบบจะแจ้ง “ผู้รับสุดท้าย” แทน",`<div class="row">${active.map(c=>`<label class="chip" title="${c.line_bound?"":"ยังไม่ผูก LINE"}"><input type="checkbox" class="sa" value="${c.id}" ${sa.caregiver_ids.includes(c.id)?"checked":""} ${dis}><span>${esc(c.full_name)}${c.line_bound?"":" ⚠"}</span></label>`).join("")||'<span class="mut">ยังไม่มี อสม./ผู้ดูแล — เพิ่มได้ที่เมนู อสม./ผู้ดูแล</span>'}</div>`)}
+    ${fld("เตือนซ้ำทุก","ถ้าปัญหายังไม่หาย · ใส่ 0 = ไม่เตือนซ้ำ (ช่วงที่ใช้ได้ 10–1440 นาที)",`${num("sar",sa.repeat_min,0,1440,"นาที")}<div class="hint" id="sarh"></div>${chips("sar",[[0,"ไม่เตือนซ้ำ"],[30,"30 นาที"],[60,"1 ชม."],[120,"2 ชม."]])}`)}
+    ${adm?`<div class="row" style="margin-top:6px"><button class="btn" id="s6">ส่ง LINE ทดสอบ</button><span class="mut">ควรกดทดสอบทุกครั้งหลังเปลี่ยนผู้รับ (ทดสอบจากค่าที่บันทึกแล้ว)</span></div><div id="testres" class="hint"></div>`:""}</div>
+   <div class="card">${head("chip","แจ้งเตือนปุ่มผู้ป่วย","เตือนเมื่อปุ่มในบ้านผู้ป่วยเงียบหาย แบตเตอรี่ต่ำ หรือไฟบ้านดับ")}
+    ${fld("เปิดใช้งาน","ส่ง LINE ถึงผู้รับแจ้งเตือนระบบ (รายชื่อด้านบน)",`<label class="sw"><input type="checkbox" id="dae" ${da.enabled?"checked":""} ${dis}><i></i><span id="daet">${da.enabled?"เปิด":"ปิด"}</span></label>`)}
+    ${fld("เตือนเมื่อแบตต่ำกว่า","ช่วง 5–50%",num("dab",da.battery_low_pct,5,50,"%"))}
+    ${fld("เตือนเมื่อไฟบ้านดับนานกว่า","ไฟกระพริบสั้น ๆ จะไม่เตือน (ช่วง 1–240 นาที)",num("dam",da.mains_grace_min,1,240,"นาที"))}</div>
+  </div>
+  <div class="sec" data-sec="device" ${setSec==="device"?"":"hidden"}>
+   <div class="card">${head("chip","ค่าเริ่มต้นของปุ่มผู้ป่วย","ส่งลงปุ่มทุกเครื่องอัตโนมัติผ่านรอบ heartbeat · เฉพาะบางเครื่องตั้งแยกได้ที่เมนูอุปกรณ์")}
+    ${fld("ปุ่มรายงานสถานะทุก","ถี่ขึ้น = รู้เร็วว่าเครื่องหาย แต่ใช้แบต/ช่องสัญญาณมากขึ้น (5–1275 นาที, แนะนำ 30)",num("hb",dd.heartbeat_min,5,1275,"นาที"))}
+    ${fld("ถามผลตอบรับทุก","หลังกดปุ่ม เครื่องจะถามเซิร์ฟเวอร์ว่ามีคนรับเรื่องแล้วหรือยัง (5–120 วินาที, แนะนำ 10)",num("po",dd.poll_s,5,120,"วินาที"))}
+    ${fld("ระดับเสียงบี๊บ","",`<select id="bz" ${dis}>${[[0,"ปิดเสียง"],[1,"เบา"],[2,"ปกติ"],[3,"ดัง"]].map(o=>`<option value="${o[0]}" ${dd.buzzer===o[0]?"selected":""}>${o[1]}</option>`).join("")}</select>`)}
+    ${fld("ต้องกดค้างนาน","กันกดพลาด · ยิ่งนานยิ่งกันพลาดได้ดี แต่ผู้ป่วยต้องกดนานขึ้น (0.5–5 วินาที, แนะนำ 1.5)",num("ho",dd.hold_ms/1000,0.5,5,"วินาที","0.1"))}</div>
+   <div class="card">${head("wifi","ตรวจจับขาดการเชื่อมต่อ","ถ้าเงียบนานเกินกำหนด ระบบจะถือว่าออฟไลน์และแจ้งเตือน")}
+    ${fld("ปุ่มผู้ป่วยเงียบเกิน","ควรมากกว่ารอบรายงานสถานะอย่างน้อย 2–3 เท่า (10–10080 นาที, แนะนำ 90)",`${num("do",of.device_offline_min,10,10080,"นาที")}<div class="hint" id="doh"></div>`)}
+    ${fld("เกตเวย์เงียบเกิน","เกตเวย์รายงานทุก 1 นาที (3–240 นาที, แนะนำ 5)",num("go",of.gateway_offline_min,3,240,"นาที"))}</div>
+  </div>
+  </div>
+  ${adm?`<div class="savebar" id="sb" hidden><span><b id="sbn">0</b> หมวดที่เปลี่ยน: <span id="sbl"></span></span><span class="row" style="margin:0"><button class="btn" id="sbc">ยกเลิก</button><button class="btn p" id="sbs">บันทึกทั้งหมด</button></span></div>`:""}`;
+  if(!adm){setDirty=()=>false;return}
+  const $v=id=>$("#"+id).value,N=id=>+$v(id);
+  const get=()=>({
+    office_hours:{days:[...document.querySelectorAll(".dy:checked")].map(x=>+x.value),start:$v("st"),end:$v("en")},
+    escalation:{escalate_after_s:N("ea"),overdue_after_s:N("ov"),final_caregiver_id:$v("fin")?+$v("fin"):null,max_rounds:1},
+    system_alert:{caregiver_ids:[...document.querySelectorAll(".sa:checked")].map(x=>+x.value),repeat_min:N("sar")},
+    device_alert:{enabled:$("#dae").checked,battery_low_pct:N("dab"),mains_grace_min:N("dam")},
+    device_defaults:{heartbeat_min:N("hb"),poll_s:N("po"),buzzer:N("bz"),hold_ms:Math.round(N("ho")*1000)},
+    offline:{device_offline_min:N("do"),gateway_offline_min:N("go")}});
+  const NAMES={office_hours:"เวลาทำการ",escalation:"การแจ้งต่อ",system_alert:"ผู้รับแจ้งเตือน",device_alert:"แจ้งเตือนปุ่มผู้ป่วย",device_defaults:"ค่าเริ่มต้นปุ่ม",offline:"ตรวจจับออฟไลน์"};
+  const SECOF={office_hours:"hours",escalation:"alert",system_alert:"notify",device_alert:"notify",device_defaults:"device",offline:"device"};
+  let base=JSON.stringify(get()),baseO=get();
+  const changed=()=>{const c=get();return Object.keys(c).filter(k=>JSON.stringify(c[k])!==JSON.stringify(baseO[k]))};
+  setDirty=()=>changed().length>0;
+  const hints=()=>{$("#eah").textContent="= "+human(N("ea"));$("#ovh").textContent="= "+human(N("ov"))+(N("ov")<=N("ea")?" · ควรมากกว่าเวลาแจ้งต่อ":"");
+    $("#sarh").textContent=N("sar")===0?"ไม่เตือนซ้ำ":"= ทุก "+humanMin(N("sar"));
+    $("#doh").textContent="= "+humanMin(N("do"))+(N("do")<N("hb")*2?` · ควรอย่างน้อย ${N("hb")*2} นาที (2 เท่าของรอบรายงาน)`:"");
+    $("#daet").textContent=$("#dae").checked?"เปิด":"ปิด"};
+  const refresh=()=>{hints();const ch=changed();$("#sb").hidden=!ch.length;$("#sbn").textContent=ch.length;$("#sbl").textContent=ch.map(k=>NAMES[k]).join(", ");
+    document.querySelectorAll("#pills button").forEach(b=>b.classList.toggle("dirty",ch.some(k=>SECOF[k]===b.dataset.s)))};
+  const validate=()=>{let bad=null;document.querySelectorAll("#sr input[type=number]").forEach(i=>{const box=i.closest(".inp");const v=i.value===""?NaN:+i.value;const ok=!isNaN(v)&&v>=+i.min&&v<=+i.max;box.classList.toggle("bad3",!ok);
+      if(!ok&&!bad)bad={i,msg:`${i.closest(".sf").querySelector("label").textContent}: ต้องอยู่ระหว่าง ${i.min}–${i.max}`}});
+    const r=N("sar");if(!bad&&r!==0&&r<10)bad={i:$("#sar"),msg:"เตือนซ้ำ: ใส่ 0 (ไม่เตือน) หรือ 10 นาทีขึ้นไป"};
+    if(!bad&&!$v("st")||!bad&&!$v("en"))bad={i:$("#st"),msg:"กรุณาระบุเวลาเปิด–ปิด"};return bad};
+  $("#sr").addEventListener("input",refresh);$("#sr").addEventListener("change",refresh);
+  document.querySelectorAll("#pills button").forEach(b=>b.onclick=()=>{setSec=b.dataset.s;sessionStorage.setItem("sec",setSec);document.querySelectorAll("#pills button").forEach(x=>x.classList.toggle("on",x===b));document.querySelectorAll(".sec").forEach(x=>x.hidden=x.dataset.sec!==setSec)});
+  document.querySelectorAll(".chips button").forEach(b=>b.onclick=()=>{const i=$("#"+b.parentNode.dataset.for);i.value=b.dataset.v;i.dispatchEvent(new Event("input",{bubbles:true}))});
+  $("#sbc").onclick=()=>{setDirty=()=>false;loadSettings()};
+  $("#sbs").onclick=guard(async()=>{const bad=validate();if(bad){const sec=bad.i.closest(".sec");if(sec&&sec.hidden)document.querySelector(`#pills [data-s="${sec.dataset.sec}"]`).click();bad.i.focus();throw new Error(bad.msg)}
+    const c=get(),ks=changed();let done=0;
+    for(const k of ks){try{await api("/settings/"+k,{method:"PUT",body:c[k]});baseO[k]=c[k];done++}catch(e){refresh();throw new Error(NAMES[k]+": "+e.message+(done?` (บันทึกแล้ว ${done} หมวด)`:""))}}
+    refresh();toast("บันทึกแล้ว "+done+" หมวด")});
+  if($("#s6"))$("#s6").onclick=guard(async()=>{$("#testres").textContent="กำลังส่ง...";try{const r=await api("/system-alert/test",{method:"POST"});$("#testres").innerHTML=r.results.map(x=>`<div class="${x.ok?"ok":"bad"}">${x.ok?"✔":"✖"} ${esc(x.caregiver)}: ${x.ok?"ส่งแล้ว":"ไม่สำเร็จ ("+esc(x.detail)+")"}</div>`).join("")}catch(e){$("#testres").innerHTML=`<span class="bad">${esc(e.message)}</span>`}});
+  const bindHol=()=>document.querySelectorAll("[data-h]").forEach(b=>b.onclick=guard(async()=>{await api("/holidays/"+b.dataset.h,{method:"DELETE"});$("#hol").innerHTML=holRows(await api("/holidays"));bindHol()}));
+  $("#ha").onclick=guard(async()=>{if(!$("#hd").value)throw new Error("เลือกวันที่ก่อน");await api("/holidays",{method:"POST",body:{day:$("#hd").value,name:$("#hn").value}});$("#hd").value="";$("#hn").value="";$("#hol").innerHTML=holRows(await api("/holidays"));bindHol();toast("เพิ่มวันหยุดแล้ว")});
+  bindHol();refresh()});
 
 // ---------------- system update (GitHub) — admin only; the host updater does the work (docs/UPDATE.md) ----------------
 let upSawBusy=false;
