@@ -1,0 +1,13 @@
+[Unit]
+Description=SOS gateway remote-action agent (signed commands from the VPS)
+After=network-online.target chrony.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/sos-gateway-agent
+Restart=always
+RestartSec=10
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

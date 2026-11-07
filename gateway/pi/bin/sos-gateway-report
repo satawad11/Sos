@@ -43,9 +43,10 @@ json="$(jq -cn \
   --argjson fwd  "$(bool systemctl is-active --quiet chirpstack-mqtt-forwarder)" \
   --argjson spi  "$(bool test -e /dev/spidev0.0)" \
   --argjson ntp  "$(bool bash -c 'timedatectl show -p NTPSynchronized --value | grep -q yes')" \
-  --arg ip "$ip" --arg sw "sos-gw-report 2" --argjson gps "$gps" \
+  --argjson agent "$(bool systemctl is-active --quiet sos-gateway-agent)" \
+  --arg ip "$ip" --arg sw "sos-gw-report 3" --argjson gps "$gps" \
   '{uptime_s:$uptime_s, cpu_temp_c:$cpu_temp_c, throttled:$throttled, disk_pct:$disk_pct, mem_pct:$mem_pct, load1:$load1,
-    radio_fail:$radio_fail, services:{concentratord:$conc, forwarder:$fwd}, spi:$spi, ntp:$ntp, ip:$ip, sw:$sw}
+    radio_fail:$radio_fail, services:{concentratord:$conc, forwarder:$fwd}, spi:$spi, ntp:$ntp, agent:$agent, ip:$ip, sw:$sw}
     + (if $gps != null then {gps:$gps} else {} end)')" || { echo "jq failed" >&2; exit 1; }
 
 if [ "${1:-}" = "--print" ]; then echo "$json"; exit 0; fi

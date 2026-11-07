@@ -8,10 +8,11 @@ from . import settings_store
 from .auth import (admin_only, audit, check_pw, current_user, hash_pw, make_token, password_problem, staff_or_admin)
 from .db import get_db
 from .engine import aware
-from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, Holiday, Notification,
+from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, GatewayCommand, Holiday, Notification,
                      Patient, User, utcnow)
 from .config import env
 from . import gateways as gwmod
+from . import gwcmd
 from . import geo
 from . import privacy, reports
 from . import provision as prov
@@ -431,7 +432,7 @@ def set_device_config(did: int, b: DeviceConfigIn, db: Session = Depends(get_db)
 
 
 def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str = "staff") -> dict:
-    st, reason = gwmod.classify(g, now, off, move_m)
+    st, reason = gwmod.classify(g, now, g.offline_min or off, move_m)
     crit, warn = gwmod.critical(g.report), gwmod.warnings(g.report)
     mv = gwmod.moved_m(g, now, move_m)
     if mv is not None: warn = warn + [f"ตำแหน่ง GPS ห่างจากที่ลงทะเบียน {mv} เมตร (เกตเวย์อาจถูกย้ายหรือถูกนำออกไป)"]
@@ -445,7 +446,9 @@ def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str
             "status": st, "offline": st == "offline", "reason": reason or (g.offline_reason if st == "offline" else ""),
             "last_seen": iso(g.last_seen), "last_report_at": iso(g.last_report_at),
             "state_changed_at": iso(g.state_changed_at), "uplinks_total": g.uplinks_total or 0,
-            "devices": n_dev.get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc}
+            "devices": n_dev.get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc,
+            "notes": g.notes or "", "offline_min": g.offline_min, "offline_min_effective": g.offline_min or off,
+            "alert_ids": g.alert_ids, "agent": rep.get("agent") is True}
 
 
 @router.get("/gateways")
@@ -524,6 +527,11 @@ class GatewayPatch(BaseModel):
     lon: float | None = None
     clear_location: bool = False        # forget the registered position
     use_gps: bool = False               # copy the gateway's own latest GPS fix into the registered position
+    notes: str | None = Field(default=None, max_length=500)
+    offline_min: int | None = None      # per-gateway "silent for N minutes = offline" (3-240); admin only
+    reset_offline: bool = False         # back to the global value
+    alert_ids: list[int] | None = None  # per-gateway LINE recipients for this gateway's alerts; admin only
+    reset_alerts: bool = False          # back to the global list
 
 
 @router.post("/gateways")
@@ -555,10 +563,86 @@ def patch_gateway(gid: int, b: GatewayPatch, db: Session = Depends(get_db), u=De
     elif b.lat is not None or b.lon is not None:
         if not geo.valid_latlon(b.lat, b.lon): raise HTTPException(422, "lat/lon ไม่ถูกต้อง (ต้องระบุทั้งคู่ และไม่ใช่ 0,0)")
         g.lat, g.lon = round(b.lat, 6), round(b.lon, 6)
+    if b.notes is not None:
+        g.notes = b.notes.strip()
+    if b.offline_min is not None or b.reset_offline or b.alert_ids is not None or b.reset_alerts:
+        if u.role != "admin": raise HTTPException(403, "only admin can change alert thresholds/recipients")
+        if b.reset_offline: g.offline_min = None
+        elif b.offline_min is not None:
+            if isinstance(b.offline_min, bool) or not 3 <= b.offline_min <= 240:
+                raise HTTPException(422, "offline_min must be 3-240 (gateways report every minute)")
+            g.offline_min = b.offline_min
+        if b.reset_alerts: g.alert_ids = None
+        elif b.alert_ids is not None:
+            ids = sorted(set(b.alert_ids))
+            if len(ids) > 20: raise HTTPException(422, "too many recipients")
+            if ids and {c.id for c in db.query(Caregiver).filter(Caregiver.id.in_(ids)).all()} != set(ids):
+                raise HTTPException(422, "unknown caregiver id")
+            g.alert_ids = ids or None
     audit(db, u.username, "gateway_update", g.gateway_id, label=g.label, enabled=g.enabled is not False,
-          located=g.lat is not None)
+          located=g.lat is not None, offline_min=g.offline_min, own_recipients=g.alert_ids is not None)
     db.commit()
     return {"ok": True}
+
+
+# ---- remote actions (signed MQTT commands to the gateway agent) ----
+def _cmd_dict(c) -> dict:
+    return {"id": c.id, "cmd_id": c.cmd_id, "action": c.action, "label": gwcmd.ACTIONS.get(c.action, c.action), "status": c.status,
+            "detail": c.detail, "output": c.output, "by": c.requested_by, "created_at": iso(c.created_at), "done_at": iso(c.done_at)}
+
+
+def _expire_commands(db: Session, gateway_id: str | None = None):
+    q = db.query(GatewayCommand).filter(GatewayCommand.status == "pending")
+    if gateway_id: q = q.filter(GatewayCommand.gateway_id == gateway_id)
+    now = utcnow(); n = 0
+    for c in q.all():
+        if (now - aware(c.created_at)).total_seconds() > gwcmd.EXPIRE_S:
+            c.status, c.detail, c.done_at = "expired", "ไม่มีคำตอบจากเกตเวย์ (ออฟไลน์ หรือยังไม่ได้เปิดตัวช่วยควบคุม)", now; n += 1
+    if n: db.commit()
+
+
+class GwCommandIn(BaseModel):
+    action: str
+
+
+@router.get("/gateways/{gid}/commands")
+def gateway_commands(gid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    _expire_commands(db, g.gateway_id)
+    rows = db.query(GatewayCommand).filter_by(gateway_id=g.gateway_id).order_by(GatewayCommand.id.desc()).limit(10).all()
+    return {"actions": gwcmd.ACTIONS, "agent": (g.report or {}).get("agent") is True, "commands": [_cmd_dict(c) for c in rows]}
+
+
+@router.post("/gateways/{gid}/commands")
+def gateway_command(gid: int, b: GwCommandIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    if b.action not in gwcmd.ACTIONS: raise HTTPException(422, "unknown action")
+    if (g.report or {}).get("agent") is not True:
+        raise HTTPException(409, "เกตเวย์นี้ยังไม่ได้ติดตั้ง/เปิด sos-gateway-agent (ดูคู่มือ docs/GATEWAY-REMOTE.md)")
+    _expire_commands(db, g.gateway_id)
+    if db.query(GatewayCommand).filter_by(gateway_id=g.gateway_id, status="pending").first():
+        raise HTTPException(409, "มีคำสั่งที่ยังรอคำตอบอยู่ รอสักครู่")
+    eng = get_engine()
+    if eng.gw_cmd_publish is None or not eng.mqtt_ok(): raise HTTPException(503, "ระบบยังเชื่อมต่อ MQTT ไม่ได้")
+    cid, payload = gwcmd.make_command(g.gateway_id, b.action)
+    c = GatewayCommand(cmd_id=cid, gateway_id=g.gateway_id, action=b.action, requested_by=u.username)
+    db.add(c); db.flush()
+    if not eng.gw_cmd_publish(g.gateway_id, payload):
+        db.rollback(); raise HTTPException(503, "ส่งคำสั่งไม่สำเร็จ (MQTT)")
+    audit(db, u.username, "gateway_command", g.gateway_id, cmd=b.action, cmd_id=cid)
+    db.commit()
+    return _cmd_dict(c)
+
+
+@router.get("/gateways/{gid}/agent-key")
+def gateway_agent_key(gid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    """The per-gateway signing key to put in /etc/sos-gateway.env on the Pi. Shown to admins only and audited."""
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    audit(db, u.username, "gateway_agent_key_view", g.gateway_id); db.commit()
+    return {"gateway_id": g.gateway_id, "key": gwcmd.agent_key(g.gateway_id)}
 
 
 @router.post("/system-alert/test")

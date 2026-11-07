@@ -127,7 +127,7 @@ function logout(){token="";sessionStorage.clear();if(ws)ws.close();render()}
 function beep(){if(!audioOn)return;try{const c=new AudioContext(),o=c.createOscillator();o.frequency.value=880;o.connect(c.destination);o.start();setTimeout(()=>{o.stop();c.close()},700)}catch{}}
 function connectWS(){
   if(ws)ws.close();ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws?token="+encodeURIComponent(token));
-  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==="case_new"){beep();toast("🚨 มีเหตุฉุกเฉินใหม่")}if(m.type==="gateway_state"){toast(m.state==="offline"?"⚠️ เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์");if(page==="gateways"&&!devEdit)loadGateways()}if(page==="cases")loadCases()};
+  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==="case_new"){beep();toast("🚨 มีเหตุฉุกเฉินใหม่")}if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"⚠️ เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์");if(page==="gateways"&&!devEdit)loadGateways()}if(page==="cases")loadCases()};
   ws.onclose=()=>{if(token)setTimeout(connectWS,3000)}}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
@@ -238,12 +238,22 @@ const loadGateways=guard(async()=>{
   <p class="mut">เกตเวย์ส่งรายงานตัวเองทุก 1 นาที ถ้าเงียบเกินที่ตั้งไว้ (หน้าตั้งค่า → ออฟไลน์) หรือตัวรับสัญญาณ LoRa เสียเกิน 3 นาที ระบบจะส่ง LINE แจ้งผู้รับที่เลือกไว้ในหน้าตั้งค่า</p></div>`;
   if($("#ga"))$("#ga").onclick=guard(async()=>{await api("/gateways",{method:"POST",body:{gateway_id:$("#gi").value,label:$("#gl").value}});toast("เพิ่มแล้ว");loadGateways()});
   document.querySelectorAll("button[data-g]").forEach(b=>b.onclick=guard(async()=>{const g=gs.find(x=>x.id==b.dataset.g),r=g.report||{};devEdit=true;
+    const cgs=role==="admin"?await api("/caregivers"):[];
     const row=(k,v)=>`<tr><th style="width:230px">${k}</th><td>${v}</td></tr>`;
     $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${GWS[g.status][0]} ${esc(g.gateway_id)}</h3>
       <div class="row">ป้าย <input id="gl2" value="${esc(g.label)}" maxlength="64"></div>
       <div class="row"><label><input type="checkbox" id="gen" ${g.enabled?"checked":""} ${role==="admin"?"":"disabled"}> เฝ้าระวังเกตเวย์นี้ (ส่ง LINE เมื่อขาดการเชื่อมต่อ)</label>${role==="admin"?"":'<span class="mut">เฉพาะผู้ดูแลระบบ</span>'}</div>
       <p class="mut">ปิดการเฝ้าระวังเมื่อถอดเกตเวย์เครื่องนี้ออกจากระบบถาวร มิฉะนั้นระบบจะแจ้งว่าออฟไลน์</p>
       <div class="row"><button class="btn p" id="gsv">บันทึก</button></div></div>
+    <div class="card"><h3>ตั้งค่าเกตเวย์นี้</h3>
+      <div class="row">หมายเหตุ <input id="gnt" value="${esc(g.notes)}" maxlength="500" size="40" placeholder="เช่น ติดบนหลังคา รพ.สต. ชั้น 2"></div>
+      <div class="row">เตือนเมื่อเงียบเกิน <input id="gof" type="number" min="3" max="240" size="4" style="width:80px" value="${g.offline_min??""}" placeholder="${g.offline_min_effective}" ${role==="admin"?"":"disabled"}> นาที
+        <span class="mut">${g.offline_min==null?"(ใช้ค่ากลางของระบบ)":"(ตั้งเฉพาะเครื่องนี้)"}</span>${role==="admin"&&g.offline_min!=null?'<button class="btn" id="gofr">ใช้ค่ากลาง</button>':""}</div>
+      <div class="row"><b>ผู้รับแจ้งเตือนเกตเวย์นี้</b> <span class="mut">${g.alert_ids==null?"(ใช้ผู้รับตามหน้าตั้งค่า)":"(เลือกเฉพาะเครื่องนี้)"}</span></div>
+      <div class="chips" id="gcg">${role==="admin"?(cgs.filter(c=>c.active).map(c=>`<label class="chip"><input type="checkbox" value="${c.id}" ${(g.alert_ids||[]).includes(c.id)?"checked":""}><span>${esc(c.full_name)}${c.line_bound?"":" (ยังไม่ผูก LINE)"}</span></label>`).join("")||'<span class="mut">ยังไม่มีผู้ดูแล</span>'):'<span class="mut">เฉพาะผู้ดูแลระบบ</span>'}</div>
+      ${role==="admin"?`<div class="row"><button class="btn p" id="gss">บันทึกการตั้งค่า</button>${g.alert_ids!=null?'<button class="btn" id="gcr">ใช้ผู้รับตามหน้าตั้งค่า</button>':""}</div>`:`<div class="row"><button class="btn p" id="gss">บันทึกหมายเหตุ</button></div>`}
+      <p class="hint">ถ้าไม่มีผู้รับที่ผูก LINE ไว้เลย ระบบจะแจ้งผู้ดูแลคนสุดท้ายที่ผูกไว้เสมอ เพื่อไม่ให้การแจ้งเตือนหายไปเงียบ ๆ</p></div>
+    ${role==="admin"?`<div class="card" id="grm"><h3>สั่งงานระยะไกล</h3><div id="grb"><span class="mut">กำลังโหลด…</span></div></div>`:""}
     <div class="card"><h3>ตำแหน่งเกตเวย์</h3>
       <p>ตำแหน่งที่ลงทะเบียน: ${g.loc.registered?`${g.loc.registered.lat.toFixed(5)}, ${g.loc.registered.lon.toFixed(5)} ${gmap(g.loc.registered.lat,g.loc.registered.lon)}`:'<span class="mut">ยังไม่ระบุ</span>'}</p>
       <p>GPS ของเกตเวย์: ${g.loc.gps?`${g.loc.gps.lat.toFixed(5)}, ${g.loc.gps.lon.toFixed(5)} ${gmap(g.loc.gps.lat,g.loc.gps.lon)} <span class="mut">(${ago(g.loc.gps.at)} · ดาวเทียม ${g.loc.gps.sats??"-"}${g.loc.gps.fresh?"":" · เก่า"})</span>`:`<span class="mut">${g.loc.gps_attached?"ติดตั้ง GPS แล้ว แต่ยังไม่ได้ตำแหน่ง (ต้องเห็นท้องฟ้า)":"ไม่มี GPS ติดตั้ง — ใส่ตำแหน่งเองด้านล่างได้"}</span>`}</p>
@@ -256,7 +266,38 @@ const loadGateways=guard(async()=>{
     const glp=body=>guard(async()=>{await api("/gateways/"+g.id,{method:"PUT",body});toast("บันทึกแล้ว");devEdit=false;render()})();
     $("#gls").onclick=()=>{const la=$("#glat").value.trim(),lo=$("#glon").value.trim();if(la===""||lo===""||isNaN(+la)||isNaN(+lo)){toast("กรอกละติจูดและลองจิจูดเป็นตัวเลข");return}glp({lat:+la,lon:+lo})};
     if($("#glu"))$("#glu").onclick=()=>glp({use_gps:true});if($("#glc"))$("#glc").onclick=()=>glp({clear_location:true});
-    $("#gsv").onclick=guard(async()=>{const body={label:$("#gl2").value};if(role==="admin")body.enabled=$("#gen").checked;await api("/gateways/"+g.id,{method:"PUT",body});toast("บันทึกแล้ว");devEdit=false;render()})}))});
+    $("#gsv").onclick=guard(async()=>{const body={label:$("#gl2").value};if(role==="admin")body.enabled=$("#gen").checked;await api("/gateways/"+g.id,{method:"PUT",body});toast("บันทึกแล้ว");devEdit=false;render()});
+    $("#gss").onclick=()=>{const body={notes:$("#gnt").value};
+      if(role==="admin"){const v=$("#gof").value.trim();if(v!==""){if(!(+v>=3&&+v<=240)){toast("เวลาออฟไลน์ต้องอยู่ระหว่าง 3–240 นาที");return}body.offline_min=Math.round(+v)}
+        const ids=[...document.querySelectorAll("#gcg input:checked")].map(i=>+i.value);if(ids.length||g.alert_ids!=null)body.alert_ids=ids}
+      glp(body)};
+    if($("#gofr"))$("#gofr").onclick=()=>glp({reset_offline:true});if($("#gcr"))$("#gcr").onclick=()=>glp({reset_alerts:true});
+    if(role==="admin")gwRemote(g)}))});
+
+/* ---- remote control of one gateway (admin): signed whitelisted commands, see docs/GATEWAY-REMOTE.md ---- */
+let gwRT=null;
+async function gwRemote(g){
+  clearTimeout(gwRT);
+  const box=$("#grb");if(!box)return;
+  const ACT={report_now:["ขอรายงานตอนนี้",false],logs:["ดู log ล่าสุด",false],restart_services:["รีสตาร์ท LoRa services",true],reboot:["รีบูตเกตเวย์",true]};
+  const ST={pending:["⏳","รอเกตเวย์ตอบ"],ok:["✅","สำเร็จ"],failed:["❌","ไม่สำเร็จ"],expired:["⌛","หมดเวลา (เกตเวย์ไม่ตอบ)"]};
+  const draw=async()=>{
+    if(!$("#grb")||page!=="gateways")return;
+    const d=await api(`/gateways/${g.id}/commands`),pend=d.commands.some(c=>c.status==="pending");
+    $("#grb").innerHTML=`<div class="row">เอเจนต์บนเกตเวย์: ${d.agent?'<span class="ok">● พร้อม</span>':'<span class="bad">● ยังไม่ทำงาน</span>'}</div>
+      ${d.agent?"":'<div class="warn">เกตเวย์ยังไม่ได้ติดตั้ง/เปิดเอเจนต์ — ใช้ปุ่มด้านล่างยังไม่ได้ ดูวิธีที่ docs/GATEWAY-REMOTE.md หรือกด "แสดงคีย์เอเจนต์"</div>'}
+      <div class="row">${Object.entries(ACT).map(([k,v])=>`<button class="btn" data-act="${k}" ${!d.agent||pend?"disabled":""}>${v[0]}</button>`).join("")}</div>
+      <p class="hint">สั่งได้เฉพาะ 4 อย่างนี้ — ไม่มีการรันคำสั่งอิสระ · ทุกคำสั่งมีลายเซ็นและบันทึกใน "บันทึกการใช้งาน" · รีบูตทำให้ปุ่มผู้ป่วยส่งไม่ได้ประมาณ 1–2 นาที</p>
+      ${d.commands.length?`<table><tr><th>เวลา</th><th>คำสั่ง</th><th>สถานะ</th><th>ผล</th></tr>${d.commands.map(c=>`<tr><td>${fmt(c.created_at)}</td><td>${esc(ACT[c.action]?ACT[c.action][0]:c.label)}<div class="mut">${esc(c.by||"")}</div></td><td>${ST[c.status][0]} ${ST[c.status][1]}</td><td>${esc(c.detail||"")}${c.output?`<details><summary>ดูผลลัพธ์</summary><pre style="white-space:pre-wrap;max-height:260px;overflow:auto;font-size:12px">${esc(c.output)}</pre></details>`:""}</td></tr>`).join("")}</table>`:'<p class="mut">ยังไม่เคยสั่งงาน</p>'}
+      <div class="row"><button class="btn" id="gky">แสดงคีย์เอเจนต์</button><span id="gkv"></span></div>`;
+    document.querySelectorAll("#grb button[data-act]").forEach(b=>b.onclick=guard(async()=>{
+      const k=b.dataset.act;
+      if(ACT[k][1]&&!confirm(k==="reboot"?"รีบูตเกตเวย์?\nปุ่มผู้ป่วยจะส่งสัญญาณไม่ได้ประมาณ 1–2 นาที — ไม่ควรทำถ้ามีเหตุเกิดอยู่":"รีสตาร์ท LoRa services?\nการรับสัญญาณจะสะดุดประมาณ 10 วินาที"))return;
+      await api(`/gateways/${g.id}/commands`,{method:"POST",body:{action:k}});toast("ส่งคำสั่งแล้ว");draw()}));
+    $("#gky").onclick=guard(async()=>{const r=await api(`/gateways/${g.id}/agent-key`);$("#gkv").innerHTML=` <code style="user-select:all">${esc(r.key)}</code> <span class="mut">ใส่เป็น AGENT_KEY ใน /etc/sos-gateway.env บนเกตเวย์ — เป็นความลับ (การดูถูกบันทึก)</span>`});
+    if(pend)gwRT=setTimeout(()=>{draw().catch(()=>{})},3000)};
+  window._gwDraw=draw;
+  try{await draw()}catch(e){box.innerHTML='<span class="bad">โหลดไม่สำเร็จ</span>'}}
 
 const loadDevices=guard(async()=>{
   const [ds,ps]=await Promise.all([api("/devices"),api("/patients")]);if(page!=="devices")return;

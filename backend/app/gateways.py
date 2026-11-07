@@ -55,7 +55,7 @@ def sanitize_report(d) -> dict | None:
         v = _num(d.get(key), lo, hi, cast)
         if v is not None:
             out[key] = round(v, 1) if cast is float else v
-    for key in ("spi", "ntp"):
+    for key in ("spi", "ntp", "agent"):
         v = _flag(d.get(key))
         if v is not None:
             out[key] = v
@@ -205,17 +205,18 @@ class GatewayMonitor:
         repeat = settings_store.get(db, "system_alert").get("repeat_min", 60)
         changed = 0
         for g in db.query(Gateway).filter(Gateway.enabled.is_not(False)).all():
-            st, reason = classify(g, now, off)
+            goff = g.offline_min or off                 # per-gateway threshold overrides the global one
+            st, reason = classify(g, now, goff)
             if st == "offline":
                 if g.state != "offline":
                     g.state, g.state_changed_at, g.offline_reason, g.offline_notified_at = "offline", now, reason, now
-                    self._alert(db, g, self._down_text(g, reason, now, off), "gateway_offline")
+                    self._alert(db, g, self._down_text(g, reason, now, goff), "gateway_offline")
                     changed += 1
                 else:
                     last = _aware(g.offline_notified_at)
                     if repeat and last and (now - last) >= timedelta(minutes=repeat):
                         g.offline_notified_at = now
-                        self._alert(db, g, "⏰ เตือนซ้ำ: " + self._down_text(g, g.offline_reason, now, off, short=True),
+                        self._alert(db, g, "⏰ เตือนซ้ำ: " + self._down_text(g, g.offline_reason, now, goff, short=True),
                                     "gateway_offline_repeat")
             elif st in ("online", "warning"):
                 if g.state == "offline":
@@ -248,8 +249,9 @@ class GatewayMonitor:
                 "ปุ่มแจ้งเหตุของผู้ป่วยที่อยู่ในระยะเกตเวย์นี้อาจส่งสัญญาณมาไม่ถึง "
                 "โปรดตรวจไฟ/อินเทอร์เน็ตที่เกตเวย์ (ตรวจเบื้องต้นก่อน แล้วแจ้งผู้ดูแลระบบ)")
 
-    def recipients(self, db: Session) -> list[Caregiver]:
-        ids = list(settings_store.get(db, "system_alert").get("caregiver_ids") or [])
+    def recipients(self, db: Session, override: list | None = None) -> list[Caregiver]:
+        """override = a gateway's own list (None / empty -> the global system-alert list)."""
+        ids = list(override) if override else list(settings_store.get(db, "system_alert").get("caregiver_ids") or [])
         fin = settings_store.get(db, "escalation").get("final_caregiver_id")
         if not ids and fin:
             ids = [fin]
@@ -260,11 +262,11 @@ class GatewayMonitor:
                 out.append(c)
         return out
 
-    def send_system(self, db: Session, text: str) -> list[dict]:
+    def send_system(self, db: Session, text: str, override: list | None = None) -> list[dict]:
         """Push a plain-text LINE message to the system-alert recipients. Returns per-recipient results."""
         res = []
         fn = getattr(self.notifier, "notify_system", None)
-        for c in self.recipients(db):
+        for c in self.recipients(db, override):
             if fn is None:
                 ok, detail = False, "no notifier"
             elif not c.line_user_id:
@@ -278,7 +280,7 @@ class GatewayMonitor:
         return res
 
     def _alert(self, db: Session, g: Gateway, text: str, action: str):
-        results = self.send_system(db, text)
+        results = self.send_system(db, text, g.alert_ids)
         if not results:
             log.warning("%s for %s but nobody is configured to receive system alerts", action, g.gateway_id)
         db.add(AuditLog(actor="system", action=action, target=g.gateway_id,
