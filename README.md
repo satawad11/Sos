@@ -14,6 +14,7 @@
 | 5 | แดชบอร์ด + LINE OA | `dashboard/`, `backend/app/line.py` | `docs/INSTALL-5-dashboard-line.md` |
 | – | ตัวจำลองอุปกรณ์ (ทดสอบโดยไม่มีวิทยุ) | `simulator/sim.py` | ท้าย INSTALL-5 |
 | – | อัปเดตระบบจากหน้าเว็บ (ดึงจาก GitHub, สำรอง+ย้อนกลับอัตโนมัติ) | `infra/scripts/sos-update.sh` | `docs/UPDATE.md` |
+| – | ทดสอบปุ่มประจำเดือน · แผนที่ · แอปมือถือ + แจ้งเตือน push · รายงาน PDF · ยืนยันตัวตน 2 ขั้น | `dashboard/`, `backend/app/{selftest,push,pdf_report,mfa}.py` | `docs/FEATURES-2569-11.md` |
 
 ## สถานะการทดสอบ (ตรงไปตรงมา)
 | ส่วน | สถานะ |

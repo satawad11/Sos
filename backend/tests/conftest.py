@@ -43,6 +43,9 @@ def env_():
                     Assignment(patient_id=p.id, caregiver_id=b.id, priority=2)])
         db.commit()
         ids = {"a": a.id, "b": b.id, "c": c.id, "p": p.id}
+        # the monthly self-test reminder would fire inside any eng.tick() run at a real date/time; tests/test_selftest.py turns it on
+        from app import settings_store
+        settings_store.put(db, "self_test", {**settings_store.DEFAULTS["self_test"], "enabled": False}, "test")
     from app.main import create_app
     client = TestClient(create_app(with_lifespan=False))
     yield eng, downs, notifier, client, ids

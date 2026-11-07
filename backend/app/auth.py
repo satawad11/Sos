@@ -33,10 +33,27 @@ def password_problem(pw: str, username: str = "") -> str | None:
     return None
 
 
-def make_token(u: User) -> str:
+def make_token(u: User, mfa: bool = False) -> str:
     exp = datetime.now(timezone.utc) + timedelta(hours=env.jwt_hours)
-    return jwt.encode({"sub": u.username, "role": u.role, "tv": u.token_ver or 0, "exp": exp},
+    return jwt.encode({"sub": u.username, "role": u.role, "tv": u.token_ver or 0, "mfa": bool(mfa), "exp": exp},
                       env.jwt_secret, algorithm="HS256")
+
+
+def make_mfa_ticket(u: User) -> str:
+    """Short-lived proof that the password step passed; only /api/login/2fa accepts it."""
+    exp = datetime.now(timezone.utc) + timedelta(minutes=5)
+    return jwt.encode({"sub": u.username, "tv": u.token_ver or 0, "purpose": "mfa", "exp": exp}, env.jwt_secret, algorithm="HS256")
+
+
+def user_from_mfa_ticket(db: Session, ticket: str) -> User:
+    try:
+        data = jwt.decode(ticket, env.jwt_secret, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        raise HTTPException(401, "ขั้นตอนเข้าสู่ระบบหมดเวลา กรุณาเข้าสู่ระบบใหม่")
+    u = db.query(User).filter_by(username=data.get("sub"), active=True).first()
+    if data.get("purpose") != "mfa" or not u or data.get("tv", 0) != (u.token_ver or 0):
+        raise HTTPException(401, "ขั้นตอนเข้าสู่ระบบหมดเวลา กรุณาเข้าสู่ระบบใหม่")
+    return u
 
 
 def user_from_token(db: Session, token: str) -> User:
@@ -47,12 +64,16 @@ def user_from_token(db: Session, token: str) -> User:
     u = db.query(User).filter_by(username=data["sub"], active=True).first()
     if not u:
         raise HTTPException(401, "user disabled")
+    if data.get("purpose"):
+        raise HTTPException(401, "invalid token")                           # a 2FA ticket is not a session
     if data.get("tv", 0) != (u.token_ver or 0):
         raise HTTPException(401, "session revoked, please log in again")   # password changed/reset, role changed, user disabled
+    u._mfa_ok = bool(data.get("mfa"))
     return u
 
 
 MUST_CHANGE_OK = ("/api/me", "/api/me/password")
+MFA_SETUP_OK = ("/api/me", "/api/me/password", "/api/me/2fa/setup", "/api/me/2fa/enable")
 
 
 def current_user(request: Request, authorization: str = Header(default=""), db: Session = Depends(get_db)) -> User:
@@ -61,6 +82,11 @@ def current_user(request: Request, authorization: str = Header(default=""), db: 
     u = user_from_token(db, authorization[7:])
     if u.must_change and request.url.path not in MUST_CHANGE_OK:
         raise HTTPException(403, "password change required")
+    from . import mfa
+    if u.totp_secret and not getattr(u, "_mfa_ok", False) and mfa.required(db, u):
+        raise HTTPException(401, "2fa required")                 # session from before the policy was switched on
+    if not u.totp_secret and request.url.path not in MFA_SETUP_OK and mfa.required(db, u):
+        raise HTTPException(403, "2fa setup required")
     return u
 
 

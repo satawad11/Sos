@@ -73,7 +73,9 @@ async def lifespan(app: FastAPI):
     bootstrap_admin()
     hub.loop = asyncio.get_running_loop()
     from .mqtt_worker import MqttWorker
-    worker = MqttWorker(lambda dl: Engine(dl, LineNotifier(), hub.publish))
+    from .push import PushSender
+    pusher = PushSender(SessionLocal); pusher.start(); api._engine["push"] = pusher
+    worker = MqttWorker(lambda dl: Engine(dl, LineNotifier(), lambda e: (hub.publish(e), pusher.on_event(e))))
     api._engine["engine"] = worker.engine
     worker.start()
     stop = threading.Event()

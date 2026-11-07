@@ -8,6 +8,7 @@ from . import codec, geo, settings_store
 from .hours import is_office_hours
 from .gateways import GatewayMonitor
 from .device_monitor import DeviceMonitor
+from .selftest import SelfTestScheduler, confirm_text, first_caregivers
 from .models import (Case, CaseEvent, Device, Assignment, Caregiver, Notification, utcnow)
 
 log = logging.getLogger("sos.engine")
@@ -35,6 +36,7 @@ class Engine:
         self.publish = publish or (lambda e: None)
         self.gw = GatewayMonitor(notifier, self.publish)
         self.dev_watch = DeviceMonitor(self.gw)
+        self.selftest = SelfTestScheduler()
         self.mqtt_ok: Callable[[], bool] = lambda: True      # main.py plugs in the MQTT worker's connection state
 
     # ---------- helpers ----------
@@ -171,6 +173,13 @@ class Engine:
         db.add(case); db.flush()
         self._event(db, case, "test_received", battery=up.battery)
         self._pub(case, "case_test")
+        if self.notifier is not None and settings_store.get(db, "self_test").get("confirm_line"):
+            try:   # tell the responsible อสม. the monthly test went through (never blocks the device reply)
+                cg = first_caregivers(db).get(dev.patient_id) if dev.patient_id else None
+                if cg and cg.line_user_id:
+                    self.notifier.notify_system(db, cg, confirm_text(db, dev, up.battery))
+            except Exception:
+                log.exception("self-test confirmation failed")
         return "test"
 
     def _cancel(self, db, dev, up) -> str:
@@ -296,4 +305,8 @@ class Engine:
         db.commit()
         self.gw.tick(db, now, self.mqtt_ok())
         self.dev_watch.tick(db, now, self.mqtt_ok())
+        try:
+            self.selftest.tick(db, now, self.notifier)
+        except Exception:
+            log.exception("self-test scheduler failed")
         return n

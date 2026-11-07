@@ -16,8 +16,12 @@ DEFAULTS: dict[str, dict] = {
     "device_alert": {"enabled": True, "battery_low_pct": 20, "mains_grace_min": 10},   # LINE alert when a button goes quiet / low battery / mains lost
     "privacy": {"require_consent": True, "case_retention_days": 730, "audit_retention_days": 365,
                 "auto_purge": False, "line_detail": "full"},          # line_detail: full | minimal (name + village only)
-    "geo": {"home_radius_m": 150, "gps_fresh_min": 15, "gateway_move_m": 200},
+    "geo": {"home_radius_m": 150, "gps_fresh_min": 15, "gateway_move_m": 200, "coverage_m": 3000},   # coverage_m: map circle per gateway
     "message": {"afterhours_text": "นอกเวลาราชการ กรุณาโทร 1669"},
+    "org": {"name": "", "partner": "", "system_name": "ระบบปุ่มแจ้งเหตุฉุกเฉินผู้ป่วยติดบ้านด้วย LoRaWAN",
+            "reporter_name": "", "reporter_title": "ผู้รายงาน", "approver_name": "", "approver_title": "ผู้อำนวยการ รพ.สต."},   # PDF report header/signers
+    "security": {"mfa_enabled": False, "mfa_roles": ["admin"]},       # 2-step sign-in policy (off until an admin turns it on)
+    "self_test": {"enabled": True, "remind_day": 1, "second_day": 15, "remind_time": "10:00", "confirm_line": True},   # monthly button test (app/selftest.py)
 }
 
 
