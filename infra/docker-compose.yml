@@ -31,6 +31,8 @@ services:
       SOS_PUBLIC_URL: https://${DOMAIN}
       SOS_BOOTSTRAP_ADMIN_USER: ${ADMIN_USER}
       SOS_BOOTSTRAP_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    volumes:
+      - ./update:/update      # in-app updater: request.json → host systemd (docs/UPDATE.md); no Docker socket inside
     depends_on: [postgres, mosquitto]
     # single worker on purpose: MQTT consumer + escalation loop run inside the process
 

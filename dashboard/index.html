@@ -1,27 +1,72 @@
 <!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1565c0">
 <title>ระบบแจ้งเหตุฉุกเฉิน รพ.สต.</title>
 <style>
 :root{--bg:#f4f6f8;--card:#fff;--ink:#1c2733;--mut:#6b7885;--red:#c62828;--grn:#2e7d32;--amb:#ef6c00;--bd:#dde3e8;--pri:#1565c0}
 @media(prefers-color-scheme:dark){:root{--bg:#10161c;--card:#1a232c;--ink:#e6edf3;--mut:#93a1ad;--bd:#2c3a46}}
 *{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,"Noto Sans Thai",sans-serif;background:var(--bg);color:var(--ink)}
-header{display:flex;gap:12px;align-items:center;padding:10px 16px;background:var(--pri);color:#fff;flex-wrap:wrap}
-header h1{font-size:18px;margin:0;flex:1}nav{display:flex;gap:4px;flex-wrap:wrap}
 nav button,.btn{border:0;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer;background:var(--card);color:var(--ink);border:1px solid var(--bd)}
-nav button{background:transparent;color:#fff;border-color:transparent}nav button.on{background:#ffffff33}
 .btn.p{background:var(--pri);color:#fff;border-color:var(--pri)}.btn.g{background:var(--grn);color:#fff;border-color:var(--grn)}.btn.r{background:var(--red);color:#fff;border-color:var(--red)}
-main{max-width:1100px;margin:0 auto;padding:16px}.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+main{padding:16px;min-width:0}.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--bd);font-size:14px;vertical-align:top}th{color:var(--mut);font-weight:600}
 .tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;border:1px solid var(--bd)}
 .new{background:var(--red);color:#fff;border-color:var(--red)}.accepted{background:var(--amb);color:#fff;border-color:var(--amb)}.closed{background:var(--grn);color:#fff;border-color:var(--grn)}
 .alarm{border:3px solid var(--red);animation:b 1s infinite}@keyframes b{50%{background:#c6282833}}
 input,select,textarea{font:inherit;padding:7px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--ink);max-width:100%}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}.mut{color:var(--mut)}
-#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:10px;display:none}
-#login{max-width:340px;margin:12vh auto}.warn{background:#fff3cd;color:#664d03;padding:8px 12px;border-radius:8px}
+#toast{position:fixed;z-index:60;max-width:92vw;bottom:calc(16px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:10px;display:none}
+.warn{background:#fff3cd;color:#664d03;padding:8px 12px;border-radius:8px}
 @media print{body.rpt *{visibility:hidden}body.rpt #rpt,body.rpt #rpt *{visibility:visible}body.rpt #rpt{position:absolute;left:0;top:0;width:100%;color:#000}body *{visibility:hidden}#plabel,#plabel *{visibility:visible}#plabel{position:absolute;left:0;top:0;border:1px solid #000;padding:6px;width:60mm;color:#000;background:#fff}}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+/* ---------- app shell: sidebar on desktop, drawer on tablet/phone ---------- */
+.shell{display:grid;grid-template-columns:248px minmax(0,1fr);grid-template-rows:auto 1fr;grid-template-areas:"top top" "side main";min-height:100vh;min-height:100dvh}
+.top{grid-area:top;position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top));background:linear-gradient(90deg,#0d47a1,var(--pri));color:#fff;box-shadow:0 2px 8px #0002}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;flex:1;min-width:0}.brand span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ham{display:none;background:#ffffff26;border:0;color:#fff;font-size:22px;width:42px;height:42px;border-radius:10px;cursor:pointer}
+.top .btn{background:#ffffff26;color:#fff;border-color:transparent}.top .btn.on{background:#fff;color:var(--pri)}
+#side{grid-area:side;position:sticky;top:62px;align-self:start;height:calc(100vh - 62px);height:calc(100dvh - 62px);overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding:12px 10px;background:var(--card);border-right:1px solid var(--bd)}
+#side nav{display:flex;flex-direction:column;gap:2px}
+#side nav button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px 12px;border-radius:10px;border:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+#side nav button:hover{background:var(--bg)}#side nav button.on{background:var(--pri);color:#fff;font-weight:600}
+#side .ic{width:24px;text-align:center;font-size:18px}
+.me{margin-top:auto;padding:12px 8px 4px;border-top:1px solid var(--bd)}.me b{display:block;overflow:hidden;text-overflow:ellipsis}.me .row{flex-wrap:nowrap}.me .row .btn{flex:1;white-space:nowrap;padding:8px 10px}
+.scrim{display:none}
+main>.card:first-child{margin-top:0}main{max-width:1200px;width:100%}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}.tw>table{min-width:560px}
+.btn,nav button{min-height:40px}
+@media(max-width:1023px){
+  .shell{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "main"}
+  .ham{display:inline-flex;align-items:center;justify-content:center}
+  #side{position:fixed;top:0;left:0;bottom:0;z-index:50;width:min(300px,86vw);height:100%;transform:translateX(-105%);visibility:hidden;transition:transform .22s ease,visibility .22s;padding-top:calc(16px + env(safe-area-inset-top))}
+  .shell.nav-open #side{transform:none;visibility:visible;box-shadow:4px 0 24px #0004}
+  .shell.nav-open .scrim{display:block;position:fixed;inset:0;z-index:40;background:#0006}
+}
+@media(max-width:640px){
+  main{padding:10px}.card{padding:12px;border-radius:10px}.brand{font-size:16px}.top .btn .lbl{display:none}
+  .row>input,.row>select,.row>textarea{flex:1 1 100%}h2{font-size:20px}h3{font-size:17px}
+}
+/* ---------- sign-in / password screens ---------- */
+.auth{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:radial-gradient(1200px 600px at 10% -10%,#42a5f5 0,transparent 60%),radial-gradient(900px 500px at 110% 110%,#c62828 0,transparent 55%),linear-gradient(135deg,#0d47a1,#1565c0 55%,#283593)}
+.auth-card{width:100%;max-width:410px;background:var(--card);color:var(--ink);border-radius:20px;padding:32px 28px 24px;box-shadow:0 20px 60px #0005;animation:rise .35s ease}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.auth-logo{display:flex;justify-content:center;margin-bottom:10px}
+.auth-card h1{font-size:23px;text-align:center;margin:4px 0 2px}.auth-card .sub{text-align:center;color:var(--mut);margin:0 0 22px;font-size:14px}
+.fld{display:block;margin:0 0 14px}.fld>span{display:block;font-size:14px;font-weight:600;margin-bottom:6px}
+.fld input{width:100%;padding:12px 14px;font-size:16px;border-radius:12px;border:1.5px solid var(--bd);background:var(--bg);transition:border-color .15s,box-shadow .15s}
+.fld input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px #1565c033}
+.pwbox{position:relative}.pwbox input{padding-right:52px}
+.eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--mut);width:42px;height:42px;border-radius:10px;cursor:pointer;font-size:18px}.eye:hover{background:var(--bd)}
+.btn.big{width:100%;padding:13px;font-size:17px;font-weight:600;border-radius:12px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:8px}
+.auth .err{background:#fdecea;color:#8b1a1a;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:14px}
+.auth .caps{color:var(--amb);font-size:13px;margin:-8px 0 12px}
+.auth .foot{text-align:center;color:var(--mut);font-size:12px;margin:18px 0 0}
+.auth .alt{display:flex;gap:8px}.auth .alt .btn{flex:1}
+.spin{width:18px;height:18px;border:2.5px solid #fff6;border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
+@media(prefers-color-scheme:dark){.auth .err{background:#4a1515;color:#ffd6d6}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .step{display:flex;gap:8px;align-items:flex-start;margin:4px 0}.ok{color:var(--grn)}.bad{color:var(--red)}
 </style></head>
 <body>
@@ -46,16 +91,50 @@ function connectWS(){
   ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==="case_new"){beep();toast("🚨 มีเหตุฉุกเฉินใหม่")}if(m.type==="gateway_state"){toast(m.state==="offline"?"⚠️ เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์");if(page==="gateways"&&!devEdit)loadGateways()}if(page==="cases")loadCases()};
   ws.onclose=()=>{if(token)setTimeout(connectWS,3000)}}
 
+const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
+const ICON={cases:"🚨",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",users:"👥",update:"⬆️",settings:"⚙️",audit:"📜"};
+const LS={get:k=>{try{return localStorage.getItem(k)||""}catch{return""}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
+function authShell(inner){$("#app").innerHTML=`<div class="auth">${inner}</div>`}
+function busyBtn(b,on,label){b.disabled=on;b.innerHTML=on?`<span class="spin"></span> กำลังดำเนินการ…`:label}
+function eyeToggle(btn,input){btn.onclick=()=>{const s=input.type==="password";input.type=s?"text":"password";btn.textContent=s?"🙈":"👁";btn.setAttribute("aria-label",s?"ซ่อนรหัสผ่าน":"แสดงรหัสผ่าน");input.focus()}}
+function capsWatch(input,el){const f=e=>{if(e.getModifierState)el.hidden=!e.getModifierState("CapsLock")};input.addEventListener("keydown",f);input.addEventListener("keyup",f)}
+// wide tables scroll sideways on phones instead of squashing the page
+new MutationObserver(()=>document.querySelectorAll("main table").forEach(t=>{if(!t.parentElement.classList.contains("tw")){const w=document.createElement("div");w.className="tw";t.replaceWith(w);w.appendChild(t)}})).observe(document.documentElement,{childList:true,subtree:true});
+
 function render(){
   if(token&&sessionStorage.getItem("mc")==="1"){pwScreen(true);return}
-  if(!token){$("#app").innerHTML=`<div class="card" id="login"><h2>เข้าสู่ระบบ</h2><div class="row"><input id="u" placeholder="ชื่อผู้ใช้" autocomplete="username"></div><div class="row"><input id="p" type="password" placeholder="รหัสผ่าน" autocomplete="current-password"></div><button class="btn p" id="go">เข้าสู่ระบบ</button></div>`;
-    $("#go").onclick=guard(async()=>{const r=await api("/login",{method:"POST",body:{username:$("#u").value,password:$("#p").value}});token=r.token;role=r.role;sessionStorage.setItem("tk",token);sessionStorage.setItem("role",role);if(r.must_change)sessionStorage.setItem("mc","1");else sessionStorage.removeItem("mc");render()});
-    $("#p").onkeydown=e=>{if(e.key==="Enter")$("#go").click()};return}
-  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["users","ผู้ใช้"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
-  $("#app").innerHTML=`<header><h1>🚑 ระบบแจ้งเหตุฉุกเฉิน</h1><nav>${tabs.map(t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}">${t[1]}</button>`).join("")}</nav><button class="btn" id="snd">${audioOn?"🔔 เสียงเปิด":"🔕 เปิดเสียงเตือน"}</button><button class="btn" id="pw">🔑 รหัสผ่าน</button><button class="btn" id="out">ออก</button></header><main id="main"></main>`;
-  document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{page=b.dataset.p;render()});
+  if(!token){
+    authShell(`<form class="auth-card" id="lf" novalidate>
+      <div class="auth-logo">${LOGO(64)}</div>
+      <h1>ระบบแจ้งเหตุฉุกเฉิน</h1><p class="sub">ปุ่มแจ้งเหตุผู้ป่วยติดบ้าน · สำหรับเจ้าหน้าที่และผู้ดูแลระบบ</p>
+      <div class="err" id="lerr" role="alert" hidden></div>
+      <label class="fld"><span>ชื่อผู้ใช้</span><input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+      <label class="fld"><span>รหัสผ่าน</span><div class="pwbox"><input id="p" name="password" type="password" autocomplete="current-password" required><button type="button" class="eye" id="eye" aria-label="แสดงรหัสผ่าน">👁</button></div></label>
+      <div class="caps" id="caps" hidden>⇪ Caps Lock เปิดอยู่</div>
+      <button class="btn p big" id="go" type="submit">เข้าสู่ระบบ</button>
+      <p class="foot">ใช้งานเฉพาะผู้ได้รับอนุญาต · การเข้าใช้งานทุกครั้งถูกบันทึกตาม PDPA</p></form>`);
+    const u=$("#u"),p=$("#p"),err=$("#lerr");u.value=LS.get("lu");(u.value?p:u).focus();eyeToggle($("#eye"),p);capsWatch(p,$("#caps"));
+    $("#lf").onsubmit=async e=>{e.preventDefault();err.hidden=true;
+      if(!u.value.trim()||!p.value){err.textContent="กรอกชื่อผู้ใช้และรหัสผ่าน";err.hidden=false;return}
+      busyBtn($("#go"),true);
+      try{const r=await api("/login",{method:"POST",body:{username:u.value.trim(),password:p.value}});
+        token=r.token;role=r.role;sessionStorage.setItem("tk",token);sessionStorage.setItem("role",role);sessionStorage.setItem("nm",r.name||u.value.trim());LS.set("lu",u.value.trim());
+        if(r.must_change)sessionStorage.setItem("mc","1");else sessionStorage.removeItem("mc");render()}
+      catch(x){const m=/bad credentials/.test(x.message)?"ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง":/locked/.test(x.message)?"บัญชีถูกล็อกชั่วคราว 15 นาที เพราะใส่รหัสผิดหลายครั้ง":/Failed to fetch|NetworkError/.test(x.message)?"ติดต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ต":x.message;
+        err.textContent=m;err.hidden=false;busyBtn($("#go"),false,"เข้าสู่ระบบ");p.select()}};
+    return}
+  const tabs=[["cases","เคสฉุกเฉิน"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  const RN={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
+  $("#app").innerHTML=`<div class="shell" id="shell"><header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">☰</button>
+    <div class="brand">${LOGO(32)}<span>ระบบแจ้งเหตุฉุกเฉิน</span></div>
+    <button class="btn ${audioOn?"on":""}" id="snd" title="เสียงเตือนเคสใหม่">${audioOn?"🔔":"🔕"}<span class="lbl"> ${audioOn?"เสียงเปิด":"เปิดเสียงเตือน"}</span></button></header>
+   <aside id="side" aria-label="เมนู"><nav>${tabs.map(t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}"><span class="ic">${ICON[t[0]]||"•"}</span><span>${t[1]}</span></button>`).join("")}</nav>
+    <div class="me"><b>👤 ${esc(sessionStorage.getItem("nm")||"")}</b><span class="mut">${RN[role]||role}</span><div class="row"><button class="btn" id="pw">🔑 รหัสผ่าน</button><button class="btn" id="out">ออก</button></div></div></aside>
+   <div class="scrim" id="scrim"></div><main id="main"></main></div>`;
+  document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{page=b.dataset.p;render();scrollTo(0,0)});
+  $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>pwScreen(false);$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
-  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,settings:loadSettings,audit:loadAudit})[page])();
+  clearInterval(timer);(({cases:loadCases,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,update:loadUpdate,settings:loadSettings,audit:loadAudit})[page])();
   if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
   if(!ws||ws.readyState>1)connectWS()}
 
@@ -186,6 +265,44 @@ const loadSettings=guard(async()=>{
   $("#ha").onclick=guard(async()=>{await api("/holidays",{method:"POST",body:{day:$("#hd").value,name:$("#hn").value}});loadSettings()});
   document.querySelectorAll("[data-h]").forEach(b=>b.onclick=guard(async()=>{await api("/holidays/"+b.dataset.h,{method:"DELETE"});loadSettings()}))});
 
+// ---------------- system update (GitHub) — admin only; the host updater does the work (docs/UPDATE.md) ----------------
+let upSawBusy=false;
+const UPST={idle:["ok","พร้อม"],done:["ok","สำเร็จ"],failed:["bad","ไม่สำเร็จ"],queued:["mut","รอคิว"],checking:["mut","กำลังตรวจ…"],updating:["mut","กำลังอัปเดต…"],rolling_back:["bad","กำลังย้อนกลับ…"]};
+const verLine=v=>v?`<code>${esc(v.short)}</code> ${esc(v.subject)} <span class="mut">· ${fmt(v.date)}</span>`:'<span class="mut">-</span>';
+async function loadUpdate(){
+  if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
+  clearTimeout(timer);let s;
+  try{s=await api("/system/update")}
+  catch(e){if(page!=="update")return;
+    $("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ</h3><p>⏳ ${upSawBusy?"ระบบกำลังรีสตาร์ทหลังอัปเดต รอสักครู่…":"ติดต่อเซิร์ฟเวอร์ไม่ได้ ("+esc(e.message)+")"}</p></div>`;
+    timer=setTimeout(()=>{if(page==="update")loadUpdate()},4000);return}
+  if(page!=="update")return;
+  const st=s.status||{},busy=s.busy,state=s.pending?"queued":(st.state||"idle"),[cls,lbl]=UPST[state]||["mut",state];
+  if(busy)upSawBusy=true;
+  const finished=!busy&&upSawBusy&&(state==="done"||state==="failed");
+  if(!s.installed){$("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ</h3><div class="warn">ยังไม่ได้ติดตั้งตัวอัปเดตบนเซิร์ฟเวอร์ — ให้ผู้ดูแลเซิร์ฟเวอร์รัน <code>sudo bash infra/scripts/setup-updater.sh</code> หนึ่งครั้ง (ดู docs/UPDATE.md)</div></div>`;return}
+  const ch=st.changes||[],n=st.behind||0,lu=st.last_update;
+  $("#main").innerHTML=`<div class="card"><h3>อัปเดตระบบ <span class="mut" style="font-weight:normal">(โค้ดจาก GitHub · สาขา ${esc(st.branch||"main")})</span></h3>
+   <div class="row"><b>เวอร์ชันที่ใช้อยู่:</b> ${verLine(st.current)}</div>
+   <div class="row"><b>ล่าสุดบน GitHub:</b> ${verLine(st.latest)}</div>
+   <div class="row mut">ตรวจล่าสุด ${fmt(st.checked_at)}${lu?` · อัปเดตครั้งก่อน ${fmt(lu.at)} <code>${esc(lu.from.slice(0,7))}</code> → <code>${esc(lu.to.slice(0,7))}</code> ${lu.ok?'<span class="ok">สำเร็จ</span>':'<span class="bad">ไม่สำเร็จ (ย้อนกลับ)</span>'}`:""}</div>
+   <div class="row"><b>สถานะ:</b> <span class="${cls}">${busy?"⏳ ":""}${esc(lbl)}</span> ${esc(st.message||"")}</div>
+   ${finished&&state==="done"?'<div class="row"><b class="ok">อัปเดตเสร็จแล้ว</b> — กด "โหลดหน้าใหม่" เพื่อใช้หน้าจอเวอร์ชันใหม่ <button class="btn g" id="uprl">โหลดหน้าใหม่</button></div>':""}
+   <div class="row"><button class="btn" id="upchk" ${busy?"disabled":""}>🔍 ตรวจหาอัปเดต</button>
+     <button class="btn p" id="upgo" ${busy||!n?"disabled":""}>⬆️ อัปเดตตอนนี้${n?` (${n} รายการ)`:""}</button></div>
+   ${n?`<h4>มีอะไรใหม่ (${n})</h4><ul>${ch.map(c=>`<li><code>${esc(c.short)}</code> ${esc(c.subject)} <span class="mut">· ${esc(c.author)} · ${fmt(c.date)}</span></li>`).join("")}</ul>`:'<p class="mut">ไม่มีเวอร์ชันใหม่ (กด "ตรวจหาอัปเดต" เพื่อเช็กกับ GitHub อีกครั้ง — ระบบเช็กเองทุก 6 ชั่วโมง)</p>'}
+   <p class="mut">ขั้นตอนอัปเดต: สำรองฐานข้อมูล → ดึงโค้ด → build ใหม่ → ตรวจว่าระบบทำงาน — ถ้าไม่ผ่าน ระบบจะ<b>ย้อนกลับเวอร์ชันเดิมให้อัตโนมัติ</b> · ระหว่างอัปเดต (ประมาณ 1–5 นาที) หน้าเว็บและการส่ง LINE จะหยุดชั่วคราว ควรทำนอกช่วงที่มีเคสค้าง</p>
+   <details ${busy||state==="failed"?"open":""}><summary>บันทึกการทำงาน (log)</summary><pre style="white-space:pre-wrap;max-height:320px;overflow:auto;font-size:12px;background:#0f1720;color:#d6e2ee;padding:8px;border-radius:8px">${esc((s.log||[]).join("\n"))||"-"}</pre></details></div>`;
+  if($("#uprl"))$("#uprl").onclick=()=>location.reload();
+  const send=action=>guard(async()=>{await api("/system/update",{method:"POST",body:{action}});upSawBusy=action==="update";toast(action==="update"?"ส่งคำขออัปเดตแล้ว":"กำลังตรวจกับ GitHub…");loadUpdate()})();
+  $("#upchk").onclick=()=>send("check");
+  $("#upgo").onclick=guard(async()=>{
+    const open=(await api("/cases?state=new")).length;
+    if(!confirm(`อัปเดตเป็น ${st.latest?st.latest.short:"เวอร์ชันล่าสุด"} (${n} รายการ)?\n\nระหว่างอัปเดตประมาณ 1–5 นาที หน้าเว็บและการแจ้ง LINE จะหยุดชั่วคราว`+(open?`\n\n⚠️ ขณะนี้มีเคสรอรับเรื่อง ${open} เคส — แนะนำให้จัดการก่อน`:"")+"\n\nระบบจะสำรองฐานข้อมูลก่อน และย้อนกลับเองถ้าอัปเดตไม่ผ่าน"))return;
+    send("update")});
+  if(busy)timer=setTimeout(()=>{if(page==="update")loadUpdate()},3000);
+}
+
 const loadAudit=guard(async()=>{
   if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
   const [a,us]=await Promise.all([api("/audit"),api("/users")]);
@@ -195,14 +312,22 @@ const loadAudit=guard(async()=>{
 
 // ---------------------------------------------------------------- USB provisioning (Web Serial)
 class SerialLink{
-  constructor(){this.port=null;this.lines=[];this.waiters=[];this.buf="";this.writer=null;this.reader=null;this.closed=false}
+  constructor(){this.port=null;this.lines=[];this.waiters=[];this.buf="";this.writer=null;this.reader=null;this.closed=false;this.stopping=false}
   static supported(){return "serial" in navigator}
   async open(){
     this.port=await navigator.serial.requestPort();await this.port.open({baudRate:115200});
-    this.writer=this.port.writable.getWriter();this.reader=this.port.readable.getReader();this._pump()}
+    this.writer=this.port.writable.getWriter();this._pump()}
+  // Boards with a separate USB-UART chip (Heltec V2 / CP2102) produce a BREAK/framing error when the ESP32 restarts.
+  // Web Serial reports that as a non-fatal read error and hands out a fresh readable stream — so keep reading
+  // until the port is really gone (readable === null) or close() was called.
   async _pump(){const dec=new TextDecoder();
-    try{for(;;){const {value,done}=await this.reader.read();if(done)break;this.buf+=dec.decode(value,{stream:true});
-      let i;while((i=this.buf.search(/\r?\n/))>=0){const l=this.buf.slice(0,i).trim();this.buf=this.buf.slice(i).replace(/^\r?\n/,"");if(l){this.lines.push(l);this._wake()}}}}catch{}
+    while(!this.stopping&&this.port&&this.port.readable){
+      this.reader=this.port.readable.getReader();let ended=false;
+      try{for(;;){const {value,done}=await this.reader.read();if(done){ended=true;break}this.buf+=dec.decode(value,{stream:true});
+        let i;while((i=this.buf.search(/\r?\n/))>=0){const l=this.buf.slice(0,i).trim();this.buf=this.buf.slice(i).replace(/^\r?\n/,"");if(l){this.lines.push(l);this._wake()}}}}catch{this.buf=""}
+      finally{try{this.reader.releaseLock()}catch{}}
+      if(ended||this.stopping)break;
+      await new Promise(r=>setTimeout(r,100))}
     this.closed=true;this._wake()}
   _wake(){this.waiters.splice(0).forEach(f=>f())}
   async send(cmd){await this.writer.write(new TextEncoder().encode(cmd+"\n"))}
@@ -213,7 +338,7 @@ class SerialLink{
       const left=end-Date.now();if(left<=0)throw new Error("ไม่มีคำตอบ "+prefix+" จากเครื่อง");if(this.closed)throw new Error("ขาดการเชื่อมต่อ USB");
       await new Promise(r=>{const t=setTimeout(r,left);this.waiters.push(()=>{clearTimeout(t);r()})})}}
   async ping(){for(let i=0;i<5;i++){this.flush();await this.send("PING");try{return await this.expect("PONG",1500)}catch{}}throw new Error("เครื่องไม่ตอบ PING — ตรวจสาย USB (ต้องเป็นสายข้อมูล) และว่าอัปโหลดเฟิร์มแวร์แล้ว")}
-  async close(){try{await this.reader.cancel()}catch{}try{this.writer.releaseLock()}catch{}try{await this.port.close()}catch{}}
+  async close(){this.stopping=true;try{await this.reader.cancel()}catch{}try{this.writer.releaseLock()}catch{}try{await this.port.close()}catch{}}
 }
 let link=null;
 const loadInstall=guard(async()=>{
@@ -239,7 +364,9 @@ const loadInstall=guard(async()=>{
     try{
       link=new SerialLink();await link.open();mark("usb","wait");await new Promise(r=>setTimeout(r,1500));await link.ping();mark("usb","ok","ตอบ PONG");
       cur="reg";mark("reg","wait");reg=await api("/provision/start",{method:"POST",body:{label}});mark("reg","ok",reg.dev_eui);
-      cur="flash";mark("flash","wait");link.flush();await link.send(`PROV ${reg.dev_eui} ${reg.app_key} ${reg.join_eui}`);await link.expect("OK",6000);reg.app_key=null;mark("flash","ok","เครื่องกำลังรีสตาร์ท");
+      cur="flash";mark("flash","wait");link.flush();await link.send(`PROV ${reg.dev_eui} ${reg.app_key} ${reg.join_eui}`);let okLine=null;try{okLine=await link.expect("OK",6000)}catch(e){if(/^เครื่องตอบ/.test(e.message))throw e}reg.app_key=null;
+      if(link.closed)throw new Error("ขาดการเชื่อมต่อ USB (ถอดสายหรือพอร์ตหาย)");
+      mark("flash","ok",okLine?"เครื่องกำลังรีสตาร์ท":"ไม่เห็นคำตอบ OK — จะยืนยันด้วยการอ่านค่ากลับ");
       cur="verify";mark("verify","wait");await new Promise(r=>setTimeout(r,3000));let info=null;
       for(let i=0;i<6&&!info;i++){link.flush();await link.send("INFO");try{info=await link.expect("INFO",2500)}catch{}}
       if(!info)throw new Error("อ่านค่ากลับไม่ได้");
@@ -272,17 +399,23 @@ const locCell=l=>!l?'<span class="mut">-</span>':`${gmap(l.lat,l.lon,"📍 แ�
 
 /* ---- password change (voluntary and forced) ---- */
 function pwScreen(forced){
-  $("#app").innerHTML=`<div class="card" id="login"><h2>${forced?"ตั้งรหัสผ่านใหม่":"เปลี่ยนรหัสผ่าน"}</h2>${forced?'<p class="warn">บัญชีนี้ใช้รหัสผ่านชั่วคราว ต้องตั้งรหัสผ่านใหม่ก่อนใช้งาน</p>':""}
-  <div class="row"><input id="pc" type="password" placeholder="รหัสผ่านปัจจุบัน" autocomplete="current-password"></div>
-  <div class="row"><input id="pn" type="password" placeholder="รหัสผ่านใหม่ (อย่างน้อย 10 ตัวอักษร)" autocomplete="new-password"></div>
-  <div class="row"><input id="pn2" type="password" placeholder="ยืนยันรหัสผ่านใหม่" autocomplete="new-password"></div>
-  <p class="mut">ห้ามมีชื่อผู้ใช้ ห้ามเป็นรหัสที่เดาง่าย/ตัวอักษรซ้ำ ๆ · เมื่อเปลี่ยนแล้ว เครื่องอื่นที่ล็อกอินอยู่จะถูกออกจากระบบ</p>
-  <div class="row"><button class="btn p" id="pgo">บันทึก</button>${forced?'<button class="btn" id="pout">ออกจากระบบ</button>':'<button class="btn" id="pback">ยกเลิก</button>'}</div></div>`;
+  authShell(`<form class="auth-card" id="pf" novalidate><div class="auth-logo">${LOGO(56)}</div>
+  <h1>${forced?"ตั้งรหัสผ่านใหม่":"เปลี่ยนรหัสผ่าน"}</h1><p class="sub">${forced?"บัญชีนี้ใช้รหัสผ่านชั่วคราว ต้องตั้งรหัสใหม่ก่อนใช้งาน":"เครื่องอื่นที่ล็อกอินอยู่จะถูกออกจากระบบ"}</p>
+  <div class="err" id="perr" role="alert" hidden></div>
+  <label class="fld"><span>รหัสผ่านปัจจุบัน</span><input id="pc" type="password" autocomplete="current-password"></label>
+  <label class="fld"><span>รหัสผ่านใหม่ <span class="mut" style="font-weight:normal">(อย่างน้อย 10 ตัวอักษร)</span></span><div class="pwbox"><input id="pn" type="password" autocomplete="new-password"><button type="button" class="eye" id="eye2" aria-label="แสดงรหัสผ่าน">👁</button></div></label>
+  <label class="fld"><span>ยืนยันรหัสผ่านใหม่</span><input id="pn2" type="password" autocomplete="new-password"></label>
+  <p class="mut" style="font-size:13px;margin:-4px 0 10px">ห้ามมีชื่อผู้ใช้ · ห้ามเป็นรหัสที่เดาง่ายหรือตัวอักษรซ้ำ ๆ</p>
+  <button class="btn p big" id="pgo" type="submit">บันทึกรหัสผ่านใหม่</button>
+  <div class="alt" style="margin-top:10px">${forced?'<button type="button" class="btn" id="pout">ออกจากระบบ</button>':'<button type="button" class="btn" id="pback">ยกเลิก</button>'}</div></form>`);
+  eyeToggle($("#eye2"),$("#pn"));$("#pc").focus();
   if(forced)$("#pout").onclick=logout;else $("#pback").onclick=()=>render();
-  $("#pgo").onclick=guard(async()=>{if($("#pn").value!==$("#pn2").value)throw new Error("รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน");
-    const r=await api("/me/password",{method:"POST",body:{current_password:$("#pc").value,new_password:$("#pn").value}});
-    token=r.token;sessionStorage.setItem("tk",token);sessionStorage.removeItem("mc");toast("เปลี่ยนรหัสผ่านแล้ว");render()});
-  $("#pn2").onkeydown=e=>{if(e.key==="Enter")$("#pgo").click()}}
+  $("#pf").onsubmit=async e=>{e.preventDefault();const err=$("#perr");err.hidden=true;
+    try{if($("#pn").value!==$("#pn2").value)throw new Error("รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน");
+      busyBtn($("#pgo"),true);
+      const r=await api("/me/password",{method:"POST",body:{current_password:$("#pc").value,new_password:$("#pn").value}});
+      token=r.token;sessionStorage.setItem("tk",token);sessionStorage.removeItem("mc");toast("เปลี่ยนรหัสผ่านแล้ว");render()}
+    catch(x){err.textContent=x.message;err.hidden=false;busyBtn($("#pgo"),false,"บันทึกรหัสผ่านใหม่")}}}
 
 /* ---- users (admin) ---- */
 const RTH={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};

@@ -857,3 +857,30 @@ def prov_label(eui: str, db: Session = Depends(get_db), u=Depends(staff_or_admin
     img = qrcode.make(d.dev_eui, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
     buf = io.BytesIO(); img.save(buf)
     return Response(buf.getvalue(), media_type="image/svg+xml")
+
+
+# ---------------- system update (GitHub → host updater; see app/updates.py, docs/UPDATE.md) ----------------
+from . import updates as upd
+
+
+class UpdateIn(BaseModel):
+    action: str = Field(pattern="^(check|update)$")
+
+
+@router.get("/system/update")
+def update_state(u=Depends(admin_only)):
+    return upd.state()
+
+
+@router.post("/system/update")
+def update_request(b: UpdateIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    try:
+        req = upd.request(b.action, u.username)
+    except upd.UpdateError as e:
+        raise HTTPException(e.code, str(e))
+    if b.action == "update":
+        st = upd.state()["status"]
+        audit(db, u.username, "system_update_requested", req["id"],
+              current=(st.get("current") or {}).get("commit", "")[:12], latest=(st.get("latest") or {}).get("commit", "")[:12])
+        db.commit()
+    return req

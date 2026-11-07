@@ -23,6 +23,7 @@ class Env(BaseSettings):
     tz: str = "Asia/Bangkok"
     bootstrap_admin_user: str = "admin"
     bootstrap_admin_password: str = ""
+    update_dir: str = "/update"   # shared with the host updater (infra/update ↔ /update); see docs/UPDATE.md
 
 
 env = Env()

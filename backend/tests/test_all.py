@@ -1190,3 +1190,41 @@ def test_device_watch_ignores_inactive_devices_and_api_validation(env_):
     for bad in ({"enabled": "yes", "battery_low_pct": 20, "mains_grace_min": 10}, {"enabled": True, "battery_low_pct": 2, "mains_grace_min": 10},
                 {"enabled": True, "battery_low_pct": 20, "mains_grace_min": 0}, {"enabled": True, "battery_low_pct": True, "mains_grace_min": 10}, {}):
         assert P(bad).status_code == 422, bad
+
+
+# ---------- system update (dashboard → shared folder → host updater) ----------
+def test_system_update_request_flow(env_, tmp_path, monkeypatch):
+    import json
+    from app.config import env as cfg
+    from app.models import AuditLog
+    *_, client, ids = env_
+    monkeypatch.setattr(cfg, "update_dir", str(tmp_path))
+    H, V = login(client), login(client, "viewer")
+    assert client.get("/api/system/update", headers=V).status_code == 403
+    assert client.post("/api/system/update", json={"action": "update"}, headers=V).status_code == 403
+    # host updater not set up yet → clear 503, nothing written
+    s = client.get("/api/system/update", headers=H).json()
+    assert s["installed"] is False and s["busy"] is False
+    assert client.post("/api/system/update", json={"action": "update"}, headers=H).status_code == 503
+    assert not (tmp_path / "request.json").exists()
+    # host has written its first status → requests are accepted
+    (tmp_path / "status.json").write_text(json.dumps({"state": "idle", "behind": 2,
+        "current": {"commit": "a" * 40}, "latest": {"commit": "b" * 40}}))
+    (tmp_path / "update.log").write_text("line1\nline2\n")
+    assert client.post("/api/system/update", json={"action": "rm -rf"}, headers=H).status_code == 422
+    r = client.post("/api/system/update", json={"action": "update"}, headers=H)
+    assert r.status_code == 200 and r.json()["action"] == "update"
+    req = json.loads((tmp_path / "request.json").read_text())
+    assert req["by"] == "admin" and req["action"] == "update"
+    s = client.get("/api/system/update", headers=H).json()
+    assert s["installed"] and s["busy"] and s["pending"]["id"] == req["id"] and s["log"] == ["line1", "line2"]
+    # second request while one is pending/running → 409
+    assert client.post("/api/system/update", json={"action": "check"}, headers=H).status_code == 409
+    (tmp_path / "request.json").unlink()
+    (tmp_path / "status.json").write_text(json.dumps({"state": "updating"}))
+    assert client.post("/api/system/update", json={"action": "update"}, headers=H).status_code == 409
+    (tmp_path / "status.json").write_text(json.dumps({"state": "failed"}))
+    assert client.post("/api/system/update", json={"action": "check"}, headers=H).status_code == 200
+    with SessionLocal() as db:
+        a = db.query(AuditLog).filter_by(action="system_update_requested").all()
+        assert len(a) == 1 and a[0].actor == "admin"

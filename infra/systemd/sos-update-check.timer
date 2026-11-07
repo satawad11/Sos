@@ -1,0 +1,11 @@
+# Only checks and shows "new version available" in the dashboard — updating always needs an admin to press the button.
+[Unit]
+Description=SOS: check GitHub for updates every 6 hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

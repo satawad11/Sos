@@ -12,3 +12,4 @@ provisioned_devices.csv
 *.png
 gateway/windows/logs/
 gateway/windows/gateway-settings.json
+infra/update/

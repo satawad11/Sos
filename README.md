@@ -13,6 +13,7 @@
 | ★ | **คู่มือติดตั้งทั้งระบบ Windows + Proxmox (ไล่ตามลำดับ)** | – | `docs/DEPLOY-WINDOWS-PROXMOX.md` |
 | 5 | แดชบอร์ด + LINE OA | `dashboard/`, `backend/app/line.py` | `docs/INSTALL-5-dashboard-line.md` |
 | – | ตัวจำลองอุปกรณ์ (ทดสอบโดยไม่มีวิทยุ) | `simulator/sim.py` | ท้าย INSTALL-5 |
+| – | อัปเดตระบบจากหน้าเว็บ (ดึงจาก GitHub, สำรอง+ย้อนกลับอัตโนมัติ) | `infra/scripts/sos-update.sh` | `docs/UPDATE.md` |
 
 ## สถานะการทดสอบ (ตรงไปตรงมา)
 | ส่วน | สถานะ |

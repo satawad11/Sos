@@ -1,0 +1,9 @@
+[Unit]
+Description=SOS: handle an update request (GitHub → backup → rebuild → health check → rollback on failure)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/infra/scripts/sos-update.sh handle
+TimeoutStartSec=45min
