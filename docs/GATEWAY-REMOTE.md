@@ -8,6 +8,8 @@
 1. **เซิร์ฟเวอร์**: อัปเดตระบบ แล้วตรวจว่า `infra/mosquitto/acl.conf` มีบรรทัด `topic write as923/gateway/+/sos/cmd` และ `topic read as923/gateway/+/sos/cmd-result` ของ backend จากนั้น `docker compose restart mosquitto`
 2. แดชบอร์ด → เกตเวย์ → เกตเวย์ที่ต้องการ → "สั่งงานระยะไกล" → คัดลอก **คีย์เอเจนต์** (ผู้ดูแลระบบเท่านั้น, ถูกบันทึกใน audit)
 3. **บน Pi**: ใส่ `AGENT_KEY=<คีย์>` ต่อท้าย `/etc/sos-gateway.env` (หรือรันติดตั้งใหม่ด้วย `AGENT_KEY=... sudo -E ./install-gateway.sh`) แล้ว `sudo systemctl enable --now sos-gateway-agent`
+> ติดตั้งด้วย `gateway\windows\INSTALL-GATEWAY.bat` หรือ `add-gateway.sh` รุ่นใหม่ ข้อ 2–3 ทำให้อัตโนมัติ (สคริปต์คำนวณคีย์จาก backend บน VPS)
+
 4. รอรายงานถัดไป ป้ายเอเจนต์ในแดชบอร์ดจะขึ้น "พร้อม"
 
 ## ความปลอดภัย
