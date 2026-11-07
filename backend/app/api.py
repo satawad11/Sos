@@ -10,10 +10,11 @@ from .auth import (admin_only, audit, check_pw, current_user, hash_pw, make_toke
 from . import mfa
 from .db import get_db
 from .engine import aware
-from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, Holiday, Notification,
+from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, GatewayCommand, Holiday, Notification,
                      Patient, User, utcnow)
 from .config import env
 from . import gateways as gwmod
+from . import gwcmd
 from . import geo
 from . import privacy, reports
 from . import provision as prov
@@ -522,7 +523,7 @@ def set_device_config(did: int, b: DeviceConfigIn, db: Session = Depends(get_db)
 
 
 def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str = "staff") -> dict:
-    st, reason = gwmod.classify(g, now, off, move_m)
+    st, reason = gwmod.classify(g, now, g.offline_min or off, move_m)
     crit, warn = gwmod.critical(g.report), gwmod.warnings(g.report)
     mv = gwmod.moved_m(g, now, move_m)
     if mv is not None: warn = warn + [f"ตำแหน่ง GPS ห่างจากที่ลงทะเบียน {mv} เมตร (เกตเวย์อาจถูกย้ายหรือถูกนำออกไป)"]
@@ -536,7 +537,9 @@ def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str
             "status": st, "offline": st == "offline", "reason": reason or (g.offline_reason if st == "offline" else ""),
             "last_seen": iso(g.last_seen), "last_report_at": iso(g.last_report_at),
             "state_changed_at": iso(g.state_changed_at), "uplinks_total": g.uplinks_total or 0,
-            "devices": n_dev.get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc}
+            "devices": n_dev.get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc,
+            "notes": g.notes or "", "offline_min": g.offline_min, "offline_min_effective": g.offline_min or off,
+            "alert_ids": g.alert_ids, "agent": rep.get("agent") is True}
 
 
 class LocationIn(BaseModel):
@@ -555,46 +558,6 @@ def set_patient_location(pid: int, b: LocationIn, db: Session = Depends(get_db),
     return {"id": p.id, "lat": p.lat, "lon": p.lon}
 
 
-@router.get("/map")
-def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
-    """Everything the map page draws. Viewers get gateways only (home locations are personal data)."""
-    now = utcnow()
-    off_dev = settings_store.get(db, "offline")["device_offline_min"]
-    g_off = settings_store.get(db, "offline")["gateway_offline_min"]
-    geo_s = settings_store.get(db, "geo")
-    n_dev: dict[str, int] = {}
-    devs = db.query(Device).filter(Device.lifecycle == "active", Device.patient_id.isnot(None)).all()
-    for d in devs:
-        if d.last_gateway: n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
-    gws = []
-    for g in db.query(Gateway).filter(Gateway.enabled.is_(True)).order_by(Gateway.id).all():
-        gd = gw_dict(g, now, g_off, n_dev, geo_s["gateway_move_m"], u.role)
-        pos = (g.lat, g.lon) if g.lat is not None else ((g.gps_lat, g.gps_lon) if g.gps_lat is not None else None)
-        gws.append({"gateway_id": g.gateway_id, "label": g.label or g.gateway_id, "status": gd["status"],
-                    "offline": gd["offline"], "devices": n_dev.get(g.gateway_id, 0),
-                    "lat": pos[0] if pos else None, "lon": pos[1] if pos else None, "estimated": g.lat is None and pos is not None})
-    out = {"gateways": gws, "coverage_m": geo_s["coverage_m"], "patients": [], "no_location": [], "viewer": u.role == "viewer"}
-    if u.role == "viewer":
-        return out
-    by_pat = {d.patient_id: d for d in devs}
-    open_ = {c.patient_id: c for c in db.query(Case).filter(Case.state.in_(("new", "accepted")), Case.is_test.is_(False))
-             .order_by(Case.id).all() if c.patient_id}
-    for p in db.query(Patient).filter(Patient.active.is_(True), Patient.anonymized_at.is_(None)).order_by(Patient.id).all():
-        d = by_pat.get(p.id); c = open_.get(p.id)
-        dev = None
-        if d:
-            seen = aware(d.last_seen)
-            dev = {"label": d.label or d.dev_eui, "battery": d.battery if d.battery != 255 else None, "mains_ok": d.mains_ok,
-                   "rssi": d.last_rssi, "last_seen": iso(d.last_seen),
-                   "online": bool(seen and (now - seen).total_seconds() <= off_dev * 60)}
-        row = {"id": p.id, "name": p.full_name, "village": p.village, "address": p.address, "phone": p.phone,
-               "lat": p.lat, "lon": p.lon, "device": dev,
-               "case": {"id": c.id, "state": c.state, "overdue": c.overdue, "created_at": iso(c.created_at),
-                        "loc": {"lat": c.loc_lat, "lon": c.loc_lon} if c.loc_lat is not None else None} if c else None}
-        (out["patients"] if p.lat is not None else out["no_location"]).append(row)
-    return out
-
-
 @router.get("/gateways")
 def gateways(db: Session = Depends(get_db), u=Depends(current_user)):
     off = settings_store.get(db, "offline")["gateway_offline_min"]
@@ -605,6 +568,72 @@ def gateways(db: Session = Depends(get_db), u=Depends(current_user)):
             n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
     mv = settings_store.get(db, "geo")["gateway_move_m"]
     return [gw_dict(g, now, off, n_dev, mv, u.role) for g in db.query(Gateway).order_by(Gateway.id).all()]
+
+
+def _quality(rssi, snr):
+    """Rough LoRa link grade from the last uplink (SF9-ish): good / fair / weak / None when unknown."""
+    if rssi is None: return None
+    if rssi >= -105 and (snr is None or snr >= 0): return "good"
+    if rssi >= -115 and (snr is None or snr >= -7): return "fair"
+    return "weak"
+
+
+@router.get("/map")
+def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
+    """Gateways, devices and which gateway heard each device last — for the dashboard map.
+    Patient/home coordinates and GPS fixes are never sent to the read-only role (PDPA); the connectivity table still is."""
+    now = utcnow(); viewer = u.role == "viewer"
+    goff = settings_store.get(db, "offline")["gateway_offline_min"]
+    doff = settings_store.get(db, "offline")["device_offline_min"]
+    gcfg = settings_store.get(db, "geo")
+    n_dev: dict[str, int] = {}
+    devs = db.query(Device).filter(Device.lifecycle != "retired").order_by(Device.id).all()
+    for d in devs:
+        if d.lifecycle == "active" and d.last_gateway: n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
+    gws, gpos = [], {}
+    for g in db.query(Gateway).filter(Gateway.enabled.isnot(False)).order_by(Gateway.id).all():
+        x = gw_dict(g, now, goff, n_dev, gcfg["gateway_move_m"], u.role)
+        loc = x["loc"]; pos = loc["registered"] or (loc["gps"] if loc["gps"] and loc["gps"]["fresh"] else None)
+        src = "registered" if loc["registered"] else ("gps" if pos else None)
+        if pos: gpos[g.gateway_id] = (pos["lat"], pos["lon"])
+        gws.append({"gateway_id": g.gateway_id, "label": g.label, "status": x["status"], "offline": x["offline"], "reason": x["reason"],
+                    "last_seen": x["last_seen"], "devices": x["devices"], "lat": pos["lat"] if pos else None,
+                    "lon": pos["lon"] if pos else None, "pos_src": src})
+    dvs, links = [], []
+    open_ = {c.patient_id: c for c in db.query(Case).filter(Case.state.in_(("new", "accepted")), Case.is_test.is_(False))
+             .order_by(Case.id).all() if c.patient_id}
+    for d in devs:
+        ls = aware(d.last_seen)
+        offline = d.lifecycle == "active" and (ls is None or (now - ls).total_seconds() > doff * 60)
+        lat = lon = src = None; home = None
+        if not viewer:
+            fresh = d.loc_lat is not None and d.loc_at is not None and (now - aware(d.loc_at)).total_seconds() <= gcfg["gps_fresh_min"] * 60
+            if fresh: lat, lon, src = d.loc_lat, d.loc_lon, "gps"
+            elif d.patient and d.patient.lat is not None and d.patient.lon is not None: lat, lon, src = d.patient.lat, d.patient.lon, "home"
+            elif d.loc_lat is not None: lat, lon, src = d.loc_lat, d.loc_lon, "gps_old"
+        q = _quality(d.last_rssi, d.last_snr)
+        cs = open_.get(d.patient_id) if d.patient_id else None
+        dvs.append({"id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,
+                    "patient": d.patient.full_name if d.patient else None, "patient_id": d.patient_id,
+                    "phone": d.patient.phone if d.patient and not viewer else "", "address": (f"{d.patient.address} {d.patient.village}".strip() if d.patient and not viewer else ""),
+                    "case": {"id": cs.id, "state": cs.state, "overdue": cs.overdue, "created_at": iso(cs.created_at)} if cs else None, "battery": d.battery, "mains_ok": d.mains_ok,
+                    "offline": offline, "last_seen": iso(d.last_seen), "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
+                    "gateway_id": d.last_gateway or None, "lat": lat, "lon": lon, "pos_src": src})
+        if d.last_gateway:
+            gp = gpos.get(d.last_gateway)
+            dist = round(geo.distance_m(lat, lon, gp[0], gp[1])) if lat is not None and gp else None
+            links.append({"device_id": d.id, "gateway_id": d.last_gateway, "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
+                          "offline": offline, "distance_m": dist})
+    # patients for the "pin a home" tool and homes that have no button yet (never for the read-only role)
+    homes, no_loc = [], []
+    if not viewer:
+        with_dev = {d.patient_id for d in devs if d.patient_id}
+        for p in db.query(Patient).filter(Patient.active.is_(True), Patient.anonymized_at.is_(None)).order_by(Patient.id).all():
+            row = {"id": p.id, "name": p.full_name, "village": p.village, "address": p.address, "phone": p.phone, "lat": p.lat, "lon": p.lon}
+            if p.lat is None: no_loc.append(row)
+            elif p.id not in with_dev: homes.append(row)
+    return {"gateways": gws, "devices": dvs, "links": links, "restricted": viewer, "coverage_m": gcfg["coverage_m"],
+            "homes": homes, "no_location": no_loc}
 
 
 class GatewayIn(BaseModel):
@@ -619,6 +648,11 @@ class GatewayPatch(BaseModel):
     lon: float | None = None
     clear_location: bool = False        # forget the registered position
     use_gps: bool = False               # copy the gateway's own latest GPS fix into the registered position
+    notes: str | None = Field(default=None, max_length=500)
+    offline_min: int | None = None      # per-gateway "silent for N minutes = offline" (3-240); admin only
+    reset_offline: bool = False         # back to the global value
+    alert_ids: list[int] | None = None  # per-gateway LINE recipients for this gateway's alerts; admin only
+    reset_alerts: bool = False          # back to the global list
 
 
 @router.post("/gateways")
@@ -650,10 +684,86 @@ def patch_gateway(gid: int, b: GatewayPatch, db: Session = Depends(get_db), u=De
     elif b.lat is not None or b.lon is not None:
         if not geo.valid_latlon(b.lat, b.lon): raise HTTPException(422, "lat/lon ไม่ถูกต้อง (ต้องระบุทั้งคู่ และไม่ใช่ 0,0)")
         g.lat, g.lon = round(b.lat, 6), round(b.lon, 6)
+    if b.notes is not None:
+        g.notes = b.notes.strip()
+    if b.offline_min is not None or b.reset_offline or b.alert_ids is not None or b.reset_alerts:
+        if u.role != "admin": raise HTTPException(403, "only admin can change alert thresholds/recipients")
+        if b.reset_offline: g.offline_min = None
+        elif b.offline_min is not None:
+            if isinstance(b.offline_min, bool) or not 3 <= b.offline_min <= 240:
+                raise HTTPException(422, "offline_min must be 3-240 (gateways report every minute)")
+            g.offline_min = b.offline_min
+        if b.reset_alerts: g.alert_ids = None
+        elif b.alert_ids is not None:
+            ids = sorted(set(b.alert_ids))
+            if len(ids) > 20: raise HTTPException(422, "too many recipients")
+            if ids and {c.id for c in db.query(Caregiver).filter(Caregiver.id.in_(ids)).all()} != set(ids):
+                raise HTTPException(422, "unknown caregiver id")
+            g.alert_ids = ids or None
     audit(db, u.username, "gateway_update", g.gateway_id, label=g.label, enabled=g.enabled is not False,
-          located=g.lat is not None)
+          located=g.lat is not None, offline_min=g.offline_min, own_recipients=g.alert_ids is not None)
     db.commit()
     return {"ok": True}
+
+
+# ---- remote actions (signed MQTT commands to the gateway agent) ----
+def _cmd_dict(c) -> dict:
+    return {"id": c.id, "cmd_id": c.cmd_id, "action": c.action, "label": gwcmd.ACTIONS.get(c.action, c.action), "status": c.status,
+            "detail": c.detail, "output": c.output, "by": c.requested_by, "created_at": iso(c.created_at), "done_at": iso(c.done_at)}
+
+
+def _expire_commands(db: Session, gateway_id: str | None = None):
+    q = db.query(GatewayCommand).filter(GatewayCommand.status == "pending")
+    if gateway_id: q = q.filter(GatewayCommand.gateway_id == gateway_id)
+    now = utcnow(); n = 0
+    for c in q.all():
+        if (now - aware(c.created_at)).total_seconds() > gwcmd.EXPIRE_S:
+            c.status, c.detail, c.done_at = "expired", "ไม่มีคำตอบจากเกตเวย์ (ออฟไลน์ หรือยังไม่ได้เปิดตัวช่วยควบคุม)", now; n += 1
+    if n: db.commit()
+
+
+class GwCommandIn(BaseModel):
+    action: str
+
+
+@router.get("/gateways/{gid}/commands")
+def gateway_commands(gid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    _expire_commands(db, g.gateway_id)
+    rows = db.query(GatewayCommand).filter_by(gateway_id=g.gateway_id).order_by(GatewayCommand.id.desc()).limit(10).all()
+    return {"actions": gwcmd.ACTIONS, "agent": (g.report or {}).get("agent") is True, "commands": [_cmd_dict(c) for c in rows]}
+
+
+@router.post("/gateways/{gid}/commands")
+def gateway_command(gid: int, b: GwCommandIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    if b.action not in gwcmd.ACTIONS: raise HTTPException(422, "unknown action")
+    if (g.report or {}).get("agent") is not True:
+        raise HTTPException(409, "เกตเวย์นี้ยังไม่ได้ติดตั้ง/เปิด sos-gateway-agent (ดูคู่มือ docs/GATEWAY-REMOTE.md)")
+    _expire_commands(db, g.gateway_id)
+    if db.query(GatewayCommand).filter_by(gateway_id=g.gateway_id, status="pending").first():
+        raise HTTPException(409, "มีคำสั่งที่ยังรอคำตอบอยู่ รอสักครู่")
+    eng = get_engine()
+    if eng.gw_cmd_publish is None or not eng.mqtt_ok(): raise HTTPException(503, "ระบบยังเชื่อมต่อ MQTT ไม่ได้")
+    cid, payload = gwcmd.make_command(g.gateway_id, b.action)
+    c = GatewayCommand(cmd_id=cid, gateway_id=g.gateway_id, action=b.action, requested_by=u.username)
+    db.add(c); db.flush()
+    if not eng.gw_cmd_publish(g.gateway_id, payload):
+        db.rollback(); raise HTTPException(503, "ส่งคำสั่งไม่สำเร็จ (MQTT)")
+    audit(db, u.username, "gateway_command", g.gateway_id, cmd=b.action, cmd_id=cid)
+    db.commit()
+    return _cmd_dict(c)
+
+
+@router.get("/gateways/{gid}/agent-key")
+def gateway_agent_key(gid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    """The per-gateway signing key to put in /etc/sos-gateway.env on the Pi. Shown to admins only and audited."""
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    audit(db, u.username, "gateway_agent_key_view", g.gateway_id); db.commit()
+    return {"gateway_id": g.gateway_id, "key": gwcmd.agent_key(g.gateway_id)}
 
 
 @router.post("/system-alert/test")

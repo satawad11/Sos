@@ -216,6 +216,24 @@ class Gateway(Base):
     gps_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
     gps_at: Mapped[datetime | None] = _dt(nullable=True)
     gps_sats: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")                    # free text for staff (where it is mounted, who to call...)
+    offline_min: Mapped[int | None] = mapped_column(Integer, nullable=True)  # per-gateway override of offline.gateway_offline_min
+    alert_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)      # per-gateway override of the system-alert recipients
+
+
+class GatewayCommand(Base):
+    """A remote action asked of a gateway's agent (signed MQTT message); the agent answers on <prefix>/gateway/<id>/sos/cmd-result."""
+    __tablename__ = "sos_gateway_commands"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cmd_id: Mapped[str] = mapped_column(String(16), unique=True)           # random 16 hex, signed + echoed by the agent
+    gateway_id: Mapped[str] = mapped_column(String(16), index=True)
+    action: Mapped[str] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(10), default="pending")     # pending | ok | failed | expired
+    detail: Mapped[str] = mapped_column(String(240), default="")
+    output: Mapped[str] = mapped_column(Text, default="")                  # e.g. log tail (sanitised, size-capped)
+    requested_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = _dt(default=utcnow)
+    done_at: Mapped[datetime | None] = _dt(nullable=True)
 
 
 class PushSub(Base):

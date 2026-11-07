@@ -38,6 +38,7 @@ class Engine:
         self.dev_watch = DeviceMonitor(self.gw)
         self.selftest = SelfTestScheduler()
         self.mqtt_ok: Callable[[], bool] = lambda: True      # main.py plugs in the MQTT worker's connection state
+        self.gw_cmd_publish: Callable[[str, dict], bool] | None = None   # (gateway_id, signed command) -> sent?  set by the MQTT worker
 
     # ---------- helpers ----------
     def _event(self, db: Session, case: Case, kind: str, actor="system", **detail):
@@ -92,6 +93,18 @@ class Engine:
 
     def handle_gateway_report(self, db: Session, gateway_id: str, raw) -> str:
         return self.gw.on_report(db, gateway_id.lower(), raw, utcnow())
+
+    def handle_gateway_result(self, db: Session, gateway_id: str, res: dict) -> str:
+        """The gateway agent's answer to a remote command. Only a still-pending command of THAT gateway can be completed."""
+        from .models import GatewayCommand
+        c = db.query(GatewayCommand).filter_by(cmd_id=res["id"], gateway_id=gateway_id).first()
+        if c is None or c.status != "pending":
+            return "ignored"
+        c.status = "ok" if res["ok"] else "failed"
+        c.detail, c.output, c.done_at = res["detail"], res["output"], utcnow()
+        db.commit()
+        self.publish({"type": "gateway_cmd", "gateway_id": gateway_id, "action": c.action, "status": c.status})
+        return c.status
 
     def handle_location(self, db: Session, dev_eui: str, payload: bytes, meta: dict | None = None) -> str:
         """LOC uplink (FPort 4) from a device with optional GPS: remember the fix, attach it to the alert's case and,

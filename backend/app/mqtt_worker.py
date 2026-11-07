@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json, logging, ssl, threading
 import paho.mqtt.client as mqtt
-from . import codec
+from . import codec, gwcmd
 from .config import env
 from .db import SessionLocal
 from .engine import Engine
@@ -48,6 +48,7 @@ class MqttWorker:
     def __init__(self, engine_factory):
         self.engine: Engine = engine_factory(self.send_downlink)
         self.engine.mqtt_ok = lambda: self.connected
+        self.engine.gw_cmd_publish = self.send_gw_command
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sos-backend")
         if env.mqtt_user:
             self.client.username_pw_set(env.mqtt_user, env.mqtt_password)
@@ -71,6 +72,7 @@ class MqttWorker:
         log.info("MQTT connected rc=%s", rc)
         client.subscribe("application/+/device/+/event/up", qos=1)
         client.subscribe(f"{env.gw_topic_prefix}/gateway/+/sos/health", qos=1)
+        client.subscribe(f"{env.gw_topic_prefix}/gateway/+/sos/cmd-result", qos=1)
         if self.connected:
             self.engine.gw.mqtt_connected()      # reports need a moment to arrive before gateways are judged
 
@@ -79,6 +81,15 @@ class MqttWorker:
         log.warning("MQTT disconnected rc=%s", rc)
 
     def _on_message(self, client, userdata, msg):
+        if msg.topic.endswith("/sos/cmd-result"):
+            r = gwcmd.parse_result(msg.topic, msg.payload)
+            if r:
+                with SessionLocal() as db:
+                    try:
+                        log.info("gateway %s command result -> %s", r[0], self.engine.handle_gateway_result(db, r[0], r[1]))
+                    except Exception:
+                        log.exception("gateway command result handling failed"); db.rollback()
+            return
         if "/sos/health" in msg.topic:
             gh = parse_gw_health(msg.topic, msg.payload)
             if gh:
@@ -110,3 +121,11 @@ class MqttWorker:
         body = {"devEui": dev_eui, "confirmed": False, "fPort": fport, "data": codec.b64(payload)}
         info = self.client.publish(topic, json.dumps(body), qos=1)
         log.info("downlink queued %s fport=%s rc=%s", dev_eui, fport, info.rc)
+
+    def send_gw_command(self, gateway_id: str, payload: dict) -> bool:
+        """Publish a signed command to one gateway (QoS 1, not retained: a command must never fire later, after a reconnect)."""
+        if not self.connected:
+            return False
+        info = self.client.publish(gwcmd.cmd_topic(gateway_id), json.dumps(payload), qos=1, retain=False)
+        log.info("gateway command %s %s rc=%s", gateway_id, payload.get("action"), info.rc)
+        return info.rc == mqtt.MQTT_ERR_SUCCESS

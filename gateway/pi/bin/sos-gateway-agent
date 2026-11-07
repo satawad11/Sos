@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# SOS gateway remote-action agent. Listens on  <prefix>/gateway/<id>/sos/cmd  for commands from the VPS backend and answers on
+# <prefix>/gateway/<id>/sos/cmd-result. Run by systemd (sos-gateway-agent.service) as root.
+#
+# SAFETY (read before changing anything here):
+#   * a FIXED whitelist of 4 actions; the message never supplies a command line, path or argument -> nothing to inject
+#   * every command must carry  sig = HMAC-SHA256(AGENT_KEY, "<id>|<action>|<ts>");  wrong/missing signature -> ignored
+#   * commands older (or newer) than SOS_AGENT_MAX_AGE seconds (default 120) are ignored; ids already seen are ignored (replay)
+#   * the key is per gateway (copy it from the dashboard: Gateways -> this gateway -> "Remote control"); keep /etc/sos-gateway.env mode 600
+# Test without a broker or root:   SOS_AGENT_DRYRUN=1 sos-gateway-agent --stdin < commands.jsonl   (prints results instead of acting)
+set -u
+CONF="${SOS_AGENT_CONF:-/etc/sos-gateway.env}"; [ -f "$CONF" ] && . "$CONF"
+GATEWAY_ID="${GATEWAY_ID:-}"; TOPIC_PREFIX="${TOPIC_PREFIX:-as923}"; AGENT_KEY="${AGENT_KEY:-}"
+STATE_DIR="${SOS_AGENT_STATE:-/var/lib/sos-gateway}"; MAX_AGE="${SOS_AGENT_MAX_AGE:-120}"; DRYRUN="${SOS_AGENT_DRYRUN:-0}"
+export XDG_CONFIG_HOME="${SOS_PUB_CONF_DIR:-/etc/sos-gateway}"        # holds the mosquitto_pub / mosquitto_sub option files
+
+[[ "$GATEWAY_ID" =~ ^[0-9a-f]{16}$ ]] || { echo "GATEWAY_ID missing/bad in $CONF" >&2; exit 1; }
+[ "${#AGENT_KEY}" -ge 32 ] || { echo "AGENT_KEY missing in $CONF — copy it from the dashboard (Gateways -> Remote control)" >&2; exit 1; }
+mkdir -p "$STATE_DIR"; SEEN="$STATE_DIR/agent_seen"; touch "$SEEN"
+RES_TOPIC="$TOPIC_PREFIX/gateway/$GATEWAY_ID/sos/cmd-result"
+
+log()   { echo "sos-gateway-agent: $*" >&2; }
+reply() {   # reply <id> <ok:true|false> <detail> [output]
+  local json; json="$(jq -cn --arg id "$1" --argjson ok "$2" --arg d "$3" --arg o "${4:-}" '{id:$id, ok:$ok, detail:$d, output:$o}')" || return 1
+  if [ "$DRYRUN" = 1 ]; then echo "RESULT $json"; else timeout 20 mosquitto_pub -q 1 -i "sos-agent-pub-$GATEWAY_ID" -t "$RES_TOPIC" -m "$json" || log "could not publish result"; fi
+}
+act() { if [ "$DRYRUN" = 1 ]; then echo "DRYRUN $*"; return 0; fi; "$@"; }     # the ONLY place that touches the system
+redact() { sed -E 's/((pass(word)?|secret|token|key)[=:] *)[^ ]+/\1***/Ig'; }
+
+handle() {
+  local line="$1" id action ts sig now age exp
+  [ "${#line}" -le 1000 ] || { log "oversized message ignored"; return; }
+  read -r id action ts sig < <(printf '%s' "$line" | jq -r '[(.id|strings), (.action|strings), (.ts|numbers|floor|tostring), (.sig|strings)] | @tsv' 2>/dev/null) || true
+  [[ "${id:-}" =~ ^[0-9a-f]{16}$ && "${ts:-}" =~ ^[0-9]{9,12}$ && "${sig:-}" =~ ^[0-9a-f]{64}$ ]] || { log "malformed command ignored"; return; }
+  case "$action" in report_now|logs|restart_services|reboot) ;; *) log "unknown action ignored"; return ;; esac
+  exp="$(printf '%s|%s|%s' "$id" "$action" "$ts" | openssl dgst -sha256 -hmac "$AGENT_KEY" -r | cut -d' ' -f1)"
+  [ "$exp" = "$sig" ] || { log "BAD SIGNATURE ($action) ignored"; return; }
+  now="$(date +%s)"; age=$(( now - ts )); [ "$age" -lt 0 ] && age=$(( -age ))
+  [ "$age" -le "$MAX_AGE" ] || { log "stale command ($age s) ignored — is the clock (chrony) in sync?"; return; }
+  grep -qx "$id" "$SEEN" && { log "replayed id ignored"; return; }
+  echo "$id" >> "$SEEN"; tail -n 100 "$SEEN" > "$SEEN.tmp" && mv "$SEEN.tmp" "$SEEN"
+  log "running $action ($id)"
+  case "$action" in
+    report_now)
+      if act /usr/local/bin/sos-gateway-report; then reply "$id" true "ส่งรายงานแล้ว"; else reply "$id" false "ส่งรายงานไม่สำเร็จ"; fi ;;
+    logs)
+      local out; out="$(act journalctl -u chirpstack-concentratord -u chirpstack-mqtt-forwarder -n 40 --no-pager -o short 2>&1 | redact | tail -c 3500)"
+      reply "$id" true "log ล่าสุด" "$out" ;;
+    restart_services)
+      if act systemctl restart chirpstack-concentratord && { [ "$DRYRUN" = 1 ] || sleep 3; } && act systemctl restart chirpstack-mqtt-forwarder; then
+        reply "$id" true "รีสตาร์ทบริการแล้ว"; [ "$DRYRUN" = 1 ] || { sleep 5; /usr/local/bin/sos-gateway-report || true; }
+      else reply "$id" false "รีสตาร์ทไม่สำเร็จ"; fi ;;
+    reboot)
+      reply "$id" true "จะรีบูตใน 5 วินาที (ปุ่มผู้ป่วยจะส่งไม่ได้ประมาณ 1–2 นาที)"
+      act systemd-run --on-active=5s --unit="sos-agent-reboot-$id" systemctl reboot >/dev/null 2>&1 ;;
+  esac
+}
+
+if [ "${1:-}" = "--stdin" ]; then
+  while IFS= read -r l; do handle "$l"; done; exit 0
+fi
+log "listening on $TOPIC_PREFIX/gateway/$GATEWAY_ID/sos/cmd"
+# no clean-session flag: a command that arrives while we are offline is NOT queued for later (it would be stale anyway)
+mosquitto_sub -q 1 -i "sos-agent-$GATEWAY_ID" -t "$TOPIC_PREFIX/gateway/$GATEWAY_ID/sos/cmd" | while IFS= read -r l; do handle "$l"; done
+exit 1      # mosquitto_sub ended (broker/network gone) -> systemd restarts us

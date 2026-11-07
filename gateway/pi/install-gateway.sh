@@ -87,11 +87,16 @@ install -d -m700 /etc/sos-gateway
 # one option per line: mosquitto_pub does NOT accept several options on one line (verified against a real broker)
 printf -- '-h %s\n-p 8883\n--cafile /etc/chirpstack-mqtt-forwarder/ca.crt\n-u %s\n-P %s\n' "$DOMAIN" "$GATEWAY_ID" "$MQTT_PASSWORD" > /etc/sos-gateway/mosquitto_pub
 chmod 600 /etc/sos-gateway/mosquitto_pub
+cp /etc/sos-gateway/mosquitto_pub /etc/sos-gateway/mosquitto_sub; chmod 600 /etc/sos-gateway/mosquitto_sub   # same broker options for the remote-action agent
+# optional remote actions from the dashboard: AGENT_KEY=<key shown in Gateways -> this gateway -> Remote control>
+if [ -n "${AGENT_KEY:-}" ]; then printf 'AGENT_KEY=%s\n' "$AGENT_KEY" >> /etc/sos-gateway.env; fi
+chmod 600 /etc/sos-gateway.env
 
 # ---------- services ----------
 install -m644 "$HERE"/systemd/*.service "$HERE"/systemd/*.timer /etc/systemd/system/
 install -m755 "$HERE/bin/sos-gateway-health" /usr/local/bin/sos-gateway-health
 install -m755 "$HERE/bin/sos-gateway-report" /usr/local/bin/sos-gateway-report
+install -m755 "$HERE/bin/sos-gateway-agent" /usr/local/bin/sos-gateway-agent
 systemctl daemon-reload
 systemctl enable chirpstack-concentratord chirpstack-mqtt-forwarder sos-gateway-health.timer sos-gateway-report.timer >/dev/null
 
@@ -108,6 +113,8 @@ if [ "${NEED_REBOOT:-0}" = 1 ]; then
 fi
 systemctl restart chirpstack-concentratord; sleep 5; systemctl restart chirpstack-mqtt-forwarder; sleep 5
 systemctl restart sos-gateway-report.timer
+if grep -q '^AGENT_KEY=' /etc/sos-gateway.env; then systemctl enable --now sos-gateway-agent >/dev/null && systemctl restart sos-gateway-agent; echo "Remote-action agent: enabled"
+else echo "Remote-action agent: not enabled (no AGENT_KEY). Later: add AGENT_KEY=... to /etc/sos-gateway.env, then: systemctl enable --now sos-gateway-agent"; fi
 echo; /usr/local/bin/sos-gateway-health || true
 echo; echo "Health report to VPS (first one now):"; /usr/local/bin/sos-gateway-report && echo "  report sent OK" || echo "  !! report FAILED — check MQTT user/password/CA and that the VPS ACL allows topic as923/gateway/$GATEWAY_ID/sos/health"
 echo; echo "Gateway ID: $GATEWAY_ID   — register it in ChirpStack (Gateways > Add) if you have not yet."

@@ -1228,3 +1228,171 @@ def test_system_update_request_flow(env_, tmp_path, monkeypatch):
     with SessionLocal() as db:
         a = db.query(AuditLog).filter_by(action="system_update_requested").all()
         assert len(a) == 1 and a[0].actor == "admin"
+
+
+def test_map_endpoint_positions_links_and_viewer_masking(env_):
+    eng, downs, notif, client, ids = env_
+    h = login(client); hv = login(client, "viewer")
+    from app.models import Gateway, Patient, utcnow
+    with SessionLocal() as db:
+        db.add(Gateway(gateway_id=GW, label="GW-บ้านผู้ใหญ่", lat=13.9000, lon=100.5900, last_seen=utcnow(), uplinks_total=1))
+        p = db.get(Patient, ids["p"]); p.lat, p.lon = 13.9100, 100.5900
+        d = db.query(Device).one(); d.last_gateway, d.last_rssi, d.last_snr, d.last_seen = GW, -92, 6.0, utcnow(); db.commit()
+    m = client.get("/api/map", headers=h).json()
+    assert m["restricted"] is False and len(m["gateways"]) == 1 and m["gateways"][0]["lat"] == 13.9
+    dv = m["devices"][0]
+    assert dv["pos_src"] == "home" and dv["lat"] == 13.91 and dv["quality"] == "good" and dv["gateway_id"] == GW
+    lk = m["links"][0]
+    assert lk["gateway_id"] == GW and lk["quality"] == "good" and 1000 < lk["distance_m"] < 1200
+    # a fresh GPS fix wins over the registered home
+    with SessionLocal() as db:
+        d = db.query(Device).one(); d.loc_lat, d.loc_lon, d.loc_at = 13.9200, 100.6000, utcnow(); db.commit()
+    assert client.get("/api/map", headers=h).json()["devices"][0]["pos_src"] == "gps"
+    # weak link grading
+    with SessionLocal() as db:
+        d = db.query(Device).one(); d.last_rssi, d.last_snr = -118, -10.0; db.commit()
+    assert client.get("/api/map", headers=h).json()["links"][0]["quality"] == "weak"
+    # read-only role: connectivity yes, any coordinates of people/devices no
+    mv = client.get("/api/map", headers=hv).json()
+    assert mv["restricted"] is True and mv["devices"][0]["lat"] is None and mv["devices"][0]["lon"] is None and mv["devices"][0]["pos_src"] is None
+    assert mv["links"][0]["gateway_id"] == GW and mv["links"][0]["distance_m"] is None
+    assert mv["gateways"][0]["lat"] == 13.9                                                     # gateways are infrastructure, not personal data
+    assert client.get("/api/map").status_code in (401, 403)
+
+
+# ---------------- gateway settings + remote actions ----------------
+def _gw_row(db, **kw):
+    from app.models import Gateway, utcnow
+    g = Gateway(gateway_id=GW, label="GW", last_seen=utcnow(), last_report_at=utcnow(), uplinks_total=1, enabled=True, state="online", **kw)
+    db.add(g); db.commit(); return g.id
+
+
+def test_gateway_settings_and_roles(env_):
+    eng, downs, notif, client, ids = env_
+    from app.models import User
+    from app.auth import hash_pw
+    with SessionLocal() as db:
+        db.add(User(username="staff", password_hash=hash_pw("password12345"), role="staff")); db.commit(); gid = _gw_row(db)
+    h, hs, hv = login(client), login(client, "staff"), login(client, "viewer")
+    assert client.put(f"/api/gateways/{gid}", json={"notes": "  ติดหน้าต่างชั้น 2  "}, headers=hs).status_code == 200      # staff: label/notes/location
+    assert client.put(f"/api/gateways/{gid}", json={"offline_min": 20}, headers=hs).status_code == 403                  # admin only
+    assert client.put(f"/api/gateways/{gid}", json={"alert_ids": [ids["a"]]}, headers=hs).status_code == 403
+    assert client.put(f"/api/gateways/{gid}", json={"notes": "x"}, headers=hv).status_code == 403
+    for bad in (2, 241, 0):
+        assert client.put(f"/api/gateways/{gid}", json={"offline_min": bad}, headers=h).status_code == 422
+    assert client.put(f"/api/gateways/{gid}", json={"alert_ids": [999]}, headers=h).status_code == 422
+    assert client.put(f"/api/gateways/{gid}", json={"offline_min": 20, "alert_ids": [ids["b"], ids["b"], ids["a"]]}, headers=h).status_code == 200
+    g = client.get("/api/gateways", headers=h).json()[0]
+    assert g["notes"] == "ติดหน้าต่างชั้น 2" and g["offline_min"] == 20 and g["offline_min_effective"] == 20 and g["alert_ids"] == sorted([ids["a"], ids["b"]])
+    assert client.put(f"/api/gateways/{gid}", json={"reset_offline": True, "reset_alerts": True}, headers=h).status_code == 200
+    g = client.get("/api/gateways", headers=h).json()[0]
+    assert g["offline_min"] is None and g["alert_ids"] is None and g["offline_min_effective"] == 5
+
+
+def test_gateway_own_offline_threshold_and_recipients(env_):
+    eng, downs, notif, client, ids = env_
+    from datetime import timedelta
+    from app.models import Gateway, utcnow
+    with SessionLocal() as db:
+        settings_store.put(db, "system_alert", {"caregiver_ids": [ids["a"]], "repeat_min": 0}, "t")      # global: อสม.หนึ่ง
+        gid = _gw_row(db, offline_min=30, alert_ids=[ids["b"]])
+        g = db.get(Gateway, gid); g.last_seen = g.last_report_at = utcnow() - timedelta(minutes=12); db.commit()
+        eng.gw.tick(db, utcnow(), True)                                      # 12 min < own 30 min (global would be 5) -> still fine
+        assert notif.system == []
+        g.last_seen = g.last_report_at = utcnow() - timedelta(minutes=40); db.commit()
+        eng.gw.tick(db, utcnow(), True)
+        assert [n[0] for n in notif.system] == ["อสม.สอง"]                   # the gateway's OWN recipient, not the global one
+        g.offline_min, g.alert_ids, g.state = None, None, "online"; g.last_seen = g.last_report_at = utcnow() - timedelta(minutes=40); db.commit()
+        notif.system.clear(); eng.gw.tick(db, utcnow(), True)
+        assert [n[0] for n in notif.system] == ["อสม.หนึ่ง"]                 # reset -> global
+
+
+def test_gateway_command_signing_and_lifecycle(env_):
+    eng, downs, notif, client, ids = env_
+    from app import gwcmd
+    from app.models import Gateway, GatewayCommand, User
+    from app.auth import hash_pw
+    sent = []; eng.gw_cmd_publish = lambda gid_, p: (sent.append((gid_, p)), True)[1]
+    with SessionLocal() as db:
+        db.add(User(username="staff", password_hash=hash_pw("password12345"), role="staff")); db.commit()
+        gid = _gw_row(db)
+    h, hs, hv = login(client), login(client, "staff"), login(client, "viewer")
+    # no agent reported yet -> refused (nothing is published)
+    assert client.post(f"/api/gateways/{gid}/commands", json={"action": "reboot"}, headers=h).status_code == 409 and sent == []
+    with SessionLocal() as db:
+        g = db.get(Gateway, gid); g.report = {"agent": True, "sw": "sos-gw-report 3"}; db.commit()
+    for hh in (hs, hv):                                                                       # admin only (a reboot drops every patient's link)
+        assert client.post(f"/api/gateways/{gid}/commands", json={"action": "logs"}, headers=hh).status_code == 403
+        assert client.get(f"/api/gateways/{gid}/commands", headers=hh).status_code == 403
+        assert client.get(f"/api/gateways/{gid}/agent-key", headers=hh).status_code == 403
+    assert client.post(f"/api/gateways/{gid}/commands", json={"action": "rm -rf /"}, headers=h).status_code == 422
+    r = client.post(f"/api/gateways/{gid}/commands", json={"action": "restart_services"}, headers=h)
+    assert r.status_code == 200 and r.json()["status"] == "pending"
+    (g_, p), = sent
+    assert g_ == GW and p["action"] == "restart_services" and set(p) == {"id", "action", "ts", "sig"}
+    key = client.get(f"/api/gateways/{gid}/agent-key", headers=h).json()["key"]
+    assert key == gwcmd.agent_key(GW) and p["sig"] == gwcmd.sign(key, p["id"], "restart_services", p["ts"])
+    assert gwcmd.agent_key("0016c001f1500002") != key                                         # keys are per gateway
+    assert client.post(f"/api/gateways/{gid}/commands", json={"action": "logs"}, headers=h).status_code == 409   # one at a time
+    # answers: wrong gateway / unknown id are ignored; the right one completes it
+    with SessionLocal() as db:
+        assert eng.handle_gateway_result(db, "0016c001f1500002", {"id": p["id"], "ok": True, "detail": "", "output": ""}) == "ignored"
+        assert eng.handle_gateway_result(db, GW, {"id": "0" * 16, "ok": True, "detail": "", "output": ""}) == "ignored"
+        assert eng.handle_gateway_result(db, GW, {"id": p["id"], "ok": True, "detail": "restarted", "output": ""}) == "ok"
+        assert eng.handle_gateway_result(db, GW, {"id": p["id"], "ok": False, "detail": "again", "output": ""}) == "ignored"   # only once
+    c = client.get(f"/api/gateways/{gid}/commands", headers=h).json()["commands"][0]
+    assert c["status"] == "ok" and c["detail"] == "restarted" and c["by"] == "admin"
+    # no answer for 3 minutes -> expired, and a new command is allowed
+    assert client.post(f"/api/gateways/{gid}/commands", json={"action": "logs"}, headers=h).status_code == 200
+    from datetime import timedelta
+    from app.models import utcnow
+    with SessionLocal() as db:
+        for c in db.query(GatewayCommand).filter_by(status="pending"): c.created_at = utcnow() - timedelta(seconds=gwcmd.EXPIRE_S + 5)
+        db.commit()
+    assert client.get(f"/api/gateways/{gid}/commands", headers=h).json()["commands"][0]["status"] == "expired"
+    assert client.post(f"/api/gateways/{gid}/commands", json={"action": "report_now"}, headers=h).status_code == 200
+    # MQTT down -> 503, nothing stored as pending
+    eng.mqtt_ok = lambda: False
+    with SessionLocal() as db:
+        for c in db.query(GatewayCommand).filter_by(status="pending"): c.status = "ok"
+        db.commit()
+    assert client.post(f"/api/gateways/{gid}/commands", json={"action": "logs"}, headers=h).status_code == 503
+    with SessionLocal() as db:
+        from app.models import AuditLog
+        acts = [a.action for a in db.query(AuditLog).all()]
+        assert acts.count("gateway_command") == 3 and "gateway_agent_key_view" in acts
+
+
+def test_gateway_result_parsing_and_redaction():
+    from app import gwcmd
+    t = f"as923/gateway/{GW}/sos/cmd-result"
+    ok = gwcmd.parse_result(t, json.dumps({"id": "ab" * 8, "ok": True, "detail": "done", "output": "mqtt password=hunter2 user=x\nline2"}).encode(), "as923")
+    assert ok and ok[0] == GW and "hunter2" not in ok[1]["output"] and "password=***" in ok[1]["output"]
+    for bad in (f"as923/gateway/{GW}/sos/cmd", f"x/gateway/{GW}/sos/cmd-result", "as923/gateway/zz/sos/cmd-result", t + "/x"):
+        assert gwcmd.parse_result(bad, b"{}", "as923") is None
+    assert gwcmd.parse_result(t, b"not json", "as923") is None
+    assert gwcmd.parse_result(t, json.dumps({"id": "nothex", "ok": True}).encode(), "as923") is None
+    assert gwcmd.parse_result(t, json.dumps({"id": "ab" * 8, "ok": "yes"}).encode(), "as923") is None
+    assert len(gwcmd.parse_result(t, json.dumps({"id": "ab" * 8, "ok": True, "output": "x" * 7000}).encode(), "as923")[1]["output"]) == 4000
+    assert gwcmd.parse_result(t, b" " * 9000, "as923") is None
+
+
+def test_gateway_agent_dryrun_accepts_only_valid_signed_commands(tmp_path):
+    import hashlib, hmac, json, os, shutil, subprocess, time
+    if not (shutil.which("jq") and shutil.which("openssl")): pytest.skip("jq/openssl missing")
+    agent = os.path.join(os.path.dirname(__file__), "..", "..", "gateway", "pi", "bin", "sos-gateway-agent")
+    key = "k" * 40
+    (tmp_path / "env").write_text(f"GATEWAY_ID=0016c001f1234567\nTOPIC_PREFIX=as923\nAGENT_KEY={key}\n")
+    now = int(time.time())
+
+    def mk(i, action, ts=now, k=key):
+        sig = hmac.new(k.encode(), f"{i}|{action}|{ts}".encode(), hashlib.sha256).hexdigest()
+        return json.dumps({"id": i, "action": action, "ts": ts, "sig": sig})
+    lines = [mk("a" * 16, "report_now"), mk("a" * 16, "report_now"), mk("b" * 16, "logs", now - 900),
+             mk("c" * 16, "reboot", k="x" * 40), mk("d" * 16, "rm_rf"), mk("e" * 16, "restart_services")]
+    env = dict(os.environ, SOS_AGENT_CONF=str(tmp_path / "env"), SOS_AGENT_STATE=str(tmp_path / "st"), SOS_AGENT_DRYRUN="1")
+    out = subprocess.run(["bash", agent, "--stdin"], input="\n".join(lines) + "\n", env=env, capture_output=True, text=True, timeout=30)
+    results = [json.loads(l[7:]) for l in out.stdout.splitlines() if l.startswith("RESULT ")]
+    assert [r["id"] for r in results] == ["a" * 16, "e" * 16]          # replay, stale, bad sig and unknown action all ignored
+    assert "DRYRUN systemctl reboot" not in out.stdout
+    assert "BAD SIGNATURE" in out.stderr and "replayed" in out.stderr and "stale" in out.stderr and "unknown action" in out.stderr
