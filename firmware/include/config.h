@@ -13,15 +13,24 @@
 #define OLED_SCL   15
 #define OLED_RST   16
 // External parts: GPIOs that are free on the V2 header (CHECK them against your board before wiring)
-#define PIN_BUTTON    13   // button -> GND (INPUT_PULLUP)
+#ifdef SOS_BOARD_V2_0
+// V2.0 (no "V2.1" on the silkscreen): the board's battery divider sits on GPIO13 -> the button moves to GPIO23
+#define PIN_BUTTON    23   // button -> GND (INPUT_PULLUP)
+#else
+#define PIN_BUTTON    13   // V2.1: button -> GND (INPUT_PULLUP)
+#endif
 #define PIN_LED_RED   2
 #define PIN_LED_GREEN 17
 #define PIN_BUZZER    22   // active buzzer via NPN
 #define PIN_MAINS     36   // input-only pin: 5V sense via divider 10k/20k, HIGH = mains present
-#define PIN_VBAT_ADC  37   // on-board battery divider
-#define PIN_ADC_CTRL  -1   // V2: no switch pin assumed (set if your revision has one)
+#ifdef SOS_BOARD_V2_0
+#define PIN_VBAT_ADC  13   // V2.0 on-board 220k/100k divider (ADC2: fine, WiFi is never used)
+#else
+#define PIN_VBAT_ADC  37   // V2.1 on-board 220k/100k divider, switched on by GPIO21 LOW (= Vext, already LOW for the OLED)
+#endif
+#define PIN_ADC_CTRL  -1   // GPIO21 is driven by the Vext code; nothing extra to switch
 #define ADC_CTRL_ACTIVE_LEVEL LOW
-#define VBAT_DIVIDER  2.0f // CALIBRATE with a multimeter (V2 ADC is noisy/nonlinear)
+#define VBAT_DIVIDER  3.2f // (220k+100k)/100k per Heltec schematic — CALIBRATE with a multimeter (V2 ADC is nonlinear)
 #else
 // ===== Heltec WiFi LoRa 32 V3 pins (verified against Heltec pin map) =====
 #define LORA_NSS   8

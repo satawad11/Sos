@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ผังต่อสายปุ่มแจ้งเหตุ — Heltec WiFi LoRa 32 V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#f7f7f5;--card:#fff;--fg:#1d2433;--mut:#5b6474;--bd:#e3e5ea;--red:#dc2626;--grn:#16a34a;--amb:#b45309;--acc:#2563eb;--wire:#334155}
+  @media (prefers-color-scheme:dark){:root{--bg:#0f141c;--card:#161d28;--fg:#e6e9ef;--mut:#9aa4b5;--bd:#2a3342;--red:#f87171;--grn:#4ade80;--amb:#fbbf24;--acc:#60a5fa;--wire:#cbd5e1}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 "IBM Plex Sans Thai",system-ui,sans-serif}
+  main{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:26px;margin:0 0 4px}
+  h2{font-size:19px;margin:34px 0 10px}
+  .sub{color:var(--mut);margin:0 0 18px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px}
+  .tabs{display:flex;gap:8px;margin:0 0 12px;flex-wrap:wrap}
+  .tabs button{font:inherit;padding:7px 14px;border-radius:99px;border:1px solid var(--bd);background:var(--card);color:var(--fg);cursor:pointer}
+  .tabs button[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+  figure{margin:0}
+  svg{width:100%;height:auto;display:block;color:var(--wire)}
+  figcaption{color:var(--mut);font-size:14px;margin-top:8px}
+  table{width:100%;border-collapse:collapse;font-size:15px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--bd);vertical-align:top}
+  th{font-weight:600;color:var(--mut);font-size:13px}
+  code,.pin{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:14px}
+  .pin{display:inline-block;padding:1px 7px;border-radius:6px;background:color-mix(in srgb,var(--acc) 14%,transparent);color:var(--acc);font-weight:500}
+  .v20{display:none}
+  body.rev20 .v21{display:none} body.rev20 .v20{display:inline}
+  ol li,ul li{margin:4px 0}
+  .warn{border-left:4px solid var(--amb);padding:10px 14px;background:color-mix(in srgb,var(--amb) 10%,transparent);border-radius:8px;margin:12px 0}
+  .stop{border-left-color:var(--red);background:color-mix(in srgb,var(--red) 10%,transparent)}
+  .muted{color:var(--mut)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>ผังต่อสายปุ่มแจ้งเหตุฉุกเฉิน — Heltec WiFi LoRa 32 V2</h1>
+  <p class="sub">อุปกรณ์ผู้ป่วย 1 เครื่อง · ตรงกับเฟิร์มแวร์ <code>firmware/include/config.h</code> (repo satawad11/Sos) · LoRa, จอ OLED และวงจรชาร์จแบตอยู่บนบอร์ดแล้ว ไม่ต้องต่อเพิ่ม</p>
+
+  <div class="tabs" role="group" aria-label="รุ่นบอร์ด">
+    <button id="b21" aria-pressed="true">บอร์ด V2.1 (มีคำว่า V2.1 บนบอร์ด)</button>
+    <button id="b20" aria-pressed="false">บอร์ด V2.0 (เขียนแค่ V2)</button>
+  </div>
+  <div class="warn">ดูที่ตัวหนังสือบนแผ่นวงจรด้านหลังบอร์ด — สองรุ่นนี้ต่างกันแค่ <b>ขาปุ่ม</b>: V2.1 ใช้ <span class="pin">GPIO13</span> · V2.0 ใช้ <span class="pin">GPIO23</span> เพราะบน V2.0 ขา 13 ถูกใช้วัดแบตเตอรี่ในบอร์ดอยู่แล้ว (และต้องอัปโหลดด้วย <code>-e heltec_v2_0</code>)</div>
+
+  <div class="card">
+  <figure>
+  <svg viewBox="0 0 1000 600" role="img" aria-label="ผังต่อสาย: ปุ่มเข้า GPIO ลงกราวด์, LED แดง GPIO2 และ LED เขียว GPIO17 ผ่าน 330 โอห์ม, บัซเซอร์ผ่านทรานซิสเตอร์ NPN ที่ GPIO22, ตัวแบ่งแรงดัน 10k/20k จาก 5V เข้า GPIO36, แบต LiPo เข้าขั้ว JST" font-family="IBM Plex Sans Thai, sans-serif" font-size="13">
+    <defs>
+      <g id="gnd" stroke="currentColor" stroke-width="2"><line x1="-11" y1="0" x2="11" y2="0"/><line x1="-7" y1="5" x2="7" y2="5"/><line x1="-3" y1="10" x2="3" y2="10"/></g>
+    </defs>
+
+    <!-- antenna -->
+    <line x1="500" y1="60" x2="500" y2="26" stroke="currentColor" stroke-width="2"/>
+    <polygon points="486,12 514,12 500,30" fill="none" stroke="currentColor" stroke-width="2"/>
+    <text x="524" y="22" fill="var(--red)" font-weight="700">เสา LoRa 868–915 MHz — ต่อก่อนเสียบไฟทุกครั้ง</text>
+
+    <!-- board -->
+    <rect x="380" y="60" width="240" height="500" rx="10" fill="var(--card)" stroke="currentColor" stroke-width="2.5"/>
+    <text x="500" y="90" text-anchor="middle" font-weight="700" font-size="15" fill="var(--fg)">Heltec WiFi LoRa 32</text>
+    <text x="500" y="108" text-anchor="middle" fill="var(--mut)">V2 · ESP32 + SX1276</text>
+    <rect x="440" y="250" width="120" height="70" rx="6" fill="none" stroke="var(--mut)" stroke-dasharray="4 4"/>
+    <text x="500" y="275" text-anchor="middle" fill="var(--mut)" font-size="12">ในบอร์ดแล้ว:</text>
+    <text x="500" y="292" text-anchor="middle" fill="var(--mut)" font-size="12">LoRa · จอ OLED</text>
+    <text x="500" y="309" text-anchor="middle" fill="var(--mut)" font-size="12">วงจรชาร์จแบต</text>
+
+    <!-- left pins -->
+    <g fill="var(--fg)" font-family="IBM Plex Mono, monospace" font-size="13">
+      <text x="392" y="144">5V</text>
+      <text x="392" y="214">GPIO36</text>
+      <text x="392" y="344" class="v21">GPIO13</text><text x="392" y="344" class="v20">GPIO23</text>
+      <text x="392" y="424">GPIO2</text>
+      <text x="392" y="504">GPIO17</text>
+    </g>
+    <g fill="currentColor"><circle cx="380" cy="140" r="4"/><circle cx="380" cy="210" r="4"/><circle cx="380" cy="340" r="4"/><circle cx="380" cy="420" r="4"/><circle cx="380" cy="500" r="4"/></g>
+
+    <!-- right pins -->
+    <g fill="var(--fg)" font-family="IBM Plex Mono, monospace" font-size="13" text-anchor="end">
+      <text x="608" y="144">3V3</text>
+      <text x="608" y="284">GPIO22</text>
+      <text x="608" y="434">BAT (JST)</text>
+      <text x="608" y="534">GND</text>
+    </g>
+    <g fill="currentColor"><circle cx="620" cy="140" r="4"/><circle cx="620" cy="280" r="4"/><circle cx="620" cy="430" r="4"/><circle cx="620" cy="530" r="4"/></g>
+
+    <!-- ===== mains sense divider: 5V - 10k - node - 20k - GND, node -> GPIO36 ===== -->
+    <g stroke="currentColor" stroke-width="2" fill="none">
+      <polyline points="380,140 150,140 150,150"/>
+      <rect x="140" y="150" width="20" height="40" fill="var(--card)"/>
+      <line x1="150" y1="190" x2="150" y2="230"/>
+      <line x1="150" y1="210" x2="380" y2="210"/>
+      <rect x="140" y="230" width="20" height="40" fill="var(--card)"/>
+      <line x1="150" y1="270" x2="150" y2="282"/>
+    </g>
+    <circle cx="150" cy="210" r="4" fill="currentColor"/>
+    <use href="#gnd" x="150" y="282"/>
+    <text x="168" y="175" fill="var(--fg)">10kΩ</text>
+    <text x="168" y="255" fill="var(--fg)">20kΩ</text>
+    <text x="40" y="128" fill="var(--mut)" font-size="12">ตรวจไฟบ้าน (5V จาก USB)</text>
+    <text x="200" y="200" fill="var(--mut)" font-size="12">≈3.3V เมื่อมีไฟ</text>
+
+    <!-- ===== button ===== -->
+    <g stroke="currentColor" stroke-width="2" fill="none">
+      <line x1="380" y1="340" x2="262" y2="340"/>
+      <circle cx="256" cy="340" r="5" fill="var(--card)"/>
+      <circle cx="206" cy="340" r="5" fill="var(--card)"/>
+      <line x1="200" y1="324" x2="262" y2="324"/>
+      <line x1="231" y1="324" x2="231" y2="310"/>
+      <line x1="220" y1="310" x2="242" y2="310"/>
+      <polyline points="201,340 150,340 150,352"/>
+    </g>
+    <use href="#gnd" x="150" y="352"/>
+    <text x="40" y="318" fill="var(--fg)" font-weight="600">ปุ่มใหญ่สีแดง</text>
+    <text x="40" y="334" fill="var(--mut)" font-size="12">แบบกดติด-ปล่อยดับ (NO)</text>
+
+    <!-- ===== red LED: GPIO2 - 330R - LED - GND ===== -->
+    <g stroke="currentColor" stroke-width="2" fill="none">
+      <line x1="380" y1="420" x2="335" y2="420"/>
+      <rect x="275" y="412" width="60" height="16" fill="var(--card)"/>
+      <line x1="275" y1="420" x2="236" y2="420"/>
+      <polygon points="236,406 236,434 212,420" fill="var(--red)" stroke="var(--red)"/>
+      <line x1="210" y1="406" x2="210" y2="434" stroke="var(--red)" stroke-width="3"/>
+      <polyline points="210,420 150,420 150,432"/>
+    </g>
+    <use href="#gnd" x="150" y="432"/>
+    <text x="283" y="404" fill="var(--fg)">330Ω</text>
+    <text x="40" y="404" fill="var(--fg)" font-weight="600">LED แดง</text>
+    <text x="40" y="452" fill="var(--mut)" font-size="12">ขายาว(+) ฝั่งตัวต้านทาน</text>
+
+    <!-- ===== green LED: GPIO17 ===== -->
+    <g stroke="currentColor" stroke-width="2" fill="none">
+      <line x1="380" y1="500" x2="335" y2="500"/>
+      <rect x="275" y="492" width="60" height="16" fill="var(--card)"/>
+      <line x1="275" y1="500" x2="236" y2="500"/>
+      <polygon points="236,486 236,514 212,500" fill="var(--grn)" stroke="var(--grn)"/>
+      <line x1="210" y1="486" x2="210" y2="514" stroke="var(--grn)" stroke-width="3"/>
+      <polyline points="210,500 150,500 150,512"/>
+    </g>
+    <use href="#gnd" x="150" y="512"/>
+    <text x="283" y="484" fill="var(--fg)">330Ω</text>
+    <text x="40" y="484" fill="var(--fg)" font-weight="600">LED เขียว</text>
+    <text x="40" y="532" fill="var(--mut)" font-size="12">ขาสั้น(−) ลง GND</text>
+
+    <!-- ===== buzzer driver: 3V3 -> buzzer -> NPN C, E -> GND, GPIO22 -> 1k -> B ===== -->
+    <g stroke="currentColor" stroke-width="2" fill="none">
+      <polyline points="620,140 820,140 820,152"/>
+      <circle cx="820" cy="178" r="26" fill="var(--card)"/>
+      <line x1="820" y1="204" x2="820" y2="252"/>
+      <!-- flyback diode across buzzer, cathode to + -->
+      <polyline points="820,146 890,146 890,166"/>
+      <polygon points="880,196 900,196 890,176" fill="var(--card)"/>
+      <line x1="879" y1="176" x2="901" y2="176" stroke-width="3"/>
+      <polyline points="890,196 890,226 820,226"/>
+      <!-- 1k base resistor -->
+      <line x1="620" y1="280" x2="672" y2="280"/>
+      <rect x="672" y="272" width="56" height="16" fill="var(--card)"/>
+      <line x1="728" y1="280" x2="788" y2="280"/>
+      <!-- NPN -->
+      <circle cx="806" cy="280" r="26" fill="var(--card)"/>
+      <line x1="790" y1="264" x2="790" y2="296" stroke-width="3"/>
+      <line x1="788" y1="280" x2="790" y2="280"/>
+      <polyline points="790,272 820,256 820,252"/>
+      <polyline points="790,288 820,304 820,330"/>
+    </g>
+    <circle cx="820" cy="226" r="4" fill="currentColor"/>
+    <polygon points="820,304 807,303 813,294" fill="currentColor"/>
+    <use href="#gnd" x="820" y="330"/>
+    <text x="820" y="183" text-anchor="middle" font-weight="700" fill="var(--fg)">BZ</text>
+    <text x="836" y="160" fill="var(--fg)">+</text>
+    <text x="910" y="186" fill="var(--fg)" font-size="12">1N4148</text>
+    <text x="680" y="264" fill="var(--fg)">1kΩ</text>
+    <text x="840" y="272" fill="var(--fg)" font-size="12">C</text>
+    <text x="772" y="272" fill="var(--fg)" font-size="12">B</text>
+    <text x="840" y="306" fill="var(--fg)" font-size="12">E</text>
+    <text x="660" y="122" fill="var(--fg)" font-weight="600">Buzzer แบบ active (3–5V)</text>
+    <text x="852" y="250" fill="var(--mut)" font-size="12">NPN 2N2222</text>
+    <text x="852" y="266" fill="var(--mut)" font-size="12">หรือ BC547</text>
+
+    <!-- ===== battery ===== -->
+    <g stroke="currentColor" stroke-width="2" fill="none">
+      <line x1="620" y1="430" x2="700" y2="430"/>
+      <rect x="700" y="404" width="230" height="52" rx="8" fill="var(--card)"/>
+    </g>
+    <text x="715" y="426" fill="var(--fg)" font-weight="600">แบต LiPo 3.7V 1000–2000 mAh</text>
+    <text x="715" y="444" fill="var(--mut)" font-size="12">มีวงจรป้องกัน · ตรวจขั้ว + / − ก่อนเสียบ</text>
+
+    <!-- ===== GND bus note ===== -->
+    <line x1="620" y1="530" x2="700" y2="530" stroke="currentColor" stroke-width="2"/>
+    <use href="#gnd" x="700" y="530"/>
+    <text x="722" y="528" fill="var(--mut)" font-size="12">⏚ ทุกจุดในผัง = ต่อรวม</text><text x="722" y="544" fill="var(--mut)" font-size="12">เข้าขา GND ของบอร์ด</text>
+  </svg>
+  <figcaption>ทุกชิ้นต่อระหว่างขา GPIO ของบอร์ดกับ GND ของบอร์ด — ปุ่มไม่ต้องมีตัวต้านทาน (ใช้ pull-up ในชิป) · บัซเซอร์ต่อเข้า <b>3V3</b> เพื่อให้ยังดังได้ตอนไฟดับและใช้แบต</figcaption>
+  </figure>
+  </div>
+
+  <h2>ตารางขา</h2>
+  <div class="card">
+  <table>
+    <tr><th>ชิ้นส่วน</th><th>ต่อที่ขา</th><th>ต่อแบบไหน</th><th class="muted">ถ้าเป็นบอร์ด V3</th></tr>
+    <tr><td>ปุ่มใหญ่ (NO)</td><td><span class="pin v21">GPIO13</span><span class="pin v20">GPIO23</span></td><td>ขาหนึ่งเข้า GPIO อีกขาลง GND</td><td><span class="pin">GPIO4</span></td></tr>
+    <tr><td>LED แดง</td><td><span class="pin">GPIO2</span></td><td>GPIO → 330Ω → ขายาว(+) LED · ขาสั้น(−) → GND</td><td><span class="pin">GPIO5</span></td></tr>
+    <tr><td>LED เขียว</td><td><span class="pin">GPIO17</span></td><td>เหมือน LED แดง</td><td><span class="pin">GPIO6</span></td></tr>
+    <tr><td>Buzzer (active)</td><td><span class="pin">GPIO22</span></td><td>GPIO → 1kΩ → ขา B ของ NPN · ขา E → GND · ขา C → ขา − ของ buzzer · ขา + ของ buzzer → 3V3 · ไดโอด 1N4148 คร่อม buzzer (ขีดของไดโอดหันไปฝั่ง +)</td><td><span class="pin">GPIO7</span></td></tr>
+    <tr><td>ตรวจไฟบ้าน</td><td><span class="pin">GPIO36</span></td><td>5V → 10kΩ → <b>จุดกลาง</b> → 20kΩ → GND · จุดกลาง → GPIO36</td><td><span class="pin">GPIO3</span></td></tr>
+    <tr><td>แบตเตอรี่ LiPo</td><td>ขั้ว JST 1.25 บนบอร์ด</td><td>เสียบตรง (บอร์ดอ่านแรงดันแบตเองที่ <span class="v21">GPIO37</span><span class="v20">GPIO13</span>)</td><td>ขั้ว JST บนบอร์ด</td></tr>
+    <tr><td>เสา LoRa</td><td>ขั้ว IPEX/SMA บนบอร์ด</td><td>ต่อก่อนจ่ายไฟทุกครั้ง</td><td>เหมือนกัน</td></tr>
+    <tr><td>OLED · LoRa</td><td colspan="3" class="muted">อยู่บนบอร์ดแล้ว (ขา 4, 15, 16, 21 และ 5, 14, 18, 19, 26, 27, 35 ถูกใช้ภายใน — <b>ห้ามต่ออะไรเพิ่ม</b>)</td></tr>
+  </table>
+  </div>
+
+  <div class="grid" style="margin-top:14px">
+    <div class="card">
+      <h2 style="margin-top:0">รายการอุปกรณ์ต่อ 1 เครื่อง</h2>
+      <ul>
+        <li>Heltec WiFi LoRa 32 V2 รุ่น <b>-F (863–928 MHz)</b> + เสา</li>
+        <li>ปุ่มกดใหญ่แบบ NO 1 ตัว</li>
+        <li>LED แดง 1 · LED เขียว 1 · ตัวต้านทาน 330Ω 2 ตัว</li>
+        <li>Buzzer แบบ active 3–5V 1 · ทรานซิสเตอร์ NPN (2N2222/BC547) 1 · ตัวต้านทาน 1kΩ 1 · ไดโอด 1N4148 1</li>
+        <li>ตัวต้านทาน 10kΩ 1 และ 20kΩ 1 (ตรวจไฟบ้าน)</li>
+        <li>แบต LiPo 3.7V 1000–2000 mAh มีวงจรป้องกัน ขั้ว JST 1.25</li>
+        <li>อะแดปเตอร์ USB 5V/1A + สาย Micro-USB · กล่องพลาสติก</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">ตรวจก่อนจ่ายไฟ</h2>
+      <ol>
+        <li><b>เสาต่อแน่นแล้ว</b> — จ่ายไฟโดยไม่มีเสาอาจทำให้ชิป LoRa เสีย</li>
+        <li>ขั้วแบตตรงกับบอร์ด (สายแดง = +) — สลับขั้วบอร์ดเสียทันที</li>
+        <li>ไม่มีสายไหนแตะขา 3V3 กับ GND โดยตรง (วัดด้วยมัลติมิเตอร์โหมด continuity)</li>
+        <li>LED กลับขั้ว = ไม่ติด (ไม่เสีย) — กลับขาแล้วลองใหม่</li>
+        <li>รุ่นบอร์ดตรงกับคำสั่งอัปโหลด: V2.1 → <code>-e heltec_v2</code> · V2.0 → <code>-e heltec_v2_0</code></li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="warn">
+    <b>หมายเหตุทางเทคนิค</b>
+    <ul style="margin:6px 0 0">
+      <li><span class="pin">GPIO2</span> เป็นขาที่ ESP32 อ่านตอนบูต — ต่อ LED + 330Ω ลง GND ได้ปกติ แต่อย่าต่อ pull-up ภายนอก</li>
+      <li><span class="pin">GPIO36</span> รับได้สูงสุด 3.3V และเป็นขาอินพุตอย่างเดียว · 10k/20k ให้ ≈3.3V ที่ 5V พอดีขอบ ถ้ามีตัว 15kΩ ใช้แทน 20kΩ จะได้ ≈3.0V ปลอดภัยกว่า (ยังอ่านเป็น HIGH ได้)</li>
+      <li>ขา 5V บนบอร์ดมีไฟเฉพาะตอนเสียบ USB จึงใช้ตรวจไฟบ้านได้ — แต่ด้วยเหตุนี้ <b>buzzer ต้องต่อที่ 3V3</b> ไม่ใช่ 5V มิฉะนั้นตอนไฟดับจะไม่มีเสียง</li>
+      <li>เทียบค่าแบต: วัดแรงดันแบตจริงด้วยมัลติมิเตอร์ แล้วปรับ <code>VBAT_DIVIDER</code> ใน <code>config.h</code> (ตั้งต้น 3.2)</li>
+    </ul>
+  </div>
+</main>
+<script>
+  const b21=document.getElementById("b21"),b20=document.getElementById("b20");
+  function set(rev){document.body.classList.toggle("rev20",rev==="20");b21.setAttribute("aria-pressed",rev!=="20");b20.setAttribute("aria-pressed",rev==="20");
+    try{localStorage.setItem("sos_rev",rev)}catch(e){}}
+  b21.onclick=()=>set("21");b20.onclick=()=>set("20");
+  try{if(localStorage.getItem("sos_rev")==="20")set("20")}catch(e){}
+</script>
+</body>
+</html>
