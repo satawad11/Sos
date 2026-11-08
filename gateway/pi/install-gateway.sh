@@ -5,7 +5,7 @@
 #   sudo ./install-gateway.sh                              # interactive install
 #   sudo DOMAIN=sos.example.org MQTT_PASSWORD=... CA_FILE=./ca.crt LAT=13.91 LON=100.60 ./install-gateway.sh   # unattended
 #
-# Re-runnable. Binaries come from the official ChirpStack GitHub releases (override with CONCENTRATORD_URL / FORWARDER_URL).
+# Re-runnable. Binaries come from the official ChirpStack downloads at artifacts.chirpstack.io (override with CONCENTRATORD_URL / MQTT_FORWARDER_URL).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 [ "$(id -u)" = 0 ] || { echo "run with sudo"; exit 1; }
@@ -47,15 +47,27 @@ mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]\nRuntimeWatchdogSec=15\nRebootWatchdogSec=2min\n' > /etc/systemd/system.conf.d/10-watchdog.conf
 
 # ---------- binaries ----------
-fetch_release() {   # $1=repo $2=name-regex $3=dest-binary-name $4=override-url
-  local repo="$1" rx="$2" bin="$3" url="${4:-}"
+# Binaries are published at artifacts.chirpstack.io (the GitHub releases carry source only):
+#   https://artifacts.chirpstack.io/downloads/<repo>/<name>_<version>_linux_arm64.tar.gz
+# Version = latest GitHub release tag (fallback: pinned). Overrides: CONCENTRATORD_URL / MQTT_FORWARDER_URL,
+# or CONCENTRATORD_VERSION / MQTT_FORWARDER_VERSION.
+latest_tag() {   # $1=repo -> 4.7.1 (empty on failure)
+  curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/chirpstack/$1/releases/latest" 2>/dev/null \
+    | sed -n 's#.*/tag/v\{0,1\}\([0-9][0-9.]*\)$#\1#p'
+}
+fetch_release() {   # $1=repo $2=artifact-name $3=binary $4=override-url $5=override-version $6=fallback-version
+  local repo="$1" name="$2" bin="$3" url="${4:-}" ver="${5:-}" fallback="$6" cand
   if [ -z "$url" ]; then
-    url="$(curl -fsSL "https://api.github.com/repos/chirpstack/$repo/releases/latest" \
-          | jq -r '.assets[].browser_download_url' | grep -E "$rx" | head -1 || true)"
+    [ -n "$ver" ] || ver="$(latest_tag "$repo")"
+    for v in $ver $fallback; do
+      cand="https://artifacts.chirpstack.io/downloads/$repo/${name}_${v}_linux_arm64.tar.gz"
+      if curl -fsSIL -o /dev/null "$cand"; then url="$cand"; break; fi
+      echo "   (not found: $cand)"
+    done
   fi
   if [ -z "$url" ]; then
-    echo "!! could not find a release asset matching /$rx/ in chirpstack/$repo."
-    echo "   Open https://github.com/chirpstack/$repo/releases , copy the linux arm64 download link and re-run with"
+    echo "!! could not find a linux arm64 download for $repo."
+    echo "   Find the file at https://artifacts.chirpstack.io/downloads/$repo/ and re-run with"
     echo "   $(echo "$repo" | tr 'a-z-' 'A-Z_' | sed 's/CHIRPSTACK_//')_URL=<link>   (CONCENTRATORD_URL or MQTT_FORWARDER_URL)"
     exit 1
   fi
@@ -69,8 +81,10 @@ fetch_release() {   # $1=repo $2=name-regex $3=dest-binary-name $4=override-url
   rm -rf "$tmp"
   "/usr/local/bin/$bin" --version || true
 }
-fetch_release chirpstack-concentratord 'sx1302.*(arm64|aarch64).*(\.tar\.gz|\.deb)$' chirpstack-concentratord-sx1302 "${CONCENTRATORD_URL:-}"
-fetch_release chirpstack-mqtt-forwarder '(arm64|aarch64).*(\.tar\.gz|\.deb)$' chirpstack-mqtt-forwarder "${MQTT_FORWARDER_URL:-}"
+fetch_release chirpstack-concentratord chirpstack-concentratord-sx1302 chirpstack-concentratord-sx1302 \
+  "${CONCENTRATORD_URL:-}" "${CONCENTRATORD_VERSION:-}" "4.7.1 4.5.3"
+fetch_release chirpstack-mqtt-forwarder chirpstack-mqtt-forwarder chirpstack-mqtt-forwarder \
+  "${MQTT_FORWARDER_URL:-}" "${MQTT_FORWARDER_VERSION:-}" "4.5.1 4.3.1"
 
 # ---------- configs ----------
 install -d -m750 /etc/chirpstack-concentratord /etc/chirpstack-mqtt-forwarder
