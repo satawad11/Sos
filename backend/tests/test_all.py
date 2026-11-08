@@ -61,7 +61,7 @@ def test_duplicate_press_no_second_case(env_, monkeypatch):
     patch_now(monkeypatch, NOON_TUE)
     with SessionLocal() as db:
         eng.handle_uplink(db, EUI, up(codec.T_ALERT))
-        assert eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=6)) == "duplicate"
+        assert eng.handle_uplink(db, EUI, up(codec.T_ALERT)) == "duplicate"          # radio retransmission
         assert db.query(Case).count() == 1
 
 
