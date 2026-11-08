@@ -1,4 +1,4 @@
-// Patient SOS device firmware v0.3 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
+// Patient SOS device firmware v0.4 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
 // NOT hardware-tested yet: follow firmware/README.md bench tests before any patient use.
 #include <Arduino.h>
 #include <Preferences.h>
@@ -334,6 +334,7 @@ uint8_t  tries = 0, pollCount = 0;
 uint8_t  ackShown = 0;          // ACK_L2 result the device shows for curAlert (reported back so the server stops re-sending)
 uint32_t acceptedAt = 0;
 bool     g_repress = false;     // patient pressed again after acceptance -> resend ALERT (server logs "pressed again")
+bool     g_releasedSinceAlert = false;   // button let go at least once since this alert began (cancel needs a fresh press)
 uint32_t nextHeartbeat = 0;
 
 void endAlert(UiMode m) { phase = P_IDLE; setUi(m); doneAt = millis(); }
@@ -392,7 +393,7 @@ void doAlertStep() {
 
 void startAlert() {
   curAlert = nextAlertId(); phase = P_ALERT; l1Ok = false; tries = 0; pollCount = 0;
-  ackShown = 0; g_msgSeen = 0; g_accepted = false; g_repress = false;
+  ackShown = 0; g_msgSeen = 0; g_accepted = false; g_repress = false; g_releasedSinceAlert = false;
   alertStart = millis(); nextTry = 0; setUi(UI_SENDING);
 #if SOS_GPS
   g_locSent = false; g_locTries = 0;
@@ -472,7 +473,10 @@ void loop() {
     if (phase == P_IDLE) startAlert();                 // hold reached hold_ms
     else if (phase == P_ALERT && g_accepted) g_repress = true;
   }
-  if (phase == P_ALERT && g_buttonDown && millis() - g_buttonDownAt > CANCEL_HOLD_MS + g_cfg.hold_ms
+  // Cancel needs a NEW press: the button must have been released after the alert started. (fw <= 0.3 measured from the
+  // alert's own press, so a patient who simply kept holding the button ~5 s cancelled their own emergency.)
+  if (phase == P_ALERT && g_releaseEvent) g_releasedSinceAlert = true;
+  if (phase == P_ALERT && g_releasedSinceAlert && g_buttonDown && millis() - g_buttonDownAt > CANCEL_HOLD_MS + g_cfg.hold_ms
       && g_ui == UI_SENT_WAIT && millis() - alertStart < 45000UL) {
     // long hold (hold_ms + 3 s) during the first 45 s of a waiting alert = patient cancels
     doCancel();
