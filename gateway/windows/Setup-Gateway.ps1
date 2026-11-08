@@ -71,7 +71,7 @@ function Ensure-SshKey([string]$Target, [string]$PubKeyPath, [string]$Label) {
   }
   Warn "$Label ยังไม่มีกุญแจ SSH ของเครื่องนี้ -> พิมพ์รหัสผ่านของ $Target 1 ครั้ง"
   $ErrorActionPreference = 'Continue'
-  Get-Content $PubKeyPath | & ssh @SshOpts $Target "umask 077; mkdir -p ~/.ssh; tr -d '\r' >> ~/.ssh/authorized_keys"
+  Get-Content $PubKeyPath | & ssh @SshOpts $Target "umask 077; mkdir -p ~/.ssh; sed -e 's/\r$//' -e '1s/^\xEF\xBB\xBF//' >> ~/.ssh/authorized_keys; chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys"
   $t = Test-SshLogin $Target
   if (-not $t.Ok) { Fail "ยังเข้า $Target ด้วยกุญแจไม่ได้: $($t.Out)" }
   Ok "$Label ฝากกุญแจ SSH แล้ว"
@@ -191,9 +191,9 @@ try {
   Step 7 'ส่งค่าตั้งไปที่ Pi'
   $envText = "DOMAIN=$Domain`nMQTT_PASSWORD=$MqttPw`nCA_FILE=./ca.crt`nLAT=$Lat`nLON=$Lon`nANTENNA_GAIN=$Gain`nREBOOT_EXIT_CODE=10`n"
   if ($AgentKey) { $envText += "AGENT_KEY=$AgentKey`n" }
-  $r = Invoke-Ssh $Pi "umask 077; tr -d '\r' > ~/gw/.install.env && echo ENV_OK" $envText
+  $r = Invoke-Ssh $Pi "umask 077; sed -e 's/\r$//' -e '1s/^\xEF\xBB\xBF//' > ~/gw/.install.env && echo ENV_OK" $envText
   if ($r.Out -notmatch 'ENV_OK') { Fail "เขียนค่าตั้งบน Pi ไม่สำเร็จ: $($r.Out)" }
-  $r = Invoke-Ssh $Pi "tr -d '\r' > ~/gw/ca.crt && echo CA_OK" $Ca
+  $r = Invoke-Ssh $Pi "sed -e 's/\r$//' -e '1s/^\xEF\xBB\xBF//' > ~/gw/ca.crt && echo CA_OK" $Ca
   if ($r.Out -notmatch 'CA_OK') { Fail 'ส่ง ca.crt ไป Pi ไม่สำเร็จ' }
   $MqttPw = $null; $AgentKey = $null; $envText = $null
   Ok 'ส่งแล้ว (ไฟล์รหัสบน Pi สิทธิ์ 600 จะถูกลบหลังติดตั้ง)'
