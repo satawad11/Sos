@@ -21,6 +21,15 @@ def aware(dt: datetime | None) -> datetime | None:
     return dt
 
 
+def msg_capable(dev: Device | None) -> bool:
+    """Preset messages need firmware 0.2+ (it keeps polling after acceptance and shows FPort 12). Unknown version = allow."""
+    try:
+        major, minor = (int(x) for x in (dev.fw_version or "").split(".")[:2])
+    except (ValueError, AttributeError):
+        return True
+    return (major, minor) >= (0, 2)
+
+
 class Notifier(Protocol):
     def notify_case(self, db: Session, case: Case, caregiver: Caregiver, reminder: bool) -> tuple[bool, str]: ...
 
@@ -199,6 +208,7 @@ class Engine:
         case = self._open_case(db, dev)
         if case and case.state == "new" and case.alert_id == up.alert_id:
             case.state = "cancelled"; case.next_escalation_at = None
+            self._drop_msg(db, case)
             self._event(db, case, "cancelled_by_device")
             self._pub(case, "case_update")
             return "cancelled"
@@ -218,14 +228,72 @@ class Engine:
                                       Case.is_test.is_(False)).order_by(Case.id.desc()).first())
         if not case:
             return "no_case"
+        msg = self._msg_on_poll(db, case, dev, up, now)
         res = self._result_for(case)
         if res == 0:
-            return "pending"
+            return msg or "pending"
+        if up.ack_known == res:                      # firmware >= 0.2 says it already shows this result
+            return msg or "ack_known"
         last = aware(case.ack_sent_at)
         if case.ack_result_sent == res and last and (now - last).total_seconds() < 25:
-            return "ack_in_flight"
+            return msg or "ack_in_flight"
         self._send_ack(db, case, dev, res)
         return "ack_sent"
+
+    # ---------- preset messages to the patient's display (MSG, FPort 12) ----------
+    MSG_RESEND_S = 25
+
+    def _msg_on_poll(self, db, case, dev, up, now) -> str | None:
+        """Called for every ALERT_POLL of the case's alert: confirm delivery (the device echoes the seq) or (re)queue the MSG."""
+        p = case.msg_pending
+        if not p:
+            return None
+        if up.msg_seen == p["seq"]:
+            self._event(db, case, "message_delivered", seq=p["seq"], code=p["code"], value=p["value"])
+            case.msg_pending = None
+            self._pub(case, "case_msg")
+            return "msg_delivered"
+        if case.state not in OPEN_STATES:
+            return None
+        last = aware(case.msg_sent_at)
+        if last and (now - last).total_seconds() < self.MSG_RESEND_S:
+            return "msg_in_flight"
+        self._queue_msg(case, dev, p)
+        return "msg_sent"
+
+    def _queue_msg(self, case, dev, p):
+        self.downlink(dev.dev_eui, codec.FPORT_MSG, codec.encode_msg(case.alert_id, p["seq"], p["code"], p["value"]))
+        case.msg_sent_at = utcnow()
+
+    def send_message(self, db: Session, case_id: int, actor: str, code: int, value: int = 0) -> Case:
+        """Staff picked a preset message for the patient's display. Only for an open (not test) case: the device
+        listens only while it is polling for that alert. A newer message replaces one that has not arrived yet."""
+        case = db.get(Case, case_id)
+        if case is None: raise LookupError("case not found")
+        if case.is_test or case.state not in OPEN_STATES:
+            raise ValueError("case is not open")
+        if not msg_capable(case.device):
+            raise ValueError("device firmware too old for messages (needs 0.2+)")
+        if code not in codec.MESSAGES:
+            raise ValueError("unknown message")
+        if codec.MESSAGES[code]["value"] is None:
+            value = 0
+        elif not 1 <= value <= 255:
+            raise ValueError("value must be 1..255")
+        case.msg_seq = (case.msg_seq % 255) + 1          # 1..255, never 0
+        p = {"seq": case.msg_seq, "code": code, "value": value, "by": actor}
+        replaced = case.msg_pending
+        case.msg_pending = p
+        self._event(db, case, "message_sent", actor=actor, seq=p["seq"], code=code, value=value,
+                    text=" / ".join(codec.msg_preview(code, value)), replaced=replaced["seq"] if replaced else None)
+        self._queue_msg(case, case.device, p)
+        db.commit(); self._pub(case, "case_msg")
+        return case
+
+    def _drop_msg(self, db, case):
+        if case.msg_pending:
+            self._event(db, case, "message_dropped", seq=case.msg_pending["seq"])
+            case.msg_pending = None
 
     def _send_ack(self, db, case, dev, res):
         self.downlink(dev.dev_eui, codec.FPORT_ACK_L2, codec.encode_ack_l2(case.alert_id, res))
@@ -259,6 +327,7 @@ class Engine:
         case.state, case.closed_at, case.close_reason = "closed", utcnow(), reason
         case.next_escalation_at = None
         if note: case.note = note
+        self._drop_msg(db, case)
         self._event(db, case, "closed", actor=actor, reason=reason, note=note, skipped_accept=was_new)
         self._send_ack(db, case, case.device, self._result_for(case))
         db.commit(); self._pub(case, "case_update")

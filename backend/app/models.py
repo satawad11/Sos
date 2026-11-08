@@ -128,6 +128,9 @@ class Case(Base):
     next_escalation_at: Mapped[datetime | None] = _dt(nullable=True)
     ack_result_sent: Mapped[int] = mapped_column(Integer, default=0)
     ack_sent_at: Mapped[datetime | None] = _dt(nullable=True)
+    msg_seq: Mapped[int] = mapped_column(Integer, default=0)                 # last MSG sequence number used for this case
+    msg_pending: Mapped[dict | None] = mapped_column(JSON, nullable=True)    # {seq, code, value, by} not yet shown on the device
+    msg_sent_at: Mapped[datetime | None] = _dt(nullable=True)               # last time the pending MSG was queued
     loc_lat: Mapped[float | None] = mapped_column(Float, nullable=True)    # live fix received for THIS alert (LOC message)
     loc_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
     loc_at: Mapped[datetime | None] = _dt(nullable=True)

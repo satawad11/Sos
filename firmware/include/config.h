@@ -50,14 +50,18 @@
 
 // ===== Protocol (must match docs/contract) =====
 #define PROTO_VER 1
-enum MsgType : uint8_t { T_ALERT = 1, T_CANCEL, T_TEST, T_HEARTBEAT, T_POLL, T_ACK_L2, T_CONFIG, T_LOC };
+enum MsgType : uint8_t { T_ALERT = 1, T_CANCEL, T_TEST, T_HEARTBEAT, T_POLL, T_ACK_L2, T_CONFIG, T_LOC, T_MSG };
 enum : uint8_t { F_MAINS_OK = 1, F_BATT_LOW = 2, F_CHARGING = 4, F_TEST_MODE = 8 };
+// fw 0.2+: POLL flags bits 4-6 = ACK_L2 result already shown, bit 7 = byte 7 carries the last shown MSG seq (receipt)
+#define F_ACK_SHIFT 4
+#define F_MSG_SEQ   0x80
 #define FPORT_EVENT 1
 #define FPORT_HEARTBEAT 2
 #define FPORT_POLL 3
 #define FPORT_LOC 4
 #define FPORT_ACK_L2 10
 #define FPORT_CONFIG 11
+#define FPORT_MSG 12
 
 // ===== Behaviour =====
 #ifdef SOS_DEBUG_FAST_TIMERS
@@ -68,6 +72,7 @@ enum : uint8_t { F_MAINS_OK = 1, F_BATT_LOW = 2, F_CHARGING = 4, F_TEST_MODE = 8
   #define POLL_MAX_MS        (30UL*60000) // stop polling after 30 min
 #endif
 #define CANCEL_HOLD_MS       3000UL
+#define ACCEPTED_POLL_MIN_S  30          // after acceptance keep polling (slower) so staff messages can arrive
 #define DONE_DISPLAY_MS      (5UL*60000)
 #define BATT_LOW_PCT         20
 #define JOIN_RETRY_MIN_MS    10000UL
