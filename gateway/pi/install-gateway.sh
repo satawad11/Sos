@@ -37,13 +37,20 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q curl ca-certificates openssl jq chrony ufw fail2ban unattended-upgrades mosquitto-clients
 
-# ---------- SPI ----------
+# ---------- SPI + I2C ----------
 CFG=/boot/firmware/config.txt; [ -f "$CFG" ] || CFG=/boot/config.txt
 if ! grep -qE '^dtparam=spi=on' "$CFG"; then
   echo "dtparam=spi=on" >> "$CFG"; NEED_REBOOT=1
 fi
-# also when the line is there but this boot has not loaded it yet (e.g. an earlier run stopped before rebooting)
+# I2C: the WM1302 temperature sensor (0x39) sits on /dev/i2c-1; concentratord refuses to start without it
+if ! grep -qE '^dtparam=i2c_arm=on' "$CFG"; then
+  echo "dtparam=i2c_arm=on" >> "$CFG"; NEED_REBOOT=1
+fi
+echo i2c-dev > /etc/modules-load.d/sos-i2c-dev.conf
+modprobe i2c-dev 2>/dev/null || true
+# also when the lines are there but this boot has not loaded them yet (e.g. an earlier run stopped before rebooting)
 [ -e /dev/spidev0.0 ] || NEED_REBOOT=1
+[ -e /dev/i2c-1 ] || NEED_REBOOT=1
 # do not let the Pi's own watchdog/serial console steal anything we need; enable hardware watchdog via systemd
 mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]\nRuntimeWatchdogSec=15\nRebootWatchdogSec=2min\n' > /etc/systemd/system.conf.d/10-watchdog.conf
