@@ -3,6 +3,7 @@ import re, secrets
 import httpx
 from datetime import timedelta, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from . import settings_store
@@ -324,7 +325,7 @@ def set_consent(pid: int, b: ConsentIn, db: Session = Depends(get_db), u=Depends
 
 @router.get("/patients/{pid}/export")
 def export_patient(pid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import FileResponse, JSONResponse
     p = db.get(Patient, pid)
     if not p: raise HTTPException(404)
     audit(db, u.username, "patient_export", str(pid)); db.commit()
@@ -1631,7 +1632,7 @@ from . import updates as upd
 
 
 class UpdateIn(BaseModel):
-    action: str = Field(pattern="^(check|update)$")
+    action: str = Field(pattern="^(check|update|firmware)$")
 
 
 @router.get("/system/update")
@@ -1651,3 +1652,39 @@ def update_request(b: UpdateIn, db: Session = Depends(get_db), u=Depends(admin_o
               current=(st.get("current") or {}).get("commit", "")[:12], latest=(st.get("latest") or {}).get("commit", "")[:12])
         db.commit()
     return req
+
+
+# ---------------- device firmware over USB (images from the firmware-bin branch; docs/FIRMWARE-UPDATE.md) ----------------
+@router.get("/firmware")
+def firmware_list(u=Depends(staff_or_admin)):
+    return upd.firmware()
+
+
+@router.get("/firmware/{env_name}.bin")
+def firmware_file(env_name: str, u=Depends(staff_or_admin)):
+    if env_name not in {b["env"] for b in upd.firmware()["builds"]}:
+        raise HTTPException(404, "ไม่มีเฟิร์มแวร์สำหรับบอร์ดนี้")
+    return FileResponse(upd.firmware_path(env_name), media_type="application/octet-stream",
+                        headers={"Cache-Control": "no-store"})
+
+
+class FlashIn(BaseModel):
+    dev_eui: str = Field(default="", pattern="^([0-9a-fA-F]{16})?$")
+    env: str = Field(max_length=40)
+    version: str = Field(max_length=16)
+    from_version: str = Field(default="", max_length=16)
+    ok: bool
+    error: str = Field(default="", max_length=200)
+
+
+@router.post("/firmware/flashed")
+def firmware_flashed(b: FlashIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    """The browser flashed a button over USB and read INFO back — record it (the version also arrives with the next uplink)."""
+    eui = b.dev_eui.lower()
+    d = db.query(Device).filter_by(dev_eui=eui).first() if eui else None
+    if d is not None and b.ok:
+        d.fw_version = b.version
+    audit(db, u.username, "firmware_flash" if b.ok else "firmware_flash_failed", eui or "-",
+          env=b.env, version=b.version, previous=b.from_version, known_device=d is not None, **({"error": b.error} if b.error else {}))
+    db.commit()
+    return {"ok": True, "device_id": d.id if d else None}

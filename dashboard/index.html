@@ -459,6 +459,20 @@ html[data-theme=dark]{color-scheme:dark}html[data-theme=light]{color-scheme:ligh
 .top .btn.thm{width:40px;padding:0;display:grid;place-items:center;background:var(--card);color:var(--ink);border:1px solid var(--line)}
 .auth .thm{position:absolute;top:calc(16px + env(safe-area-inset-top));right:16px;z-index:2;width:40px;height:40px;padding:0;display:grid;place-items:center;border-radius:10px;background:#ffffff14;color:#fff;border:1px solid #ffffff2b;cursor:pointer}
 .lnk{border:0;background:none;padding:0;font:inherit;font-size:13px;color:var(--amb);cursor:pointer;text-decoration:underline;text-underline-offset:3px;min-height:0}
+
+/* firmware update steps */
+.fws{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.fws li{display:flex;gap:10px;align-items:flex-start;color:var(--mut)}
+.fws .fwi{flex:none;width:20px;height:20px;margin-top:2px;border-radius:50%;border:2px solid var(--line)}
+.fws li.s-run{color:var(--ink)}.fws li.s-run .fwi{border-color:var(--pri);border-right-color:transparent;animation:fwspin .8s linear infinite}
+.fws li.s-ok{color:var(--ink)}.fws li.s-ok .fwi{border-color:var(--grn);background:var(--grn);box-shadow:inset 0 0 0 3px var(--card)}
+.fws li.s-bad{color:var(--red)}.fws li.s-bad .fwi{border-color:var(--red);background:var(--red);box-shadow:inset 0 0 0 3px var(--card)}
+.fws li.s-warn{color:var(--amb)}.fws li.s-warn .fwi{border-color:var(--amb)}
+.fws small{font-size:13px;color:var(--mut)}.fws li.s-bad small{color:var(--red)}
+.fwbar{height:8px;border-radius:99px;background:var(--soft);overflow:hidden;margin:12px 0 0}.fwbar[hidden]{display:none}.fwbar span{display:block;height:100%;width:0;background:var(--pri);transition:width .2s}
+.fwdone{display:flex;gap:12px;align-items:flex-start;margin-top:14px;padding:14px;border-radius:10px;background:var(--grn2)}.fwdone svg.i{flex:none;width:22px;height:22px;color:var(--grn)}
+@keyframes fwspin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.fws li.s-run .fwi{animation:none}}
 </style></head>
 <body>
 <div id="app"></div><div id="toast" aria-live="polite"></div>
@@ -637,7 +651,7 @@ function render(){
     const c=new Set(JSON.parse(lsGet("navc")||"[]"));open?c.delete(b.dataset.g):c.add(b.dataset.g);lsSet("navc",JSON.stringify([...c]))});
   // sub-views (case detail, edit forms) add a last breadcrumb item via crumb(); it goes away when #main no longer shows a "back" view
   new MutationObserver(()=>{if(!$("#main #back"))crumb(null)}).observe($("#main"),{childList:true});
-  ncInit();ncSeed();thmInit();
+  ncInit();ncSeed();thmInit();fwLatest();
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>{page="account";render()};$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
   clearInterval(timer);(({cases:loadCases,map:loadMap,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,selftest:loadSelftest,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,chirpstack:loadChirpstack,integrations:loadIntegrations,update:loadUpdate,account:loadAccount,settings:loadSettings,audit:loadAudit})[page])();
@@ -897,7 +911,7 @@ async function gwRemote(g){
 const loadDevices=guard(async()=>{
   const [ds,ps,aiOk]=await Promise.all([api("/devices"),api("/patients"),aiReady()]);if(page!=="devices")return;
   const LC=["ready","active","repair","retired","lost"];
-  $("#main").innerHTML=`${aiOk&&canEdit()&&ds.length?`<div class="card"><div class="row">${aiBtn("devices","","AI วิเคราะห์อุปกรณ์ทั้งหมด")}<span class="mut">ให้ AI ช่วยดูแบตเตอรี่ สัญญาณ และเครื่องที่เงียบ (ไม่ส่งชื่อผู้ป่วย/รหัสเครื่อง)</span></div><div data-aibox="devices:"></div></div>`:""}${canEdit()?`<div class="card"><h3>เพิ่มอุปกรณ์</h3><div class="row"><input id="ndu" placeholder="DevEUI 16 หลัก" size="20" maxlength="23"><input id="ndl" placeholder="ป้าย เช่น บ้านลุงสม"><button class="btn p" id="nda">เพิ่ม</button></div><p class="mut">สำหรับลงทะเบียนเครื่องที่โปรแกรมไว้แล้ว — ถ้าเป็นเครื่องใหม่ ใช้เมนู "ติดตั้งอุปกรณ์" (ผู้ดูแลระบบ) จะง่ายกว่า</p></div>`:""}<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>ตำแหน่ง GPS</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr data-rid="${d.id}"><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}${d.offline?' <b style="color:var(--red)">ออฟไลน์</b>':""}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${fmt(d.last_seen)}</td><td>${locCell(d.loc)}</td><td>${esc(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
+  $("#main").innerHTML=`${aiOk&&canEdit()&&ds.length?`<div class="card"><div class="row">${aiBtn("devices","","AI วิเคราะห์อุปกรณ์ทั้งหมด")}<span class="mut">ให้ AI ช่วยดูแบตเตอรี่ สัญญาณ และเครื่องที่เงียบ (ไม่ส่งชื่อผู้ป่วย/รหัสเครื่อง)</span></div><div data-aibox="devices:"></div></div>`:""}${canEdit()?`<div class="card"><h3>เพิ่มอุปกรณ์</h3><div class="row"><input id="ndu" placeholder="DevEUI 16 หลัก" size="20" maxlength="23"><input id="ndl" placeholder="ป้าย เช่น บ้านลุงสม"><button class="btn p" id="nda">เพิ่ม</button></div><p class="mut">สำหรับลงทะเบียนเครื่องที่โปรแกรมไว้แล้ว — ถ้าเป็นเครื่องใหม่ ใช้เมนู "ติดตั้งอุปกรณ์" (ผู้ดูแลระบบ) จะง่ายกว่า</p></div>`:""}<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>ตำแหน่ง GPS</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr data-rid="${d.id}"><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}${d.offline?' <b style="color:var(--red)">ออฟไลน์</b>':""}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${fmt(d.last_seen)}</td><td>${locCell(d.loc)}</td><td>${esc(d.fw)}${fwBadge(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
   aiWire($("#main"));
   const dById=i=>ds.find(x=>x.id==i),dBody=(d,lc)=>({dev_eui:d.dev_eui,label:d.label,lifecycle:lc,patient_id:d.patient_id});
   lister("devices",$("#main").lastElementChild,{noun:"เครื่อง",reload:loadDevices,bulk:[
@@ -915,7 +929,7 @@ const loadDevices=guard(async()=>{
       ${CF.map(([k,t,lo,hi,h])=>`<div class="row"><label style="min-width:190px"><input type="checkbox" class="ck" data-k="${k}" ${k in ov?"checked":""}> ${t}</label><input type="number" class="cv" data-k="${k}" min="${lo}" max="${hi}" value="${k in ov?ov[k]:dd[k]}" ${k in ov?"":"disabled"}><span class="mut">ค่ากลาง ${dd[k]} · ช่วง ${lo}-${hi} · ${h}</span></div>`).join("")}
       <div class="row">สถานะ: ${d.config_pending?'<b style="color:var(--amb)">⏳ รอเครื่องรับค่า</b>':d.config_applied_at?"✅ เครื่องใช้ค่านี้แล้ว (เมื่อ "+fmt(d.config_applied_at)+")":"✅ ตรงกับค่าที่ตั้ง"} · เวอร์ชันค่า ${d.config_ver}</div>
       <div class="row"><button class="btn p" id="svc">ส่งค่าไปยังเครื่อง</button><button class="btn" id="rsc">กลับไปใช้ค่ากลางทั้งหมด</button></div></div>`:"";
-    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}${p.consent_ok?"":" (ยังไม่มีความยินยอม PDPA)"}</option>`).join("")}</select></div>${aiOk&&canEdit()?`<div class="row">${aiBtn("devices",d.id,"AI วิเคราะห์เครื่องนี้")}</div><div data-aibox="devices:${d.id}"></div>`:""}<div class="row"><button class="btn p" id="sv">บันทึก</button>${role==="admin"?'<button class="btn r" id="dxl">ลบอุปกรณ์นี้</button>':""}</div></div>${cfgCard}`;
+    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">เฟิร์มแวร์ <b>${esc(d.fw||"-")}</b>${fwBadge(d.fw)}${role==="admin"?' <button class="btn sm" type="button" id="fwup">อัปเดตผ่าน USB</button>':""}</div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}${p.consent_ok?"":" (ยังไม่มีความยินยอม PDPA)"}</option>`).join("")}</select></div>${aiOk&&canEdit()?`<div class="row">${aiBtn("devices",d.id,"AI วิเคราะห์เครื่องนี้")}</div><div data-aibox="devices:${d.id}"></div>`:""}<div class="row"><button class="btn p" id="sv">บันทึก</button>${role==="admin"?'<button class="btn r" id="dxl">ลบอุปกรณ์นี้</button>':""}</div></div>${cfgCard}`;crumb(`อุปกรณ์ ${d.label||d.dev_eui}`);if($("#fwup"))$("#fwup").onclick=()=>{devEdit=false;page="install";render();setTimeout(()=>$("#fwcard")?.scrollIntoView({behavior:"smooth"}),600)};
     $("#back").onclick=()=>{devEdit=false;render()};
     $("#sv").onclick=guard(async()=>{const pid=$("#pt").value?Number($("#pt").value):null;let r;
       try{r=await api("/devices/"+d.id,{method:"PUT",body:{dev_eui:d.dev_eui,label:$("#l").value,lifecycle:$("#lc").value,patient_id:pid}})}
@@ -1302,8 +1316,8 @@ const loadAudit=guard(async()=>{
 class SerialLink{
   constructor(){this.port=null;this.lines=[];this.waiters=[];this.buf="";this.writer=null;this.reader=null;this.closed=false;this.stopping=false}
   static supported(){return "serial" in navigator}
-  async open(){
-    this.port=await navigator.serial.requestPort();await this.port.open({baudRate:115200});
+  async open(port){
+    this.port=port||await navigator.serial.requestPort();await this.port.open({baudRate:115200});
     this.writer=this.port.writable.getWriter();this._pump()}
   // Boards with a separate USB-UART chip (Heltec V2 / CP2102) produce a BREAK/framing error when the ESP32 restarts.
   // Web Serial reports that as a non-fatal read error and hands out a fresh readable stream — so keep reading
@@ -1329,6 +1343,109 @@ class SerialLink{
   async close(){this.stopping=true;try{await this.reader.cancel()}catch{}try{this.writer.releaseLock()}catch{}try{await this.port.close()}catch{}}
 }
 let link=null;
+// ---------------------------------------------------------------- firmware update over USB (esptool-js, docs/FIRMWARE-UPDATE.md)
+// Writes the application image only (0x10000): bootloader, partition table and the NVS partition holding the
+// LoRaWAN keys stay as they are, so the button keeps its identity and does not need provisioning again.
+let FWI=null,FWT=0;
+async function fwLatest(force){if(role==="viewer")return null;if(force||Date.now()-FWT>300000){FWT=Date.now();try{FWI=await api("/firmware")}catch(e){FWI=null}}return FWI}
+const verN=v=>String(v||"").split(".").map(x=>+x||0),verLt=(a,b)=>{const x=verN(a),y=verN(b);for(let i=0;i<Math.max(x.length,y.length);i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)<(y[i]||0)}return false};
+function fwNewest(){return (FWI?.builds||[]).reduce((m,b)=>!m||verLt(m,b.version)?b.version:m,"")}
+function fwBadge(v){const n=fwNewest();return v&&n&&verLt(v,n)?` <span class="tag accepted" title="เวอร์ชันล่าสุด ${esc(n)}">มี ${esc(n)}</span>`:""}
+// MD5 of a Uint8Array → hex (esptool-js needs it to verify what landed in flash)
+function md5hex(u8){const K=new Uint32Array(64),S=[7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  for(let i=0;i<64;i++)K[i]=Math.floor(Math.abs(Math.sin(i+1))*4294967296)>>>0;
+  const n=u8.length,len=((n+8>>6)+1)*64,b=new Uint8Array(len);b.set(u8);b[n]=0x80;const dv=new DataView(b.buffer);
+  dv.setUint32(len-8,(n*8)>>>0,true);dv.setUint32(len-4,Math.floor(n/0x20000000)>>>0,true);
+  let a0=0x67452301,b0=0xefcdab89,c0=0x98badcfe,d0=0x10325476;const M=new Uint32Array(16);
+  for(let o=0;o<len;o+=64){for(let j=0;j<16;j++)M[j]=dv.getUint32(o+j*4,true);let A=a0,B=b0,C=c0,D=d0;
+    for(let i=0;i<64;i++){let F,g;
+      if(i<16){F=(B&C)|(~B&D);g=i}else if(i<32){F=(D&B)|(~D&C);g=(5*i+1)%16}else if(i<48){F=B^C^D;g=(3*i+5)%16}else{F=C^(B|~D);g=(7*i)%16}
+      F=(F+A+K[i]+M[g])>>>0;A=D;D=C;C=B;B=(B+((F<<S[i])|(F>>>(32-S[i]))))>>>0}
+    a0=(a0+A)>>>0;b0=(b0+B)>>>0;c0=(c0+C)>>>0;d0=(d0+D)>>>0}
+  return [a0,b0,c0,d0].map(x=>[0,8,16,24].map(s=>((x>>>s)&255).toString(16).padStart(2,"0")).join("")).join("")}
+async function sha256hex(u8){const h=await crypto.subtle.digest("SHA-256",u8);return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join("")}
+
+async function fwCard(box,ds){
+  const m=await fwLatest(true);const ok=SerialLink.supported();
+  if(!m?.available){box.innerHTML=`<h3>อัปเดตเฟิร์มแวร์ผ่าน USB</h3><div class="warn">ยังไม่มีไฟล์เฟิร์มแวร์บนเซิร์ฟเวอร์ — ไฟล์จะมาเองหลัง GitHub build เสร็จ แล้วกด "ตรวจหาเวอร์ชันใหม่" หรือ "อัปเดตระบบ" ที่หน้าอัปเดตระบบ${role==="admin"?' หรือกดปุ่มด้านล่าง':""}</div>${role==="admin"?'<button class="btn" id="fwsync">ดึงไฟล์เฟิร์มแวร์จาก GitHub</button>':""}`;
+    $("#fwsync")&&($("#fwsync").onclick=guard(async()=>{await api("/system/update",{method:"POST",body:{action:"firmware"}});toast("ส่งคำขอแล้ว รอประมาณ 10 วินาทีแล้วเปิดหน้านี้ใหม่","info")}));return}
+  const vs=[...new Set(m.builds.map(b=>b.version))];
+  box.innerHTML=`<h3>อัปเดตเฟิร์มแวร์ผ่าน USB</h3>
+   <p class="mut">เฟิร์มแวร์ล่าสุด <b>${esc(vs.join(", "))}</b> · build ${esc(m.commit)} เมื่อ ${fmt(m.built_at)} · อัปเดตเฉพาะโปรแกรม คีย์ LoRaWAN และการตั้งค่าในเครื่องยังอยู่ ไม่ต้องติดตั้งใหม่</p>
+   ${ok?"":'<div class="warn">เบราว์เซอร์นี้ไม่รองรับ Web Serial — ใช้ Chrome หรือ Edge บนคอมพิวเตอร์</div>'}
+   <ol class="mut"><li>เสียบเครื่องด้วยสาย USB (ต้องเป็นสายที่ส่งข้อมูลได้ ไม่ใช่สายชาร์จอย่างเดียว) เข้าคอมพิวเตอร์เครื่องนี้</li><li>ปิดหน้าต่างอื่นที่เปิดพอร์ตนี้อยู่ (Serial Monitor, PlatformIO)</li><li>กด "เริ่มอัปเดต" แล้วเลือกพอร์ตของเครื่อง ระหว่างเขียนห้ามถอดสาย</li></ol>
+   <div class="row">บอร์ด <select id="fwenv"><option value="">ตรวจอัตโนมัติ</option>${m.builds.map(b=>`<option value="${esc(b.env)}">${esc(b.label)} · ${esc(b.version)}</option>`).join("")}</select>
+    <button class="btn p" id="fwgo" ${ok?"":"disabled"}>เริ่มอัปเดต</button></div>
+   <div id="fwsteps"></div>`;
+  $("#fwgo").onclick=()=>fwRun(m,ds||[],$("#fwenv").value);
+}
+
+async function fwRun(m,ds,pick){
+  const S=[["usb","เชื่อมต่อและอ่านข้อมูลเครื่อง"],["chip","เข้าโหมดอัปเดตและตรวจชิป"],["dl","ดาวน์โหลดและตรวจไฟล์เฟิร์มแวร์"],["write","เขียนเฟิร์มแวร์ลงเครื่อง"],["boot","รีสตาร์ตและยืนยันเวอร์ชันใหม่"]];
+  const box=$("#fwsteps"),go=$("#fwgo");if(!box)return;go.disabled=true;
+  box.innerHTML=`<ol class="fws">${S.map(([k,t])=>`<li data-k="${k}"><span class="fwi"></span><span class="fwt">${t}<small></small></span></li>`).join("")}</ol><div class="fwbar" hidden><span></span></div><div id="fwres"></div>`;
+  const set=(k,state,note)=>{const li=box.querySelector(`[data-k=${k}]`);if(!li)return;li.className="s-"+state;if(note!=null)li.querySelector("small").textContent=note?" — "+note:""};
+  const bar=box.querySelector(".fwbar"),barS=bar.querySelector("span");
+  let port=null,link=null,transport=null,cur=null,before={fw:"",eui:""},build=null,step="usb";
+  const report=(ok,error="")=>api("/firmware/flashed",{method:"POST",body:{dev_eui:(before.eui||"").slice(0,16),env:build?.env||pick||"-",version:build?.version||"-",from_version:before.fw||"",ok,error:String(error).slice(0,200)}}).catch(()=>{});
+  const readInfo=async lk=>{await lk.ping();lk.flush();await lk.send("INFO");const l=await lk.expect("INFO",3000);
+    return {fw:(l.match(/fw=([\d.]+)/)||[])[1]||"",eui:(l.match(/deveui=([0-9a-f]{16})/i)||[])[1]?.toLowerCase()||"",prov:/provisioned=1/.test(l)}};
+  try{
+    // 1 — what is plugged in? (an empty or broken board may not answer: allowed to continue)
+    set("usb","run");port=await navigator.serial.requestPort();link=new SerialLink();await link.open(port);
+    try{before=await readInfo(link)}catch(e){before={fw:"",eui:""}}
+    await link.close();link=null;
+    cur=ds.find(d=>d.dev_eui===before.eui);
+    set("usb","ok",before.fw?`${cur?esc(cur.label)+" · ":""}เวอร์ชัน ${before.fw}${before.eui?" · "+before.eui:""}${before.eui&&!cur?" (ไม่พบในรายการอุปกรณ์)":""}`:"เครื่องไม่ตอบ (อาจยังไม่มีเฟิร์มแวร์) — อัปเดตต่อได้");
+    // 2/3 — chip decides which images fit; the image must match the manifest byte for byte
+    set("chip","run");step="chip";
+    const esp=await import("./vendor/esptool/esptool-0.7.1.js");
+    transport=new esp.Transport(port,true);
+    const loader=new esp.ESPLoader({transport,baudrate:460800,romBaudrate:115200,terminal:{clean(){},writeLine(){},write(){}}});
+    const desc=await loader.main("default_reset");const chip=loader.chip.CHIP_NAME;
+    const fits=m.builds.filter(b=>b.chip===chip);
+    if(!fits.length)throw new Error(`ชิป ${chip} ไม่มีเฟิร์มแวร์ที่ตรงกัน (มีสำหรับ ${[...new Set(m.builds.map(b=>b.chip))].join(", ")})`);
+    if(pick){build=fits.find(b=>b.env===pick);if(!build)throw new Error(`บอร์ดที่เลือกไม่ตรงกับชิปที่เสียบอยู่ (${chip}) — เลือก "ตรวจอัตโนมัติ" หรือบอร์ดที่ถูกต้อง`)}
+    else build=fits.length===1?fits[0]:(fits.find(b=>/gps/.test(b.env)===!!cur?.loc)||fits[0]);
+    set("chip","ok",`${desc} → ${build.label}`);
+    set("dl","run");step="dl";
+    const r=await fetch(`/api/firmware/${encodeURIComponent(build.env)}.bin`,{headers:{authorization:"Bearer "+token},cache:"no-store"});
+    if(!r.ok)throw new Error("ดาวน์โหลดไฟล์ไม่สำเร็จ ("+r.status+")");
+    const img=new Uint8Array(await r.arrayBuffer());
+    if(img.length!==build.size||await sha256hex(img)!==build.sha256)throw new Error("ไฟล์ที่ดาวน์โหลดไม่ตรงกับที่ build ไว้ (SHA-256) — ลองใหม่อีกครั้ง");
+    set("dl","ok",`${build.version} · ${(img.length/1024).toFixed(0)} KB · SHA-256 ตรง`);
+    if(before.fw&&!verLt(before.fw,build.version)&&!await ask(`เครื่องนี้ใช้เวอร์ชัน ${before.fw} อยู่แล้ว\nจะเขียนเวอร์ชัน ${build.version} ทับหรือไม่`,{ok:"เขียนทับ"}))throw new Error("ยกเลิกแล้ว — เครื่องยังใช้เวอร์ชันเดิม");
+    // 4 — write + verify (esptool compares the MD5 of what is in flash with ours)
+    set("write","run");step="write";bar.hidden=false;
+    await loader.writeFlash({fileArray:[{data:img,address:build.offset??0x10000}],flashMode:"keep",flashFreq:"keep",flashSize:"keep",eraseAll:false,compress:true,
+      reportProgress:(i,w,t)=>{const p=Math.round(w/t*100);barS.style.width=p+"%";set("write","run",p+"%")},calculateMD5Hash:md5hex});
+    set("write","ok","เขียนและตรวจ MD5 แล้ว");bar.hidden=true;
+    // 5 — reboot, then ask the new firmware who it is
+    set("boot","run");step="boot";
+    await loader.after("hard_reset");await transport.disconnect();transport=null;
+    let after=null;const end=Date.now()+25000;
+    while(!after&&Date.now()<end){await new Promise(r=>setTimeout(r,1500));
+      try{link=new SerialLink();await link.open(port);after=await readInfo(link)}catch(e){}finally{if(link){await link.close();link=null}}
+      if(!after){const ps=await navigator.serial.getPorts();if(ps.length===1&&ps[0]!==port)port=ps[0]}}   // native-USB boards come back as a new port
+    if(!after){set("boot","warn","เขียนสำเร็จแต่อ่านเวอร์ชันกลับไม่ได้ — ถอดเสียบสาย USB แล้วดูเวอร์ชันในหน้าอุปกรณ์หลังเครื่องส่ง heartbeat");await report(true,"no INFO after reboot");
+      $("#fwres").innerHTML=`<div class="warn">เขียนเฟิร์มแวร์ ${esc(build.version)} สำเร็จ แต่ยืนยันหลังรีสตาร์ตไม่ได้</div>`;return}
+    if(after.fw!==build.version)throw new Error(`เครื่องรีสตาร์ตแล้วยังรายงานเวอร์ชัน ${after.fw||"?"} (ควรเป็น ${build.version})`);
+    if(before.eui&&after.eui&&after.eui!==before.eui)throw new Error(`DevEUI เปลี่ยนจาก ${before.eui} เป็น ${after.eui} — ตรวจการติดตั้งเครื่องนี้ใหม่`);
+    before.eui=before.eui||after.eui;
+    set("boot","ok",`เวอร์ชัน ${after.fw}${after.prov?" · คีย์ LoRaWAN ยังอยู่":" · เครื่องยังไม่ได้ติดตั้งคีย์ (ใช้ขั้นตอนติดตั้งด้านบน)"}`);
+    await report(true);FWT=0;
+    $("#fwres").innerHTML=`<div class="fwdone">${ico("check")}<div><b>อัปเดตเป็นเวอร์ชัน ${esc(after.fw)} สำเร็จ</b><br><span class="mut">${cur?esc(cur.label)+" · ":""}ถอดสาย USB แล้วนำเครื่องไปติดตั้งได้ เครื่องจะเชื่อมต่อเครือข่ายใหม่เอง</span></div></div>`;
+    toast(`อัปเดตเฟิร์มแวร์เป็น ${after.fw} แล้ว`,"ok");
+  }catch(e){
+    const raw=e?.message||String(e),msg=e?.name==="NotFoundError"?"ไม่ได้เลือกพอร์ต":/Failed to open|already open|NetworkError/i.test(raw)?"เปิดพอร์ตไม่ได้ — ปิดโปรแกรมอื่นที่ใช้พอร์ตนี้อยู่ (Serial Monitor) แล้วลองใหม่"
+      :step==="chip"&&!/[\u0E00-\u0E7F]/.test(raw)?"เข้าโหมดอัปเดตไม่ได้ ("+raw+") — กดปุ่ม PRG ค้างไว้ แล้วกด RST หนึ่งครั้ง จากนั้นกดเริ่มอัปเดตใหม่"
+      :step==="write"&&!/[\u0E00-\u0E7F]/.test(raw)?"เขียนไม่สำเร็จ ("+raw+")":raw;
+    set(step,"bad",msg);bar.hidden=true;
+    if(step!=="usb"||port)await report(false,msg);
+    $("#fwres").innerHTML=`<div class="warn">${esc(msg)}${step==="write"?"<br>เครื่องยังเข้าโหมดอัปเดตได้ตามปกติ กด \"เริ่มอัปเดต\" อีกครั้งได้เลย":""}</div>`;
+  }finally{try{link&&await link.close()}catch{}try{transport&&await transport.disconnect()}catch{}go.disabled=false}
+}
+
 const loadInstall=guard(async()=>{
   if(role!=="admin"){$("#main").innerHTML='<div class="warn">เฉพาะผู้ดูแลระบบ</div>';return}
   const [st,ds]=await Promise.all([api("/provision/status"),api("/devices")]);if(page!=="install")return;
@@ -1340,7 +1457,9 @@ const loadInstall=guard(async()=>{
    <ol><li>เสียบเครื่อง Heltec ด้วยสาย USB (สายข้อมูล) เข้าคอมพิวเตอร์เครื่องนี้ ซึ่งอัปโหลดเฟิร์มแวร์แล้ว</li><li>ตั้งป้ายชื่อ กด "เริ่มติดตั้ง" แล้วเลือกพอร์ตของเครื่องในหน้าต่างที่เด้งขึ้น</li><li>รอจนครบทุกขั้นตอน แล้วพิมพ์ป้าย QR ติดกล่อง</li></ol>
    <div class="row">ป้ายชื่อเครื่อง <input id="plbl" value="${next}" maxlength="64"><button class="btn p" id="pgo" ${st.configured&&supported?"":"disabled"}>เริ่มติดตั้ง</button></div>
    <div id="psteps"></div><div id="pres"></div></div>
+   <div class="card" id="fwcard"></div>
    <p class="mut">คีย์ลับ (AppKey) สร้างที่เซิร์ฟเวอร์ ส่งให้หน้านี้ผ่าน HTTPS ครั้งเดียวเพื่อเขียนลงเครื่องผ่าน USB เท่านั้น ไม่เก็บในแดชบอร์ด ไม่แสดงบนจอ และไม่อยู่ใน audit log</p>`;
+  fwCard($("#fwcard"),ds);
   if(!$("#pgo"))return;
   $("#pgo").onclick=async()=>{
     const label=$("#plbl").value.trim();if(!label){toast("ใส่ป้ายชื่อก่อน");return}

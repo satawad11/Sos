@@ -33,3 +33,31 @@ jobs:
       - run: pip install platformio
       - run: pio run -e ${{ matrix.env }}
         working-directory: firmware
+      - name: keep the app image for the dashboard's USB updater
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: mkdir -p out && cp firmware/.pio/build/${{ matrix.env }}/firmware.bin out/${{ matrix.env }}.bin
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with: { name: "fw-${{ matrix.env }}", path: "out/${{ matrix.env }}.bin", retention-days: 7 }
+  # Publishes the latest firmware images to the `firmware-bin` branch (one orphan commit, force-pushed, so the
+  # branch never grows). The server's updater fetches that branch with the git access it already has
+  # (the repo is private) and the dashboard flashes the image over Web Serial — docs/FIRMWARE-UPDATE.md.
+  firmware-publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [firmware-build, firmware-host-test]
+    runs-on: ubuntu-24.04
+    permissions: { contents: write }
+    concurrency: { group: firmware-bin, cancel-in-progress: true }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { pattern: "fw-*", path: out, merge-multiple: true }
+      - run: python3 tools/fw_manifest.py out firmware/platformio.ini "$GITHUB_SHA"
+      - name: force-push out/ as the only commit of firmware-bin
+        run: |
+          cd out
+          git init -q -b firmware-bin
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A && git commit -qm "firmware for ${GITHUB_SHA::12}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" firmware-bin

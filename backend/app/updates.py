@@ -56,7 +56,7 @@ def state() -> dict:
 
 
 def request(action: str, by: str) -> dict:
-    if action not in ("check", "update"):
+    if action not in ("check", "update", "firmware"):
         raise UpdateError(400, "unknown action")
     if not installed():
         raise UpdateError(503, "ยังไม่ได้ติดตั้งตัวอัปเดตบนเซิร์ฟเวอร์ — รัน infra/scripts/setup-updater.sh (ดู docs/UPDATE.md)")
@@ -74,3 +74,25 @@ def request(action: str, by: str) -> dict:
     except OSError as e:
         raise UpdateError(503, f"เขียนคำขอไม่ได้ ({e.__class__.__name__}) — ตรวจสิทธิ์โฟลเดอร์ infra/update (ดู docs/UPDATE.md)")
     return req
+
+
+# ---------------- firmware images for the dashboard's USB updater (docs/FIRMWARE-UPDATE.md) ----------------
+# CI publishes them on the firmware-bin branch; the host updater (fw_sync) unpacks that branch to <update_dir>/firmware.
+FW_DIR = "firmware"
+
+
+def firmware() -> dict:
+    m = _read_json(os.path.join(FW_DIR, "manifest.json"))
+    if not m or not isinstance(m.get("builds"), list):
+        return {"available": False, "builds": []}
+    keep = ("env", "chip", "label", "version", "size", "sha256", "md5", "offset")
+    builds = [{k: b.get(k) for k in keep} for b in m["builds"]
+              if isinstance(b, dict) and firmware_path(str(b.get("env", ""))) and os.path.isfile(firmware_path(str(b["env"])))]
+    return {"available": bool(builds), "commit": str(m.get("commit", ""))[:12], "built_at": m.get("built_at"), "builds": builds}
+
+
+def firmware_path(env_name: str) -> str | None:
+    """Path of <env>.bin — env names are a fixed charset, so nothing outside the firmware folder can be named."""
+    if not env_name or len(env_name) > 40 or not all(c.isalnum() or c in "_-" for c in env_name):
+        return None
+    return _p(os.path.join(FW_DIR, env_name + ".bin"))
