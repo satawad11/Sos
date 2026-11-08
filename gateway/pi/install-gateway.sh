@@ -42,6 +42,8 @@ CFG=/boot/firmware/config.txt; [ -f "$CFG" ] || CFG=/boot/config.txt
 if ! grep -qE '^dtparam=spi=on' "$CFG"; then
   echo "dtparam=spi=on" >> "$CFG"; NEED_REBOOT=1
 fi
+# also when the line is there but this boot has not loaded it yet (e.g. an earlier run stopped before rebooting)
+[ -e /dev/spidev0.0 ] || NEED_REBOOT=1
 # do not let the Pi's own watchdog/serial console steal anything we need; enable hardware watchdog via systemd
 mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]\nRuntimeWatchdogSec=15\nRebootWatchdogSec=2min\n' > /etc/systemd/system.conf.d/10-watchdog.conf
