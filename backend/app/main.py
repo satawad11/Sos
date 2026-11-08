@@ -84,6 +84,13 @@ async def lifespan(app: FastAPI):
     pusher = PushSender(SessionLocal); pusher.start(); api._engine["push"] = pusher
     worker = MqttWorker(lambda dl: Engine(dl, LineNotifier(), lambda e: (hub.publish(e), pusher.on_event(e))))
     api._engine["engine"] = worker.engine
+
+    def _flush(eui: str):
+        from . import provision as prov
+        cs = prov.get_cs()
+        if cs.configured:
+            cs.flush_queue(eui)
+    worker.engine.flush_queue = _flush
     worker.start()
     stop = threading.Event()
     threading.Thread(target=escalation_loop, args=(worker.engine, stop), daemon=True).start()

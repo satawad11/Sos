@@ -48,6 +48,7 @@ class Engine:
         self.selftest = SelfTestScheduler()
         self.mqtt_ok: Callable[[], bool] = lambda: True      # main.py plugs in the MQTT worker's connection state
         self.gw_cmd_publish: Callable[[str, dict], bool] | None = None   # (gateway_id, signed command) -> sent?  set by the MQTT worker
+        self.flush_queue: Callable[[str], None] | None = None   # (dev_eui) -> drop ChirpStack's pending downlinks; set by main.py
 
     # ---------- helpers ----------
     def _event(self, db: Session, case: Case, kind: str, actor="system", **detail):
@@ -235,6 +236,7 @@ class Engine:
         if case and case.state == "new" and case.alert_id == up.alert_id:
             case.state = "cancelled"; case.next_escalation_at = None
             self._drop_msg(db, case)
+            self._fresh_queue(case)
             self._event(db, case, "cancelled_by_device")
             db.commit(); self._pub(case, "case_update")
             return "cancelled"
@@ -321,6 +323,16 @@ class Engine:
             self._event(db, case, "message_dropped", seq=case.msg_pending["seq"])
             case.msg_pending = None
 
+    def _fresh_queue(self, case: Case):
+        """Before a state-change ACK: throw away stale downlinks (re-sent ACKs/messages of this and older cases) so the
+        new ACK is the next thing the device gets. A still-pending message is queued again right after the ACK."""
+        if self.flush_queue is None:
+            return
+        try:
+            self.flush_queue(case.device.dev_eui)
+        except Exception as e:
+            log.warning("downlink queue flush failed for %s: %s", case.device.dev_eui, e)
+
     def _send_ack(self, db, case, dev, res):
         self.downlink(dev.dev_eui, codec.FPORT_ACK_L2, codec.encode_ack_l2(case.alert_id, res))
         case.ack_result_sent, case.ack_sent_at = res, utcnow()
@@ -340,7 +352,10 @@ class Engine:
         case.state, case.accepted_at, case.accepted_by = "accepted", utcnow(), actor
         case.next_escalation_at = None
         self._event(db, case, "accepted", actor=actor)
+        self._fresh_queue(case)
         self._send_ack(db, case, case.device, self._result_for(case))
+        if case.msg_pending:
+            self._queue_msg(case, case.device, case.msg_pending)
         db.commit(); self._pub(case, "case_update")
         return case
 
@@ -355,6 +370,7 @@ class Engine:
         if note: case.note = note
         self._drop_msg(db, case)
         self._event(db, case, "closed", actor=actor, reason=reason, note=note, skipped_accept=was_new)
+        self._fresh_queue(case)
         self._send_ack(db, case, case.device, self._result_for(case))
         db.commit(); self._pub(case, "case_update")
         return case

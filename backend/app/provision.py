@@ -116,6 +116,10 @@ class ChirpStackRest:
         self._call("PUT", f"/api/devices/{dev_eui}", json={"device": dev})
         return True
 
+    def flush_queue(self, dev_eui: str) -> None:
+        """Drop every downlink still waiting in ChirpStack for this device (stale ACK/MSG copies of old cases)."""
+        self._call("DELETE", f"/api/devices/{dev_eui}/queue")
+
     def flush_dev_nonces(self, dev_eui: str) -> None:
         """Forget the OTAA DevNonces ChirpStack has seen for this device (it ignores a JoinRequest that reuses one).
         Needed once after a device lost its saved DevNonce counter (firmware <= 0.2 bug, NVS erase, re-flash)."""

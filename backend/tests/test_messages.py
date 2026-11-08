@@ -168,3 +168,22 @@ def test_repeat_press_on_accepted_case_reminds_people(env_, now):
         assert eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5)) == "repeat"
         assert len(notif.sent) == n
         assert db.query(Case).count() == 1
+
+
+def test_state_change_flushes_stale_downlinks_then_acks(env_, now):
+    eng, downs, *_ = env_
+    flushed = []
+    eng.flush_queue = lambda eui: (flushed.append(eui), downs.clear())
+    with SessionLocal() as db:
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT))
+        eng.send_message(db, 1, "s", 3)
+        eng.accept(db, 1, "s")
+        assert flushed == [EUI]
+        assert [d[1] for d in downs] == [10, 12]          # ACK first, the pending message queued again after it
+        eng.close(db, 1, "s")
+        assert flushed == [EUI, EUI] and downs[-1] == (EUI, 10, bytes([0x16, 5, 2]))
+    eng.flush_queue = lambda eui: (_ for _ in ()).throw(RuntimeError("chirpstack down"))
+    with SessionLocal() as db:                        # a failing flush never blocks the ACK
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=7))
+        eng.close(db, 2, "s")
+        assert downs[-1][2] == bytes([0x16, 7, 2])

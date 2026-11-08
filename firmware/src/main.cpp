@@ -1,4 +1,4 @@
-// Patient SOS device firmware v0.5 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
+// Patient SOS device firmware v0.6 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
 // NOT hardware-tested yet: follow firmware/README.md bench tests before any patient use.
 #include <Arduino.h>
 #include <Preferences.h>
@@ -237,8 +237,11 @@ int16_t sendFrame(MsgType t, uint8_t alertId, uint8_t port, bool confirmed, uint
   node.setDeviceStatus(pct == 255 ? 255 : (uint8_t)map(pct, 0, 100, 1, 254));
   LoRaWANEvent_t up, dn; memset(&dn, 0, sizeof dn);
   *downLen = 0;
+  memset(&up, 0, sizeof up);
   int16_t s = node.sendReceive(p, sizeof p, port, down, downLen, confirmed, &up, &dn);
   *confirming = (s > 0) && dn.confirming;
+  Serial.printf("[tx] type=%u port=%u state=%d dr=%u freq=%.1f pwr=%d fcnt=%lu down=%u/%u ack=%d\n", t, port, s, up.datarate,
+                up.freq, up.power, (unsigned long)up.fCnt, (s > 0) ? dn.fPort : 0, (unsigned)*downLen, *confirming);
   g_downPort = (s > 0) ? dn.fPort : 0;
   return s;
 }
@@ -346,6 +349,14 @@ bool     g_repress = false;     // patient pressed again after acceptance -> res
 bool     g_releasedSinceAlert = false;   // button let go at least once since this alert began (cancel needs a fresh press)
 uint32_t nextHeartbeat = 0;
 
+const char* radioErr(int16_t s) {
+  switch (s) {
+    case -1101: return "not joined"; case -1104: return "no channel"; case -1108: return "duty cycle wait";
+    case -1114: return "dwell time (data rate too slow)"; case -4: return "packet too long"; case -5: return "TX timeout";
+    case -2: return "radio chip not found"; case -16: return "SPI error"; default: return "see RadioLib TypeDef.h";
+  }
+}
+
 void endAlert(UiMode m) { phase = P_IDLE; setUi(m); doneAt = millis(); }
 
 void doAlertStep() {
@@ -363,7 +374,11 @@ void doAlertStep() {
 #endif
     } else {
       nextTry = millis() + min<uint32_t>(3000UL << min<uint8_t>(tries, 4), 30000UL);   // backoff 6,12,24,30 s…
+      if (s < 0) Serial.printf("[alert] radio refused to send: %d (%s)\n", s, radioErr(s));
       if (millis() - alertStart > L1_TIMEOUT_MS && g_ui != UI_FAIL) setUi(UI_FAIL);
+      if (millis() - alertStart > POLL_MAX_MS) {     // 30 min of trying: stop, keep NOT SENT on screen, accept new presses
+        Serial.println("[alert] giving up after 30 min"); endAlert(UI_FAIL);
+      }
     }
     return;
   }
@@ -410,8 +425,10 @@ void startAlert() {
 }
 
 void doCancel() {
-  uint8_t down[8]; size_t dl; bool conf;
-  sendFrame(T_CANCEL, curAlert, FPORT_EVENT, true, 0, down, &dl, &conf);
+  setUi(UI_CANCELLED);                              // show it at once; the radio call below takes a few seconds
+  uint8_t down[32]; size_t dl = 0; bool conf = false;
+  int16_t s = sendFrame(T_CANCEL, curAlert, FPORT_EVENT, true, 0, down, &dl, &conf);
+  Serial.printf("[cancel] sent state=%d L1=%d\n", s, conf);
   endAlert(UI_CANCELLED);
 }
 
@@ -480,16 +497,22 @@ void loop() {
   // ---- button logic ----
   if (g_pressEvent) {
     g_pressEvent = false;
+    Serial.printf("[btn] hold (phase=%d ui=%d)\n", phase, g_ui);
     if (phase == P_IDLE) startAlert();                 // hold reached hold_ms
     else if (phase == P_ALERT && g_accepted) g_repress = true;
   }
   // Cancel needs a NEW press: the button must have been released after the alert started (fw <= 0.3 measured from the
   // alert's own press, so simply holding on cancelled the emergency). Only while nobody has accepted, in the first minute.
   if (phase == P_ALERT && g_releaseEvent) g_releasedSinceAlert = true;
-  bool cancelOk = phase == P_ALERT && l1Ok && !g_accepted && g_releasedSinceAlert && millis() - alertStart < CANCEL_WINDOW_MS
-                  && (g_ui == UI_SENT_WAIT || g_ui == UI_AFTER_HOURS || g_ui == UI_MSG);
+  // - not delivered yet (SENDING / NOT SENT): cancel any time = stop retrying (+ a CANCEL in case one try got through)
+  // - delivered (red steady / AFTER HOURS / message): cancel during the first minute, until somebody accepts
+  bool cancelOk = phase == P_ALERT && !g_accepted && g_releasedSinceAlert &&
+                  (!l1Ok || (millis() - alertStart < CANCEL_WINDOW_MS &&
+                             (g_ui == UI_SENT_WAIT || g_ui == UI_AFTER_HOURS || g_ui == UI_MSG)));
   g_cancelArmed = cancelOk;
-  if (cancelOk && g_buttonDown && millis() - g_buttonDownAt >= CANCEL_HOLD_MS) { g_cancelArmed = false; doCancel(); }
+  if (cancelOk && g_buttonDown && millis() - g_buttonDownAt >= CANCEL_HOLD_MS) {
+    g_cancelArmed = false; Serial.printf("[cancel] by patient (delivered=%d)\n", l1Ok); doCancel();
+  }
   if (phase == P_IDLE && g_shortPresses >= 3 && millis() - g_lastShortAt < 1500) { g_shortPresses = 0; doTest(); }
   g_releaseEvent = false;
 
