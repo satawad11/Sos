@@ -1144,7 +1144,7 @@ def test_device_battery_hysteresis_and_mains_grace(env_):
         eng.dev_watch.tick(db, t0 + timedelta(minutes=13))
         assert len(notif.system) == 4 and all(m[1].startswith("✅") for m in notif.system[2:])
         assert {"แบตเตอรี่กลับมาปกติ", "ไฟบ้านกลับมาแล้ว"} == {k for m in notif.system[2:] for k in ("แบตเตอรี่กลับมาปกติ", "ไฟบ้านกลับมาแล้ว") if k in m[1]}
-        assert _dev(db).watch is None
+        assert set(_dev(db).watch) == {"_cool"}           # only the 30-min flicker window remains (test_device_alerts.py)
 
 
 def test_device_short_mains_blip_is_silent_and_never_seen_is_silent(env_):

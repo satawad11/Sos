@@ -560,8 +560,16 @@ async function onEvt(m){
     toast(`ผู้ป่วยกดปุ่มซ้ำ (เคส #${id})`,"warn");if(audioOn&&!SND.timer)siren()}
   else if(m.type==="case_test"){beep();notify({kind:"info",title:"ได้รับสัญญาณทดสอบปุ่ม",go:{page:"selftest"}})}
   else if(m.type==="gateway_state")notify({kind:m.state==="offline"?"warn":"ok",title:m.state==="offline"?`เกตเวย์ ${m.gateway_id} ขาดการเชื่อมต่อ`:`เกตเวย์ ${m.gateway_id} กลับมาออนไลน์`,go:{page:"gateways"}});
-  else if(m.type==="device_state"){const k=Object.keys(DVI).find(k=>(m.issue||"").startsWith("device_"+k));if(!k)return;const ok=/_ok$/.test(m.issue);
-    notify({kind:ok?"ok":"warn",title:`อุปกรณ์ ${m.dev_eui}: ${DVI[k]}${ok?" — กลับมาปกติ":""}`,go:{page:"devices"}})}}
+  else if(m.type==="device_state")devNotify(m)}
+// one bell entry per device and issue: a reminder only refreshes its time, a recovery turns it into "back to normal"
+function devNotify(m){const is=m.issue||"",k=Object.keys(DVI).find(k=>is.startsWith("device_"+k));if(!k)return;
+  const ok=/_ok$/.test(is),rep=/_repeat$/.test(is),crit=/_critical$/.test(is),id=`d:${m.dev_eui}:${k}`,who=m.label||m.dev_eui;
+  const a=NC.get(),i=a.findIndex(x=>x.id===id),old=i>=0?a.splice(i,1)[0]:null;
+  if(rep&&old){a.unshift({...old,at:new Date().toISOString()});NC.set(a);ncBadge();return}
+  const title=ok?`${who}: ${DVI[k]} — กลับมาปกติแล้ว`:crit?`${who}: แบตเตอรี่วิกฤต`:`${who}: ${DVI[k]}`;
+  a.unshift({id,kind:ok?"ok":"warn",title,body:ok?"":(k==="offline"?"ปุ่มอาจแจ้งเหตุไม่ได้ โปรดโทรตรวจสอบ":k==="mains"?"ปุ่มใช้แบตสำรองอยู่":"โปรดเปลี่ยนหรือชาร์จแบต"),
+    at:new Date().toISOString(),read:ok&&old?old.read:false,go:{page:"devices"}});
+  NC.set(a);ncBadge();if($("#ncp")&&!$("#ncp").hidden)ncDraw()}
 async function ncSeed(){if(ncSeed.done)return;ncSeed.done=true;   // open cases that arrived while nobody was signed in
   try{const cs=await api("/cases?state=new");alarmSet(cs.filter(c=>!c.is_test).map(c=>c.id));cs.filter(c=>!c.is_test).forEach(c=>notify({id:`c${c.id}n`,kind:"sos",title:`เคสฉุกเฉินใหม่ #${c.id}`,body:c.patient?`${c.patient.full_name} · ${c.patient.address||""}`:"",go:{case:c.id},at:c.created_at}))}catch(e){}}
 
@@ -1124,7 +1132,9 @@ const loadSettings=guard(async()=>{
    <div class="card">${head("chip","แจ้งเตือนปุ่มผู้ป่วย","เตือนเมื่อปุ่มในบ้านผู้ป่วยเงียบหาย แบตเตอรี่ต่ำ หรือไฟบ้านดับ")}
     ${fld("เปิดใช้งาน","ส่ง LINE ถึงผู้รับแจ้งเตือนระบบ (รายชื่อด้านบน)",`<label class="sw"><input type="checkbox" id="dae" ${da.enabled?"checked":""} ${dis}><i></i><span id="daet">${da.enabled?"เปิด":"ปิด"}</span></label>`)}
     ${fld("เตือนเมื่อแบตต่ำกว่า","ช่วง 5–50%",num("dab",da.battery_low_pct,5,50,"%"))}
-    ${fld("เตือนเมื่อไฟบ้านดับนานกว่า","ไฟกระพริบสั้น ๆ จะไม่เตือน (ช่วง 1–240 นาที)",num("dam",da.mains_grace_min,1,240,"นาที"))}</div>
+    ${fld("เตือนเมื่อไฟบ้านดับนานกว่า","ไฟกระพริบสั้น ๆ จะไม่เตือน และถ้าไฟติด ๆ ดับ ๆ ภายใน 30 นาทีนับเป็นครั้งเดียว (ช่วง 1–240 นาที)",num("dam",da.mains_grace_min,1,240,"นาที"))}
+    ${fld("เตือนซ้ำเรื่องแบต/ไฟดับ","ปกติแจ้งครั้งเดียวต่อเหตุการณ์ (แบตแจ้งอีกครั้งเมื่อต่ำกว่า 10%) · ปุ่มเงียบหายยังเตือนซ้ำตาม 'เตือนซ้ำทุก' ด้านบน",`${num("dar",da.issue_repeat_h??0,0,72,"ชม.")}${chips("dar",[[0,"ไม่เตือนซ้ำ"],[6,"6 ชม."],[12,"12 ชม."],[24,"วันละครั้ง"]])}`)}
+    ${fld("งดส่งตอนกลางคืน","เรื่องแบต/ไฟดับช่วง 21:00–07:00 รอส่งตอนเช้า ถ้าหายก่อนเช้าจะไม่ส่งเลย · ปุ่มเงียบหายยังส่งทันที",`<label class="sw"><input type="checkbox" id="daq" ${da.quiet_night??true?"checked":""} ${dis}><i></i><span id="daqt">${da.quiet_night??true?"เปิด":"ปิด"}</span></label>`)}</div>
   </div>
   <div class="sec" data-sec="device" ${setSec==="device"?"":"hidden"}>
    <div class="card">${head("chip","ค่าเริ่มต้นของปุ่มผู้ป่วย","ส่งลงปุ่มทุกเครื่องอัตโนมัติผ่านรอบ heartbeat · เฉพาะบางเครื่องตั้งแยกได้ที่เมนูอุปกรณ์")}
@@ -1168,7 +1178,7 @@ const loadSettings=guard(async()=>{
     office_hours:{days:[...document.querySelectorAll(".dy:checked")].map(x=>+x.value),start:$v("st"),end:$v("en")},
     escalation:{escalate_after_s:N("ea"),overdue_after_s:N("ov"),final_caregiver_id:$v("fin")?+$v("fin"):null,max_rounds:1},
     system_alert:{caregiver_ids:[...document.querySelectorAll(".sa:checked")].map(x=>+x.value),repeat_min:N("sar")},
-    device_alert:{enabled:$("#dae").checked,battery_low_pct:N("dab"),mains_grace_min:N("dam")},
+    device_alert:{enabled:$("#dae").checked,battery_low_pct:N("dab"),mains_grace_min:N("dam"),issue_repeat_h:N("dar"),quiet_night:$("#daq").checked},
     device_defaults:{heartbeat_min:N("hb"),poll_s:N("po"),buzzer:N("bz"),hold_ms:Math.round(N("ho")*1000)},
     offline:{device_offline_min:N("do"),gateway_offline_min:N("go")}});
   const NAMES={office_hours:"เวลาทำการ",escalation:"การแจ้งต่อ",system_alert:"ผู้รับแจ้งเตือน",device_alert:"แจ้งเตือนปุ่มผู้ป่วย",device_defaults:"ค่าเริ่มต้นปุ่ม",offline:"ตรวจจับออฟไลน์"};
@@ -1179,7 +1189,7 @@ const loadSettings=guard(async()=>{
   const hints=()=>{$("#eah").textContent="= "+human(N("ea"));$("#ovh").textContent="= "+human(N("ov"))+(N("ov")<=N("ea")?" · ควรมากกว่าเวลาแจ้งต่อ":"");
     $("#sarh").textContent=N("sar")===0?"ไม่เตือนซ้ำ":"= ทุก "+humanMin(N("sar"));
     $("#doh").textContent="= "+humanMin(N("do"))+(N("do")<N("hb")*2?` · ควรอย่างน้อย ${N("hb")*2} นาที (2 เท่าของรอบรายงาน)`:"");
-    $("#daet").textContent=$("#dae").checked?"เปิด":"ปิด"};
+    $("#daet").textContent=$("#dae").checked?"เปิด":"ปิด";$("#daqt").textContent=$("#daq").checked?"เปิด":"ปิด"};
   const refresh=()=>{hints();const ch=changed();$("#sb").hidden=!ch.length;$("#sbn").textContent=ch.length;$("#sbl").textContent=ch.map(k=>NAMES[k]).join(", ");
     document.querySelectorAll("#pills button").forEach(b=>b.classList.toggle("dirty",ch.some(k=>SECOF[k]===b.dataset.s)))};
   const validate=()=>{let bad=null;document.querySelectorAll("#sr input[type=number]").forEach(i=>{const box=i.closest(".inp");const v=i.value===""?NaN:+i.value;const ok=!isNaN(v)&&v>=+i.min&&v<=+i.max;box.classList.toggle("bad3",!ok);

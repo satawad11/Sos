@@ -977,7 +977,11 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
             if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi: raise HTTPException(422, f"{k} must be {lo}-{hi}")
             return v
         if not isinstance(value.get("enabled"), bool): raise HTTPException(422, "enabled must be true/false")
-        value = {"enabled": value["enabled"], "battery_low_pct": _i("battery_low_pct", 5, 50), "mains_grace_min": _i("mains_grace_min", 1, 240)}
+        cur = settings_store.get(db, "device_alert")
+        value = {**{k: cur[k] for k in ("issue_repeat_h", "quiet_night")}, **value}       # older clients send only the first three
+        if not isinstance(value.get("quiet_night"), bool): raise HTTPException(422, "quiet_night must be true/false")
+        value = {"enabled": value["enabled"], "battery_low_pct": _i("battery_low_pct", 5, 50), "mains_grace_min": _i("mains_grace_min", 1, 240),
+                 "issue_repeat_h": _i("issue_repeat_h", 0, 72), "quiet_night": value["quiet_night"]}
     if key == "geo":
         out = {}
         cur = settings_store.get(db, "geo")
