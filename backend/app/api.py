@@ -1501,6 +1501,19 @@ def prov_confirm(eui: str, b: ProvConfirm, db: Session = Depends(get_db), u=Depe
     return {"ok": True, "dev_eui": d.dev_eui, "label": d.label}
 
 
+@router.post("/devices/{did}/flush-nonces")
+def flush_nonces(did: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    """Device shows NO NETWORK after a reboot/re-flash because ChirpStack ignores reused DevNonces: clear them."""
+    d = db.get(Device, did)
+    if not d: raise HTTPException(404)
+    cs = prov.get_cs()
+    if not cs.configured: raise HTTPException(409, "ChirpStack API ยังไม่ได้ตั้งค่า")
+    try: cs.flush_dev_nonces(d.dev_eui)
+    except prov.ProvisionError as e: raise HTTPException(502, str(e))
+    audit(db, u.username, "device_flush_nonces", d.dev_eui); db.commit()
+    return {"ok": True}
+
+
 @router.post("/provision/{eui}/abort")
 def prov_abort(eui: str, db: Session = Depends(get_db), u=Depends(admin_only)):
     d = _fresh_device(db, eui)

@@ -1,4 +1,4 @@
-// Patient SOS device firmware v0.2 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
+// Patient SOS device firmware v0.3 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
 // NOT hardware-tested yet: follow firmware/README.md bench tests before any patient use.
 #include <Arduino.h>
 #include <Preferences.h>
@@ -253,11 +253,16 @@ void applyDownlink(const uint8_t* d, size_t n, uint8_t port, uint8_t alertId, in
 
 bool joinNetwork() {
   setUi(UI_JOINING);
+  // ORDER MATTERS: beginOTAA() resets the nonce state, and setBufferNonces() only accepts a buffer whose key checksum
+  // matches the keys given to beginOTAA(). Restoring first (fw <= 0.2) silently discarded the saved counter on every
+  // boot -> DevNonce restarted at 1 -> ChirpStack ignored the already-used DevNonces -> "NO NETWORK" after a reboot.
+  node.beginOTAA(g_joinEui, g_devEui, g_appKey, g_appKey);   // LoRaWAN 1.0.x: NwkKey = AppKey
   uint8_t nonces[RADIOLIB_LORAWAN_NONCES_BUF_SIZE];
   if (prefs.getBytesLength("nonces") == RADIOLIB_LORAWAN_NONCES_BUF_SIZE) {
-    prefs.getBytes("nonces", nonces, sizeof nonces); node.setBufferNonces(nonces);   // keeps DevNonce counter across reboots
+    prefs.getBytes("nonces", nonces, sizeof nonces);
+    int16_t r = node.setBufferNonces(nonces);                // keeps the DevNonce counter across reboots
+    if (r != RADIOLIB_ERR_NONE) Serial.printf("[join] saved nonces not used (%d)\n", r);
   }
-  node.beginOTAA(g_joinEui, g_devEui, g_appKey, g_appKey);   // LoRaWAN 1.0.x: NwkKey = AppKey
   int16_t s = node.activateOTAA();
   if (s == RADIOLIB_LORAWAN_NEW_SESSION || s == RADIOLIB_LORAWAN_SESSION_RESTORED) {
     prefs.putBytes("nonces", node.getBufferNonces(), RADIOLIB_LORAWAN_NONCES_BUF_SIZE);

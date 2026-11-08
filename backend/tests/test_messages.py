@@ -117,3 +117,16 @@ def test_api_message(env_, now):
     assert r.json()["msg_pending"]["lines"] == ["HELP COMING", "ETA 5 MIN"]
     assert client.post("/api/cases/1/message", json={"code": 77}, headers=h).status_code == 422
     assert client.post("/api/cases/1/message", json={"code": 3}, headers=login(client, "viewer")).status_code == 403
+
+
+def test_flush_nonces_endpoint(env_, monkeypatch):
+    from app import provision as prov
+    calls = []
+    class CS:
+        configured = True
+        def flush_dev_nonces(self, eui): calls.append(eui)
+    monkeypatch.setattr(prov, "get_cs", lambda: CS())
+    *_, client, ids = env_
+    assert client.post("/api/devices/1/flush-nonces", headers=login(client)).status_code == 200
+    assert calls == [EUI]
+    assert client.post("/api/devices/1/flush-nonces", headers=login(client, "viewer")).status_code == 403
