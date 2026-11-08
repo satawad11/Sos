@@ -91,6 +91,14 @@ enum : uint8_t { F_MAINS_OK = 1, F_BATT_LOW = 2, F_CHARGING = 4, F_TEST_MODE = 8
 #define ACCEPTED_POLL_MIN_S  30          // after acceptance keep polling (slower) so staff messages can arrive
 #define DONE_DISPLAY_MS      (5UL*60000)
 #define BATT_LOW_PCT         20
+// ---- Radio link policy (fw 0.6 field finding) ----
+// ChirpStack's ADR moved the device to DR5 (SF7) at 10 dBm after the first uplinks; from then on the gateway heard
+// nothing. A life-safety button at a fixed home does not need ADR: keep a fixed, robust data rate at full power.
+//   DR3 = SF9 (~0.2 s on air), DR2 = SF10 (~0.4 s, more range, max under the AS923 400 ms dwell limit)
+#ifndef UPLINK_DR
+  #define UPLINK_DR 3
+#endif
+#define UPLINK_POWER_DBM     16          // AS923 max EIRP in RadioLib's band table
 #define JOIN_RETRY_MIN_MS    10000UL
 #define JOIN_RETRY_MAX_MS    300000UL
 

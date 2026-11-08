@@ -1,4 +1,4 @@
-// Patient SOS device firmware v0.6 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
+// Patient SOS device firmware v0.7 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
 // NOT hardware-tested yet: follow firmware/README.md bench tests before any patient use.
 #include <Arduino.h>
 #include <Preferences.h>
@@ -263,6 +263,14 @@ void applyDownlink(const uint8_t* d, size_t n, uint8_t port, uint8_t alertId, in
   }
 }
 
+// No ADR: the FCtrl ADR bit tells ChirpStack not to change our data rate / power. Re-applied after every join and
+// before alert retries, so a LinkADRReq that slipped through can never leave the button deaf again.
+void applyLinkPolicy() {
+  node.setADR(false);
+  int16_t a = node.setDatarate(UPLINK_DR), b = node.setTxPower(UPLINK_POWER_DBM);
+  if (a || b) Serial.printf("[link] setDatarate=%d setTxPower=%d\n", a, b);
+}
+
 bool joinNetwork() {
   setUi(UI_JOINING);
   // ORDER MATTERS: beginOTAA() resets the nonce state, and setBufferNonces() only accepts a buffer whose key checksum
@@ -278,7 +286,7 @@ bool joinNetwork() {
   int16_t s = node.activateOTAA();
   if (s == RADIOLIB_LORAWAN_NEW_SESSION || s == RADIOLIB_LORAWAN_SESSION_RESTORED) {
     prefs.putBytes("nonces", node.getBufferNonces(), RADIOLIB_LORAWAN_NONCES_BUF_SIZE);
-    node.setADR(true);
+    applyLinkPolicy();
     g_joined = true; return true;
   }
   Serial.printf("[join] failed %d\n", s);
@@ -364,6 +372,7 @@ void doAlertStep() {
   uint8_t down[32]; size_t dl = 0; bool conf = false; int ack = 0;
   if (!l1Ok) {
     if (now < nextTry) return;
+    if (tries >= 2) applyLinkPolicy();             // no L1 yet: make sure we are on the robust DR / full power
     int16_t s = sendFrame(T_ALERT, curAlert, FPORT_EVENT, true, 0, down, &dl, &conf);
     Serial.printf("[alert] try=%u state=%d L1=%d\n", tries, s, conf);
     tries++;
