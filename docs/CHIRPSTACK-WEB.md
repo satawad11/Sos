@@ -26,8 +26,9 @@
 ## 2. เปิดหน้า ChirpStack ผ่านโดเมน
 
 1. **DNS:** เพิ่ม A record `lns.dmtc.ac.th` → IP เดียวกับ `sos.dmtc.ac.th` (เช่น `202.29.228.8`) — พอร์ต 80/443 forward มาที่เครื่องเดียวกันอยู่แล้ว
-   ถ้าใช้ Cloudflare ต้องตั้งเป็น **DNS only (เมฆสีเทา)** — ถ้าเป็นเมฆสีส้ม เซิร์ฟเวอร์จะเห็นแต่ IP ของ Cloudflare
-   แล้วตอบ 403 ทุกคน (ข้อความ `Forbidden: 172.6x.x.x` / `104.x.x.x`)
+   ใช้ Cloudflare แบบเมฆสีส้ม (Proxy) หรือสีเทา (DNS only) ก็ได้: Caddy เชื่อ IP ผู้ใช้จาก header `CF-Connecting-IP`
+   เฉพาะคำขอที่มาจาก IP ของ Cloudflare จริง (`trusted_proxies` ใน `infra/caddy/Caddyfile`) — แบบสีเทาง่ายกว่าและไม่ติด timeout ของ Cloudflare
+   ถ้าเคยเห็น `Forbidden: 172.6x.x.x` / `162.158.x.x` (IP ของ Cloudflare) → อัปเดตระบบแล้วรันสคริปต์ข้อ 2 อีกครั้ง
 2. บนเซิร์ฟเวอร์ (CT100):
    ```bash
    cd /opt/sos/infra
