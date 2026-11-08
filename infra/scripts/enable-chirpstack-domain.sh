@@ -58,7 +58,9 @@ $DOM {
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options nosniff
-		Referrer-Policy no-referrer
+		# not no-referrer: ChirpStack's gateway map loads OpenStreetMap tiles, and OSM blocks tile requests without a
+		# Referer ("Access blocked"). Cross-site requests get only the origin (https://lns...), never a path.
+		Referrer-Policy strict-origin-when-cross-origin
 	}
 	reverse_proxy chirpstack:8080 {
 		flush_interval -1
