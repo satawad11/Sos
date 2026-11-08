@@ -520,7 +520,9 @@ def devices(db: Session = Depends(get_db), u=Depends(current_user)):
                    "home_distance_m": home, "away": home is not None and home > gcfg["home_radius_m"],
                    "url": geo.maps_url(d.loc_lat, d.loc_lon)}
         cfg = settings_store.effective_device_cfg(db, d)
-        out.append({**settings_store.device_link(db, d, now, cfg, off), "loc": loc, "config": cfg, "config_override": d.config_override or {},
+        home = ({"lat": d.patient.lat, "lon": d.patient.lon}
+                if u.role != "viewer" and d.patient and d.patient.lat is not None and d.patient.lon is not None else None)
+        out.append({**settings_store.device_link(db, d, now, cfg, off), "loc": loc, "home": home, "config": cfg, "config_override": d.config_override or {},
                     "config_pending": pending, "config_ver": d.config_ver, "config_reported_ver": d.reported_config_ver,
                     "config_applied_at": iso(d.config_applied_at), "config_changed_at": iso(d.config_changed_at),
                     "id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,

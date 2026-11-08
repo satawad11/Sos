@@ -494,6 +494,10 @@ tr.seen td{animation:seen 2.4s ease-out}
 .bindq ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;color:var(--ink)}
 dialog.dlg:has(.bindq){width:min(560px,calc(100vw - 32px))}
 @media(max-width:560px){.bindq{flex-direction:column;align-items:flex-start}}
+
+/* last-known values of a silent button */
+td.lv small{display:none}
+tr.stale td.lv{color:var(--mut)}tr.stale td.lv small{display:block;font-size:12px;color:var(--mut)}
 </style></head>
 <body>
 <div id="app"></div><div id="toast" aria-live="polite"></div>
@@ -641,7 +645,8 @@ function linkNow(d){if(!d.last_seen||!d.late_at)return "never";const t=Date.now(
 function linkBadge(d){const [t,c]=LINK[linkNow(d)];
   return `<span class="lk ${c}" data-seen="${esc(d.last_seen||"")}" data-late="${esc(d.late_at||"")}" data-off="${esc(d.off_at||"")}" title="${d.hb_min?`รายงานทุก ${d.hb_min} นาที`:""}${d.last_seen?" · ส่งล่าสุด "+fmt(d.last_seen):""}"><i></i><span>${t}</span></span>`}
 function linkRepaint(){document.querySelectorAll(".lk[data-late]").forEach(el=>{const [t,c]=LINK[linkNow({last_seen:el.dataset.seen,late_at:el.dataset.late,off_at:el.dataset.off})];
-    if(!el.classList.contains(c)){el.className="lk "+c;el.querySelector("span").textContent=t}});
+    if(!el.classList.contains(c)){el.className="lk "+c;el.querySelector("span").textContent=t}
+    el.closest("tr")?.classList.toggle("stale",c!=="lk-ok")});
   document.querySelectorAll("[data-ago]").forEach(el=>{if(el.dataset.ago)el.textContent=ago(el.dataset.ago)})}
 setInterval(linkRepaint,30000);
 let seenFlash=0;
@@ -1050,8 +1055,9 @@ async function gwRemote(g){
 const loadDevices=guard(async()=>{
   const [ds,ps,aiOk]=await Promise.all([api("/devices"),api("/patients"),aiReady()]);if(page!=="devices")return;
   const LC=["ready","active","repair","retired","lost"];
-  $("#main").innerHTML=`${aiOk&&canEdit()&&ds.length?`<div class="card"><div class="row">${aiBtn("devices","","AI วิเคราะห์อุปกรณ์ทั้งหมด")}<span class="mut">ให้ AI ช่วยดูแบตเตอรี่ สัญญาณ และเครื่องที่เงียบ (ไม่ส่งชื่อผู้ป่วย/รหัสเครื่อง)</span></div><div data-aibox="devices:"></div></div>`:""}${canEdit()?`<div class="card"><h3>เพิ่มอุปกรณ์</h3><div class="row"><input id="ndu" placeholder="DevEUI 16 หลัก" size="20" maxlength="23"><input id="ndl" placeholder="ป้าย เช่น บ้านลุงสม"><button class="btn p" id="nda">เพิ่ม</button></div><p class="mut">สำหรับลงทะเบียนเครื่องที่โปรแกรมไว้แล้ว — ถ้าเป็นเครื่องใหม่ ใช้เมนู "ติดตั้งอุปกรณ์" (ผู้ดูแลระบบ) จะง่ายกว่า</p></div>`:""}<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>ตำแหน่ง GPS</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr data-rid="${d.id}"><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}<br>${linkBadge(d)}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${d.last_seen?`<span data-ago="${esc(d.last_seen)}">${ago(d.last_seen)}</span><div class="mut" style="font-size:12.5px">${fmt(d.last_seen)}</div>`:"-"}</td><td>${locCell(d.loc)}</td><td>${esc(d.fw)}${fwBadge(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
+  $("#main").innerHTML=`${aiOk&&canEdit()&&ds.length?`<div class="card"><div class="row">${aiBtn("devices","","AI วิเคราะห์อุปกรณ์ทั้งหมด")}<span class="mut">ให้ AI ช่วยดูแบตเตอรี่ สัญญาณ และเครื่องที่เงียบ (ไม่ส่งชื่อผู้ป่วย/รหัสเครื่อง)</span></div><div data-aibox="devices:"></div></div>`:""}${canEdit()?`<div class="card"><h3>เพิ่มอุปกรณ์</h3><div class="row"><input id="ndu" placeholder="DevEUI 16 หลัก" size="20" maxlength="23"><input id="ndl" placeholder="ป้าย เช่น บ้านลุงสม"><button class="btn p" id="nda">เพิ่ม</button></div><p class="mut">สำหรับลงทะเบียนเครื่องที่โปรแกรมไว้แล้ว — ถ้าเป็นเครื่องใหม่ ใช้เมนู "ติดตั้งอุปกรณ์" (ผู้ดูแลระบบ) จะง่ายกว่า</p></div>`:""}<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th title="พิกัดจาก GPS ของปุ่ม ถ้ายังไม่มีจะแสดงตำแหน่งบ้านที่ปักเอง">ตำแหน่ง</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr data-rid="${d.id}" class="${linkNow(d)==="ok"?"":"stale"}"><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}<br>${linkBadge(d)}</td><td>${esc(d.patient||"-")}</td><td class="lv">${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}<small>ค่าล่าสุด</small></td><td class="lv">${d.rssi??"-"} dBm / ${d.snr??"-"}<small>ค่าล่าสุด</small></td><td>${d.last_seen?`<span data-ago="${esc(d.last_seen)}">${ago(d.last_seen)}</span><div class="mut" style="font-size:12.5px">${fmt(d.last_seen)}</div>`:"-"}</td><td>${devLocCell(d)}</td><td>${esc(d.fw)}${fwBadge(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
   aiWire($("#main"));
+  devLocWire(ds);
   if(seenFlash){const tr=$(`#main tr[data-rid="${seenFlash}"]`);seenFlash=0;if(tr){tr.classList.add("seen");setTimeout(()=>tr.classList.remove("seen"),2400)}}
   const dById=i=>ds.find(x=>x.id==i),dBody=(d,lc)=>({dev_eui:d.dev_eui,label:d.label,lifecycle:lc,patient_id:d.patient_id});
   lister("devices",$("#main").lastElementChild,{noun:"เครื่อง",reload:loadDevices,bulk:[
@@ -1718,6 +1724,24 @@ function mapRedraw(){
 /* ===================== v0.5: passwords, users, PDPA, reports, locations ===================== */
 const dist=m=>m==null?"":m>=1000?(m/1000).toFixed(1)+" กม.":m+" ม.";
 const gmap=(la,lo,t="แผนที่")=>la==null?"":`<a target="_blank" rel="noopener" href="https://maps.google.com/?q=${encodeURIComponent(la)},${encodeURIComponent(lo)}">${t}</a>`;
+// Device list location: the GPS fix if the button has GPS, else the patient's home pin (set by hand),
+// with ways to set the pin: paste coordinates / a Google Maps link, pick on the map, or copy the GPS fix.
+function devLocCell(d){const can=canEdit()&&d.patient_id,useGps=can&&d.loc?`<br><button class="btn sm" type="button" data-usegps="${d.id}">ใช้พิกัดนี้เป็นตำแหน่งบ้าน</button>`:"";
+  if(d.loc)return locCell(d.loc)+useGps;
+  if(d.home)return `${gmap(d.home.lat,d.home.lon,"📍 บ้าน")} <span class="mut">ปักเอง · ยังไม่มีพิกัดจาก GPS</span>${can?` <button class="lnk" type="button" data-sethome="${d.id}">แก้</button>`:""}`;
+  return can?`<button class="btn sm" type="button" data-sethome="${d.id}">ปักตำแหน่งบ้าน</button>`:'<span class="mut">-</span>'}
+function parseLatLon(t){t=String(t||"").trim();let m=t.match(/@(-?\d+\.\d+),\s*(-?\d+\.\d+)/)||t.match(/[?&](?:q|query|ll|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/)||t.match(/^(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)$/);
+  if(!m)return null;const lat=+m[1],lon=+m[2];return Math.abs(lat)<=90&&Math.abs(lon)<=180&&!(lat===0&&lon===0)?{lat,lon}:null}
+function devLocWire(ds){
+  document.querySelectorAll("[data-sethome]").forEach(b=>b.onclick=guard(async()=>{const d=ds.find(x=>x.id==b.dataset.sethome);
+    const v=await dlg({icon:"map",title:`ตำแหน่งบ้าน: ${d.patient||d.label}`,html:`<p>วางพิกัด (เช่น <code>13.91234, 100.60123</code>) หรือลิงก์จาก Google Maps ที่ปักหมุดบ้านไว้</p><p class="mut">ใน Google Maps: กดค้างที่บ้าน → แตะตัวเลขพิกัดเพื่อคัดลอก · หรือ <a href="#" id="pickmap">เลือกบนแผนที่ของระบบ</a></p>`,
+      input:{label:"พิกัดหรือลิงก์",value:d.home?`${d.home.lat}, ${d.home.lon}`:"",placeholder:"13.91234, 100.60123"},ok:"บันทึก"});
+    if(v==null)return;const p=parseLatLon(v);if(!p){toast(/goo\.gl|app\.goo/.test(v)?"ลิงก์แบบย่อ (maps.app.goo.gl) ไม่มีพิกัดอยู่ในลิงก์ — ใน Google Maps กดค้างที่บ้านแล้วคัดลอกตัวเลขพิกัดมาวางแทน":"อ่านพิกัดไม่ได้ — ใส่เป็น ละติจูด, ลองจิจูด เช่น 13.91234, 100.60123","warn");return}
+    await api(`/patients/${d.patient_id}/location`,{method:"PUT",body:p});toast("บันทึกตำแหน่งบ้านแล้ว");loadDevices()}));
+  document.querySelectorAll("[data-usegps]").forEach(b=>b.onclick=guard(async()=>{const d=ds.find(x=>x.id==b.dataset.usegps);
+    if(!await ask(`ใช้พิกัด GPS ล่าสุดของ ${d.label} เป็นตำแหน่งบ้านของ ${d.patient}?\nพิกัด ${d.loc.lat.toFixed(5)}, ${d.loc.lon.toFixed(5)} · ดาวเทียม ${d.loc.sats??"-"} ดวง · ${ago(d.loc.at)}`,{ok:"ใช้พิกัดนี้"}))return;
+    await api(`/patients/${d.patient_id}/location`,{method:"PUT",body:{lat:d.loc.lat,lon:d.loc.lon}});toast("บันทึกตำแหน่งบ้านแล้ว");loadDevices()}))}
+document.addEventListener("click",e=>{if(e.target.id==="pickmap"){e.preventDefault();document.querySelector("dialog.dlg[open]")?.close();page="map";render()}});
 const locCell=l=>!l?'<span class="mut">-</span>':`${gmap(l.lat,l.lon,"📍 แผนที่")} <span class="mut">${ago(l.at)} · ดาวเทียม ${l.sats??"-"}${l.fresh===false?" · เก่า":""}</span>${l.away?` <b style="color:var(--amb)">ห่างบ้าน ${dist(l.home_distance_m)}</b>`:l.home_distance_m!=null?` <span class="mut">(ห่างบ้าน ${dist(l.home_distance_m)})</span>`:""}`;
 
 /* ---- password change (voluntary and forced) ---- */
