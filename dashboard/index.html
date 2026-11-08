@@ -555,6 +555,9 @@ async function onEvt(m){
     else if(m.state==="accepted")notify({id:`c${id}a`,kind:"info",title:`รับเรื่องเคส #${id} แล้ว`,go:{case:id}});
     else if(m.state==="closed")notify({id:`c${id}c`,kind:"ok",title:`ปิดเคส #${id} แล้ว`,go:{case:id}});
     if(m.state!=="new"){sosDrop(id);alarmDrop(id)}}
+  else if(m.type==="case_repeat"){let c=null;try{c=await api(`/cases/${id}`)}catch(e){}
+    notify({id:`c${id}r${Date.now()}`,kind:"sos",title:`ผู้ป่วยกดปุ่มซ้ำ — เคส #${id}`,body:c?.patient?`${c.patient.full_name} · ${c.state==="accepted"?"รับเรื่องแล้ว แต่ผู้ป่วยยังกดอยู่ — โทรติดตาม":"ยังไม่มีผู้รับเรื่อง"}`:"",go:{case:id}});
+    toast(`ผู้ป่วยกดปุ่มซ้ำ (เคส #${id})`,"warn");if(audioOn&&!SND.timer)siren()}
   else if(m.type==="case_test"){beep();notify({kind:"info",title:"ได้รับสัญญาณทดสอบปุ่ม",go:{page:"selftest"}})}
   else if(m.type==="gateway_state")notify({kind:m.state==="offline"?"warn":"ok",title:m.state==="offline"?`เกตเวย์ ${m.gateway_id} ขาดการเชื่อมต่อ`:`เกตเวย์ ${m.gateway_id} กลับมาออนไลน์`,go:{page:"gateways"}});
   else if(m.type==="device_state"){const k=Object.keys(DVI).find(k=>(m.issue||"").startsWith("device_"+k));if(!k)return;const ok=/_ok$/.test(m.issue);
@@ -638,7 +641,7 @@ function sndClick(){sndUnlock();
   if(SND.muteUntil>Date.now()){SND.muteUntil=0;alarmSync();return}
   audioOn=false;lsSet("snd","0");alarmSync()}
 setInterval(sndUI,30000);
-function liveEvent(m){onEvt(m).catch(()=>{});if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()}
+function liveEvent(m){onEvt(m).catch(()=>{});if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update"||m.type==="case_repeat")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
 const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",integrations:"🔗",settings:"⚙️",audit:"📜",account:"👤"};

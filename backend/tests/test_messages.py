@@ -130,3 +130,41 @@ def test_flush_nonces_endpoint(env_, monkeypatch):
     assert client.post("/api/devices/1/flush-nonces", headers=login(client)).status_code == 200
     assert calls == [EUI]
     assert client.post("/api/devices/1/flush-nonces", headers=login(client, "viewer")).status_code == 403
+
+
+def test_press_again_after_close_opens_new_case(env_, now):
+    eng, downs, notif, *_ = env_
+    with SessionLocal() as db:
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5))
+        eng.close(db, 1, "s")
+        assert eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=6)) == "created"
+        assert db.query(Case).count() == 2 and len(notif.sent) == 2
+
+
+def test_new_alert_while_old_case_still_open_is_a_new_case(env_, now):
+    eng, downs, notif, *_ = env_
+    with SessionLocal() as db:
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5))
+        eng.accept(db, 1, "s")
+        now["v"] += timedelta(minutes=40)            # device stopped polling, patient presses a fresh alert
+        assert eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=6)) == "created"
+        assert db.query(Case).count() == 2 and len(notif.sent) == 2
+        assert any(e.kind == "new_alert_from_device" for e in db.get(Case, 1).events)
+
+
+def test_repeat_press_on_accepted_case_reminds_people(env_, now):
+    eng, downs, notif, *_ = env_
+    pub = []; eng.publish = pub.append
+    with SessionLocal() as db:
+        eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5))
+        assert eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5)) == "duplicate"   # retransmission: quiet
+        eng.accept(db, 1, "s")
+        now["v"] += timedelta(minutes=3)
+        assert eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5)) == "repeat"
+        assert notif.sent[-1] == (1, "อสม.หนึ่ง", True)
+        assert any(p["type"] == "case_repeat" for p in pub)
+        n = len(notif.sent)
+        now["v"] += timedelta(seconds=20)            # pressing again within a minute: logged, not re-sent
+        assert eng.handle_uplink(db, EUI, up(codec.T_ALERT, alert=5)) == "repeat"
+        assert len(notif.sent) == n
+        assert db.query(Case).count() == 1

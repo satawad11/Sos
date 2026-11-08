@@ -80,7 +80,14 @@ enum : uint8_t { F_MAINS_OK = 1, F_BATT_LOW = 2, F_CHARGING = 4, F_TEST_MODE = 8
   #define L1_TIMEOUT_MS      60000UL      // no L1 ACK within 60 s -> fast-blink failure
   #define POLL_MAX_MS        (30UL*60000) // stop polling after 30 min
 #endif
-#define CANCEL_HOLD_MS       3000UL
+// ---- Button rules (keep in step with the patient card in docs/INSTALL-3 and the wiring page) ----
+//   ALERT  : hold hold_ms (default 1.5 s) until the beep
+//   CANCEL : within CANCEL_WINDOW_MS of the alert, while nobody has accepted yet: LET GO, then hold CANCEL_HOLD_MS (5 s);
+//            the screen counts down 5..1
+//   TEST   : 3 short presses (< 0.6 s each) within 1.5 s while READY
+#define CANCEL_HOLD_MS       5000UL      // a fresh press this long cancels (fw <= 0.4: hold_ms + 3 s)
+#define CANCEL_WINDOW_MS     60000UL     // cancel only possible during the first minute
+#define RESULT_SHOW_MS       10000UL     // CASE CLOSED / FALSE ALARM / CANCELLED / TEST stay this long, then READY
 #define ACCEPTED_POLL_MIN_S  30          // after acceptance keep polling (slower) so staff messages can arrive
 #define DONE_DISPLAY_MS      (5UL*60000)
 #define BATT_LOW_PCT         20

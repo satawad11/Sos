@@ -1,4 +1,4 @@
-// Patient SOS device firmware v0.4 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
+// Patient SOS device firmware v0.5 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
 // NOT hardware-tested yet: follow firmware/README.md bench tests before any patient use.
 #include <Arduino.h>
 #include <Preferences.h>
@@ -73,6 +73,7 @@ volatile uint8_t g_uiBattery = 255;
 volatile bool    g_uiMains = true;
 volatile uint8_t g_msgCode = 0, g_msgVal = 0;   // message on screen (UI_MSG)
 volatile bool    g_accepted = false;            // staff accepted the current alert (green LED under a message)
+volatile bool    g_cancelArmed = false;         // main loop: a fresh long press now would cancel (UI shows the countdown)
 
 // Preset messages — codes MUST match backend/app/codec.py MESSAGES. Max 16 characters per line; %u = value.
 struct MsgText { const char* l1; const char* l2; };
@@ -160,6 +161,9 @@ void uiTask(void*) {
       case UI_TEST_FAIL: red = pat(now, 100, 100); bz = (t < 1000) && pat(t, 100, 100); break;
       case UI_MSG: green = g_accepted; red = !g_accepted; bz = (t < 900) && pat(t, 150, 150); break;   // 3 beeps
     }
+    // holding to cancel: alternate red/green, tick every second, countdown on the OLED (drawn below)
+    bool cancelHold = g_cancelArmed && g_buttonDown && now - g_buttonDownAt > 300;
+    if (cancelHold) { uint32_t h = now - g_buttonDownAt; red = (h / 250) % 2; green = !red; bz = (h % 1000) < 60; }
     // brief confirmation beep while holding button (feedback that hold counted)
     if (g_buttonDown && holdFired && t > 0) bz = bz || (now - g_buttonDownAt < g_cfg.hold_ms + 200);
     digitalWrite(PIN_LED_RED, red); digitalWrite(PIN_LED_GREEN, green);
@@ -191,6 +195,11 @@ void uiTask(void*) {
           else { snprintf(mb1, sizeof mb1, "MESSAGE %u", c); snprintf(mb2, sizeof mb2, "update firmware"); }
           l1 = mb1; l2 = mb2; break;
         }
+      }
+      static char cb[20];
+      if (cancelHold) {
+        uint32_t h = now - g_buttonDownAt, left = h >= CANCEL_HOLD_MS ? 0 : (CANCEL_HOLD_MS - h + 999) / 1000;
+        snprintf(cb, sizeof cb, "CANCEL IN %lu s", (unsigned long)left); l1 = "KEEP HOLDING"; l2 = cb;
       }
       oled.clearBuffer();
       oled.drawStr(0, 16, l1); oled.drawStr(0, 34, l2);
@@ -465,7 +474,8 @@ void loop() {
 
   // ---- idle-state UI refresh after a result has been shown for a while ----
   if (phase == P_IDLE && g_ui != UI_READY && g_ui != UI_SENDING && millis() - doneAt > DONE_DISPLAY_MS) setUi(UI_READY);
-  if (phase == P_IDLE && (g_ui == UI_TEST_OK || g_ui == UI_TEST_FAIL || g_ui == UI_CANCELLED) && millis() - g_uiSince > 6000) setUi(UI_READY);
+  if (phase == P_IDLE && (g_ui == UI_TEST_OK || g_ui == UI_TEST_FAIL || g_ui == UI_CANCELLED || g_ui == UI_CLOSED ||
+                          g_ui == UI_FALSE_ALARM) && millis() - g_uiSince > RESULT_SHOW_MS) setUi(UI_READY);   // ready for the next emergency
 
   // ---- button logic ----
   if (g_pressEvent) {
@@ -473,14 +483,13 @@ void loop() {
     if (phase == P_IDLE) startAlert();                 // hold reached hold_ms
     else if (phase == P_ALERT && g_accepted) g_repress = true;
   }
-  // Cancel needs a NEW press: the button must have been released after the alert started. (fw <= 0.3 measured from the
-  // alert's own press, so a patient who simply kept holding the button ~5 s cancelled their own emergency.)
+  // Cancel needs a NEW press: the button must have been released after the alert started (fw <= 0.3 measured from the
+  // alert's own press, so simply holding on cancelled the emergency). Only while nobody has accepted, in the first minute.
   if (phase == P_ALERT && g_releaseEvent) g_releasedSinceAlert = true;
-  if (phase == P_ALERT && g_releasedSinceAlert && g_buttonDown && millis() - g_buttonDownAt > CANCEL_HOLD_MS + g_cfg.hold_ms
-      && g_ui == UI_SENT_WAIT && millis() - alertStart < 45000UL) {
-    // long hold (hold_ms + 3 s) during the first 45 s of a waiting alert = patient cancels
-    doCancel();
-  }
+  bool cancelOk = phase == P_ALERT && l1Ok && !g_accepted && g_releasedSinceAlert && millis() - alertStart < CANCEL_WINDOW_MS
+                  && (g_ui == UI_SENT_WAIT || g_ui == UI_AFTER_HOURS || g_ui == UI_MSG);
+  g_cancelArmed = cancelOk;
+  if (cancelOk && g_buttonDown && millis() - g_buttonDownAt >= CANCEL_HOLD_MS) { g_cancelArmed = false; doCancel(); }
   if (phase == P_IDLE && g_shortPresses >= 3 && millis() - g_lastShortAt < 1500) { g_shortPresses = 0; doTest(); }
   g_releaseEvent = false;
 

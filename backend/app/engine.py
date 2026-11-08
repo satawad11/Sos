@@ -170,9 +170,23 @@ class Engine:
 
     def _alert(self, db, dev, up, now) -> str:
         existing = self._open_case(db, dev)
-        if existing:
+        if existing and existing.alert_id == up.alert_id:
+            # same alert again: a radio retransmission (first minute) or the patient pressing again after acceptance
+            # (firmware 0.2+ re-sends ALERT with the same id). The second one must reach people, not just the log.
+            age = (now - aware(existing.created_at)).total_seconds()
+            if age < self.REPEAT_QUIET_S:
+                return "duplicate"
+            last = max((aware(e.at) for e in existing.events if e.kind == "repeat_press"), default=None)
             self._event(db, existing, "repeat_press", alert_id=up.alert_id)
-            return "duplicate"
+            if last is None or (now - last).total_seconds() >= self.REPEAT_QUIET_S:
+                db.commit()      # screen first (event after commit), then the slower LINE re-notification
+                self.publish({"type": "case_repeat", "case_id": existing.id, "state": existing.state, "overdue": existing.overdue})
+                self._renotify(db, existing)
+            return "repeat"
+        if existing:
+            # a DIFFERENT alert id = the device started a brand-new emergency (it had finished the old one, e.g. after
+            # the 30-min polling limit or a reboot) while an old case is still open: alert everyone again as a new case.
+            self._event(db, existing, "new_alert_from_device", alert_id=up.alert_id)
         # same alert_id resent after case closed within 2 minutes = retransmission
         dup = (db.query(Case).filter(Case.device_id == dev.id, Case.alert_id == up.alert_id,
                                      Case.created_at > now - timedelta(minutes=2)).first())
@@ -192,6 +206,14 @@ class Engine:
         self._pub(case, "case_new")
         self._notify_step(db, case, 0)
         return "created"
+
+    REPEAT_QUIET_S = 60
+
+    def _renotify(self, db: Session, case: Case):
+        """Patient pressed again on an open case: remind everyone already notified (LINE 'reminder' card)."""
+        chain = self._chain(db, case)[: case.esc_step + 1]
+        for i, _ in enumerate(chain):
+            self._notify_step(db, case, i, reminder=True)
 
     def _test(self, db, dev, up, now) -> str:
         case = Case(device_id=dev.id, patient_id=dev.patient_id, alert_id=up.alert_id,
