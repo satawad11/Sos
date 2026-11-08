@@ -617,12 +617,12 @@ function render(){
   const title=(tabs.find(t=>t[0]===page)||["","บัญชีของฉัน"])[1],curG=groups.find(g=>g[1].some(t=>t[0]===page));
   const navC=new Set(JSON.parse(lsGet("navc")||"[]"));if(curG)navC.delete(curG[0]);
   const ngrp=(g,i)=>{const open=!navC.has(g[0]);return `<div class="ngw"><button type="button" class="ng" data-g="${esc(g[0])}" aria-expanded="${open}" aria-controls="ng${i}"><span>${g[0]}</span>${g[0]===curG?.[0]?"":`<em>${g[1].length}</em>`}${ico("chev")}</button><div class="ngi" id="ng${i}" ${open?"":"hidden"}>${g[1].map(navb).join("")}</div></div>`};
-  const bc=`<nav class="bc" aria-label="ตำแหน่งหน้า"><ol><li><button type="button" data-bp="cases">หน้าหลัก</button></li>${curG?`<li class="bcg">${curG[0]}</li>`:""}<li id="bcp" aria-current="page"><span>${title}</span></li></ol></nav>`;
+  const bc=`<nav class="bc" aria-label="ตำแหน่งหน้า"><ol><li><button type="button" data-bp="cases">หน้าหลัก</button></li>${curG?`<li class="bcg">${curG[0]}</li>`:""}<li id="bccur" aria-current="page"><span>${title}</span></li></ol></nav>`;
   $("#app").innerHTML=`<div class="shell" id="shell">
    <aside id="side" aria-label="เมนู"><div class="sbrand">${LOGO(34)}<div><b>ระบบแจ้งเหตุฉุกเฉิน</b><span>ปุ่มแจ้งเหตุผู้ป่วยติดบ้าน</span></div></div>
     <nav>${groups.map(ngrp).join("")}</nav>
     <div class="me"><div class="who"><span class="av">${esc((sessionStorage.getItem("nm")||"?").trim().charAt(0).toUpperCase())}</span><div><b>${esc(sessionStorage.getItem("nm")||"")}</b><span>${RN[role]||role}</span></div></div><div class="row"><button class="btn" id="pw">บัญชี</button><button class="btn" id="out">ออกจากระบบ</button></div></div></aside>
-   <header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">${ico("menu")}</button><div class="ptw">${bc}<h1 class="pt" id="pt">${title}</h1></div>
+   <header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">${ico("menu")}</button><div class="ptw">${bc}<h1 class="pt" id="ptitle">${title}</h1></div>
     <div class="phr"><span class="hchip" id="conn"><span class="sdot ${wsUp?"on":"off"}"></span>${wsUp?"เชื่อมต่อสด":"กำลังเชื่อมต่อ…"}</span><span class="hchip tm" id="clk">${nowTH()}</span>
     <div class="ncw"><button class="btn icn" id="nc" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="ncp" title="การแจ้งเตือน">${ico("bell")}<span class="ncb" id="ncb" hidden></span></button><div class="ncp" id="ncp" hidden></div></div>
     <button class="btn thm" id="thm" type="button"></button>
@@ -648,7 +648,7 @@ function thmInit(){const b=$("#thm");if(!b)return;const d=isDark();b.innerHTML=i
   b.title=b.ariaLabel=d?"เปลี่ยนเป็นโหมดกลางวัน":"เปลี่ยนเป็นโหมดกลางคืน";b.setAttribute("aria-pressed",d);
   b.onclick=()=>{const t=isDark()?"light":"dark";document.documentElement.dataset.theme=t;lsSet("theme",t);
     document.querySelector('meta[name=theme-color]')?.setAttribute("content",t==="dark"?"#12141c":"#4c5fd5");thmInit()}}
-function crumb(label){const p=$("#bcp"),pt=$("#pt");if(!p)return;const base=(p.dataset.base??=p.querySelector("span").textContent);
+function crumb(label){const p=$("#bccur"),pt=$("#ptitle");if(!p)return;const base=(p.dataset.base??=p.querySelector("span").textContent);
   document.querySelectorAll(".bc .bcx").forEach(e=>e.remove());
   if(label==null){p.innerHTML=`<span>${esc(base)}</span>`;p.setAttribute("aria-current","page");if(pt)pt.textContent=base;return}
   p.removeAttribute("aria-current");p.innerHTML=`<button type="button">${esc(base)}</button>`;p.querySelector("button").onclick=()=>{setDirty=()=>false;render();scrollTo(0,0)};
@@ -913,9 +913,16 @@ const loadDevices=guard(async()=>{
       ${CF.map(([k,t,lo,hi,h])=>`<div class="row"><label style="min-width:190px"><input type="checkbox" class="ck" data-k="${k}" ${k in ov?"checked":""}> ${t}</label><input type="number" class="cv" data-k="${k}" min="${lo}" max="${hi}" value="${k in ov?ov[k]:dd[k]}" ${k in ov?"":"disabled"}><span class="mut">ค่ากลาง ${dd[k]} · ช่วง ${lo}-${hi} · ${h}</span></div>`).join("")}
       <div class="row">สถานะ: ${d.config_pending?'<b style="color:var(--amb)">⏳ รอเครื่องรับค่า</b>':d.config_applied_at?"✅ เครื่องใช้ค่านี้แล้ว (เมื่อ "+fmt(d.config_applied_at)+")":"✅ ตรงกับค่าที่ตั้ง"} · เวอร์ชันค่า ${d.config_ver}</div>
       <div class="row"><button class="btn p" id="svc">ส่งค่าไปยังเครื่อง</button><button class="btn" id="rsc">กลับไปใช้ค่ากลางทั้งหมด</button></div></div>`:"";
-    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}</option>`).join("")}</select></div>${aiOk&&canEdit()?`<div class="row">${aiBtn("devices",d.id,"AI วิเคราะห์เครื่องนี้")}</div><div data-aibox="devices:${d.id}"></div>`:""}<div class="row"><button class="btn p" id="sv">บันทึก</button>${role==="admin"?'<button class="btn r" id="dxl">ลบอุปกรณ์นี้</button>':""}</div></div>${cfgCard}`;
+    $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}${p.consent_ok?"":" (ยังไม่มีความยินยอม PDPA)"}</option>`).join("")}</select></div>${aiOk&&canEdit()?`<div class="row">${aiBtn("devices",d.id,"AI วิเคราะห์เครื่องนี้")}</div><div data-aibox="devices:${d.id}"></div>`:""}<div class="row"><button class="btn p" id="sv">บันทึก</button>${role==="admin"?'<button class="btn r" id="dxl">ลบอุปกรณ์นี้</button>':""}</div></div>${cfgCard}`;
     $("#back").onclick=()=>{devEdit=false;render()};
-    $("#sv").onclick=guard(async()=>{const r=await api("/devices/"+d.id,{method:"PUT",body:{dev_eui:d.dev_eui,label:$("#l").value,lifecycle:$("#lc").value,patient_id:$("#pt").value?Number($("#pt").value):null}});toast("บันทึกแล้ว"+csNote(r.chirpstack));devEdit=false;render()});
+    $("#sv").onclick=guard(async()=>{const pid=$("#pt").value?Number($("#pt").value):null;let r;
+      try{r=await api("/devices/"+d.id,{method:"PUT",body:{dev_eui:d.dev_eui,label:$("#l").value,lifecycle:$("#lc").value,patient_id:pid}})}
+      catch(e){const p=ps.find(x=>x.id===pid);if(!p||!/ความยินยอม/.test(e.message))throw e;
+        // PDPA: an active button needs the patient's consent on record — offer the way there instead of a dead end
+        if(await dlg({icon:"warnt",title:`ยังผูก ${p.full_name} กับอุปกรณ์นี้ไม่ได้`,body:`ผู้ป่วยยังไม่มีบันทึกความยินยอม (PDPA) ระบบจึงไม่ให้ตั้งอุปกรณ์เป็น active\nบันทึกความยินยอมก่อน แล้วกลับมาผูกอีกครั้ง หรือเปลี่ยนสถานะเป็น ready เพื่อผูกไว้ก่อนโดยยังไม่เปิดใช้งาน`,ok:"ไปบันทึกความยินยอม",cancel:"ปิด"})){
+          devEdit=false;page="patients";render();const t=setInterval(()=>{if($("#main [data-pd]")){clearInterval(t);patientPrivacy(p)}},120);setTimeout(()=>clearInterval(t),6000)}
+        return}
+      toast("บันทึกแล้ว"+csNote(r.chirpstack));devEdit=false;render()});
     aiWire($("#main"));
     if($("#dxl"))$("#dxl").onclick=guard(async()=>{if(!await ask(`ลบอุปกรณ์ ${d.dev_eui} ?\nลบได้เฉพาะเครื่องที่ยังไม่เคยมีเคส — ถ้าเคยใช้งานแล้วให้เปลี่ยนสถานะเป็น retired/lost แทน`))return;const r=await api("/devices/"+d.id,{method:"DELETE"});toast("ลบแล้ว"+csNote(r.chirpstack));devEdit=false;render()});
     document.querySelectorAll(".ck").forEach(c=>c.onchange=()=>{document.querySelector(`.cv[data-k="${c.dataset.k}"]`).disabled=!c.checked});
@@ -1579,7 +1586,7 @@ async function patientPrivacy(p){
   ${adm?`<div class="card"><h3>คำขอของเจ้าของข้อมูล</h3><div class="row"><button class="btn" id="ex">⬇ ส่งออกข้อมูลทั้งหมดของผู้ป่วย (JSON)</button></div>
    ${p.anonymized_at?"":`<hr><p>ลบข้อมูลที่ระบุตัวตน (ย้อนกลับไม่ได้): ชื่อ อายุ ที่อยู่ เบอร์ พิกัด หมายเหตุ ถูกลบ เหลือสถิติเคสแบบไม่ระบุตัวตน</p>
    <div class="row"><label><input type="checkbox" id="kv" checked> คงชื่อหมู่บ้านไว้เพื่อสถิติ</label></div>
-   <div class="row"><input id="cf" placeholder="พิมพ์เลขที่ผู้ป่วย ${p.id} เพื่อยืนยัน" size="28"><button class="btn r" id="an">ลบข้อมูลที่ระบุตัวตน</button></div>`}</div>`:""}`;
+   <div class="row"><input id="cf" placeholder="พิมพ์เลขที่ผู้ป่วย ${p.id} เพื่อยืนยัน" size="28"><button class="btn r" id="an">ลบข้อมูลที่ระบุตัวตน</button></div>`}</div>`:""}`;crumb(`ข้อมูล/PDPA: ${p.full_name}`);
   $("#back").onclick=()=>render();
   const act=f=>guard(async()=>{await f();loadPatients()});
   if($("#cg"))$("#cg").onclick=act(async()=>{await api(`/patients/${p.id}/consent`,{method:"PUT",body:{given:true,note:$("#cn").value}});toast("บันทึกความยินยอมแล้ว")});
