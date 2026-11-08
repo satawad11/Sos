@@ -504,7 +504,8 @@ def devices(db: Session = Depends(get_db), u=Depends(current_user)):
             loc = {"lat": d.loc_lat, "lon": d.loc_lon, "at": iso(d.loc_at), "sats": d.loc_sats, "hdop": d.loc_hdop, "fresh": fresh,
                    "home_distance_m": home, "away": home is not None and home > gcfg["home_radius_m"],
                    "url": geo.maps_url(d.loc_lat, d.loc_lon)}
-        out.append({"loc": loc, "config": settings_store.effective_device_cfg(db, d), "config_override": d.config_override or {},
+        cfg = settings_store.effective_device_cfg(db, d)
+        out.append({**settings_store.device_link(db, d, now, cfg, off), "loc": loc, "config": cfg, "config_override": d.config_override or {},
                     "config_pending": pending, "config_ver": d.config_ver, "config_reported_ver": d.reported_config_ver,
                     "config_applied_at": iso(d.config_applied_at), "config_changed_at": iso(d.config_changed_at),
                     "id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,
@@ -1234,7 +1235,17 @@ def stats(db: Session = Depends(get_db), u=Depends(current_user)):
     return {"cases_30d": len(cs), "open": sum(c.state == "new" for c in cs),
             "false_alarm": sum(c.close_reason == "false_alarm" for c in cs),
             "after_hours": sum(c.after_hours for c in cs),
-            "avg_accept_s": round(sum(acc) / len(acc), 1) if acc else None}
+            "avg_accept_s": round(sum(acc) / len(acc), 1) if acc else None, "devices": _device_health(db)}
+
+
+def _device_health(db: Session) -> dict:
+    """Active buttons by link state — the home page's "ปุ่มปกติ x/y" tile."""
+    now, off = utcnow(), settings_store.get(db, "offline")["device_offline_min"]
+    n = {"active": 0, "ok": 0, "late": 0, "offline": 0, "never": 0}
+    for d in db.query(Device).filter(Device.lifecycle == "active").all():
+        n["active"] += 1
+        n[settings_store.device_link(db, d, now, None, off)["link"]] += 1
+    return n
 
 
 # ---------------- LINE credentials (dashboard) ----------------

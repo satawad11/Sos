@@ -67,6 +67,28 @@ def validate_device_cfg(value: dict, partial: bool, offline_min: int | None = No
     return out
 
 
+LINK_SLACK_MIN = 10          # a heartbeat may arrive this late and still count as on time
+
+
+def device_link(db: Session, dev, now, cfg: dict | None = None, off_min: int | None = None) -> dict:
+    """How a button is doing, judged from its last uplink against its own report interval (LoRaWAN class A cannot be
+    asked "are you there?"): ok = report on time, late = missed at least one report, offline = silent past the
+    device-offline threshold (the same one that sends the LINE alert), never = no uplink yet.
+    late_at / off_at let a screen move the badge on as time passes without asking the server again."""
+    from datetime import timedelta
+    hb = (cfg or effective_device_cfg(db, dev))["heartbeat_min"]
+    off = off_min if off_min is not None else get(db, "offline")["device_offline_min"]
+    ls = dev.last_seen
+    if ls is None:
+        return {"link": "never", "hb_min": hb, "late_at": None, "off_at": None}
+    if ls.tzinfo is None:
+        from datetime import timezone
+        ls = ls.replace(tzinfo=timezone.utc)
+    late_at, off_at = ls + timedelta(minutes=hb + LINK_SLACK_MIN), ls + timedelta(minutes=max(off, hb + LINK_SLACK_MIN))
+    link = "ok" if now < late_at else "late" if now < off_at else "offline"
+    return {"link": link, "hb_min": hb, "late_at": late_at.isoformat(), "off_at": off_at.isoformat()}
+
+
 def effective_device_cfg(db: Session, dev) -> dict:
     cfg = {k: get(db, "device_defaults")[k] for k in CFG_FIELDS}
     cfg.update(dev.config_override or {})

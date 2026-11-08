@@ -478,6 +478,17 @@ html[data-theme=dark]{color-scheme:dark}html[data-theme=light]{color-scheme:ligh
 .top .btn.snd.lock{background:var(--amb2);color:color-mix(in srgb,var(--amb) 70%,var(--ink));border-color:color-mix(in srgb,var(--amb) 45%,transparent)}
 @keyframes sndp{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--red) 25%,transparent)}}
 @media(prefers-reduced-motion:reduce){.top .btn.snd.ring{animation:none}}
+
+/* button link badge */
+.lk{display:inline-flex;align-items:center;gap:6px;margin-top:3px;font-size:13px;font-weight:600;white-space:nowrap}
+.lk i{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.lk.lk-ok{color:var(--grn)}.lk.lk-ok i{box-shadow:0 0 0 3px color-mix(in srgb,var(--grn) 22%,transparent)}
+.lk.lk-late{color:var(--amb)}.lk.lk-off{color:var(--red)}.lk.lk-never{color:var(--mut)}.lk.lk-never i{background:transparent;border:1.5px solid currentColor}
+tr.seen td{animation:seen 2.4s ease-out}
+@keyframes seen{0%{background:color-mix(in srgb,var(--grn) 18%,transparent)}100%{background:transparent}}
+.kpi.go{cursor:pointer}.kpi.go:hover{background:color-mix(in srgb,var(--pri) 4%,var(--card))}.kpi.go:focus-visible{outline:2px solid var(--pri);outline-offset:-2px}
+@media(prefers-reduced-motion:reduce){tr.seen td{animation:none}}
+@media(min-width:1024px){.kpis{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}}
 </style></head>
 <body>
 <div id="app"></div><div id="toast" aria-live="polite"></div>
@@ -609,6 +620,20 @@ setInterval(()=>{if(!token||!ws)return;
   if(ws.readyState===1){if(Date.now()-wsLast>60000){wsDown=true;setConn(false);connectWS()}else try{ws.send("ping")}catch(e){}}},25000);
 document.addEventListener("visibilitychange",()=>{if(document.hidden||!token)return;if(!ws||ws.readyState>1||Date.now()-wsLast>40000){wsDown=true;connectWS()}});
 addEventListener("online",()=>{if(token){wsDown=true;connectWS()}});
+// ---------------------------------------------------------------- button link badge (ok / late / offline / never)
+// The server sends late_at / off_at; the badge moves on by itself as time passes and resets on every uplink (device_seen).
+const LINK={ok:["ปกติ","lk-ok"],late:["เลยรอบ","lk-late"],offline:["ขาดการติดต่อ","lk-off"],never:["ยังไม่เคยส่ง","lk-never"]};
+function linkNow(d){if(!d.last_seen||!d.late_at)return "never";const t=Date.now();return t<Date.parse(d.late_at)?"ok":t<Date.parse(d.off_at)?"late":"offline"}
+function linkBadge(d){const [t,c]=LINK[linkNow(d)];
+  return `<span class="lk ${c}" data-seen="${esc(d.last_seen||"")}" data-late="${esc(d.late_at||"")}" data-off="${esc(d.off_at||"")}" title="${d.hb_min?`รายงานทุก ${d.hb_min} นาที`:""}${d.last_seen?" · ส่งล่าสุด "+fmt(d.last_seen):""}"><i></i><span>${t}</span></span>`}
+function linkRepaint(){document.querySelectorAll(".lk[data-late]").forEach(el=>{const [t,c]=LINK[linkNow({last_seen:el.dataset.seen,late_at:el.dataset.late,off_at:el.dataset.off})];
+    if(!el.classList.contains(c)){el.className="lk "+c;el.querySelector("span").textContent=t}});
+  document.querySelectorAll("[data-ago]").forEach(el=>{if(el.dataset.ago)el.textContent=ago(el.dataset.ago)})}
+setInterval(linkRepaint,30000);
+let seenFlash=0;
+function devSeen(m){clearTimeout(devSeen.t);
+  if(page==="devices"&&!devEdit){seenFlash=m.device_id;devSeen.t=setTimeout(()=>{if(page==="devices"&&!devEdit)loadDevices()},600)}
+  else if(page==="cases"&&!caseOpen)devSeen.t=setTimeout(()=>{if(page==="cases"&&!caseOpen)loadCases()},1500)}
 async function liveResync(){
   try{const cs=await api("/cases?state=new");alarmSet(cs.filter(c=>!c.is_test).map(c=>c.id))}catch(e){}
   if(page==="cases"&&!caseOpen)loadCases();else if(page==="map")loadMap?.()}
@@ -649,7 +674,7 @@ function sndClick(){sndUnlock();
   if(SND.muteUntil>Date.now()){SND.muteUntil=0;alarmSync();return}
   audioOn=false;lsSet("snd","0");alarmSync()}
 setInterval(sndUI,30000);
-function liveEvent(m){onEvt(m).catch(()=>{});if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update"||m.type==="case_repeat")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()}
+function liveEvent(m){if(m.type==="device_seen"){devSeen(m);return}onEvt(m).catch(()=>{});if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update"||m.type==="case_repeat")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
 const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",integrations:"🔗",settings:"⚙️",audit:"📜",account:"👤"};
@@ -809,17 +834,19 @@ const loadCases=guard(async()=>{caseOpen=0;
   const row=c=>`<tr><td>#${c.id}</td><td>${esc(c.patient?c.patient.full_name:"(ไม่ทราบผู้ป่วย) "+c.device.dev_eui)}<div class="mut">${esc(c.patient?.address||"")} ${c.patient?.phone?`${esc(c.patient.phone)}`:""}</div></td><td><span class="tag ${c.state}">${ST[c.state]}</span>${c.overdue&&c.state==="new"?' <b style="color:var(--red)">เกินเวลา!</b>':""}${c.after_hours?' <span class="tag">นอกเวลา</span>':""}</td><td>${fmt(c.created_at)}</td><td>${esc(c.accepted_by)}</td><td><button class="btn" data-id="${c.id}" data-a="view">รายละเอียด</button></td></tr>`;
   const gwBad=gw.filter(g=>g.offline),gwWarn=gw.filter(g=>g.status==="warning");
   const nNew=open.filter(c=>c.state==="new").length,nAcc=open.length-nNew,gwOn=gw.length-gwBad.length;
-  const kpi=(ic,label,val,sub,cls)=>`<div class="kpi ${cls}"><div class="ki">${ic}</div><div><div class="kl">${label}</div><div class="kv">${val}</div>${sub?`<div class="ks">${sub}</div>`:""}</div></div>`;
+  const kpi=(ic,label,val,sub,cls,go)=>`<div class="kpi ${cls}${go?" go":""}"${go?` data-go="${go}" role="button" tabindex="0"`:""}><div class="ki">${ic}</div><div><div class="kl">${label}</div><div class="kv">${val}</div>${sub?`<div class="ks">${sub}</div>`:""}</div></div>`;
   const card=c=>`<div class="ac ${c.state}"><div class="ach"><span class="tag ${c.state}">${ST[c.state]}</span><span>#${c.id} · ${ago(c.created_at)}</span></div>
     <div class="acn">${esc(c.patient?c.patient.full_name:"ไม่ทราบผู้ป่วย")}</div><div class="mut">${esc(c.patient?.address||c.device.dev_eui)}</div>
     <div class="mut" style="font-size:13px">${c.overdue&&c.state==="new"?'<b style="color:var(--red)">เกินเวลารับเรื่อง</b> · ':""}${c.after_hours?"นอกเวลาทำการ · ":""}${c.accepted_by?"รับเรื่องโดย "+esc(c.accepted_by):"ยังไม่มีผู้รับเรื่อง"}</div>
     <div class="row">${c.patient?.phone?`<a class="btn" href="tel:${esc(c.patient.phone)}">${ico("phone")}โทร</a>`:""}<button class="btn ${c.state==="new"?"r":"p"}" data-id="${c.id}" data-a="view">เปิดเคส</button></div></div>`;
   $("#main").innerHTML=`${gwBad.length?`<div class="warn" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">⚠️ เกตเวย์ขาดการเชื่อมต่อ: ${gwBad.map(g=>esc(g.label||g.gateway_id)+(g.reason==="radio"?" (ตัวรับสัญญาณ LoRa เสีย)":"")).join(", ")} — ปุ่มของผู้ป่วยในระยะนี้อาจส่งไม่ถึง · <a href="#" id="gwgo">ดูรายละเอียด</a></div>`:""}${gwWarn.length&&!gwBad.length?`<div class="warn">เกตเวย์มีข้อควรตรวจ: ${gwWarn.map(g=>esc(g.label||g.gateway_id)+" — "+esc(g.critical.concat(g.warnings).join(", ")||"ตรวจสอบ")).join(" · ")}</div>`:""}
-  <div class="kpis">${kpi("🚨","รอรับเรื่อง",nNew,nNew?"ต้องดำเนินการทันที":"ไม่มีเคสรอ",nNew?"red":"grn")}${kpi("🩺","กำลังดูแล",nAcc,"รับเรื่องแล้ว ยังไม่ปิด","amb")}${kpi("📈","เคส 30 วัน",st.cases_30d,`ผิดพลาด ${st.false_alarm} · นอกเวลา ${st.after_hours}`,"ind")}${kpi("⏱️","รับเรื่องเฉลี่ย",dur(st.avg_accept_s),"ตั้งแต่กดปุ่มถึงมีคนรับ","")}${kpi("📡","เกตเวย์ออนไลน์",gw.length?`${gwOn}/${gw.length}`:"0",!gw.length?"ยังไม่มีเกตเวย์":gwBad.length?"มีเกตเวย์ขาดการเชื่อมต่อ":"ทำงานปกติ",gwBad.length?"red":gw.length?"grn":"")}</div>
+  <div class="kpis">${kpi("🚨","รอรับเรื่อง",nNew,nNew?"ต้องดำเนินการทันที":"ไม่มีเคสรอ",nNew?"red":"grn")}${kpi("🩺","กำลังดูแล",nAcc,"รับเรื่องแล้ว ยังไม่ปิด","amb")}${kpi("📈","เคส 30 วัน",st.cases_30d,`ผิดพลาด ${st.false_alarm} · นอกเวลา ${st.after_hours}`,"ind")}${kpi("⏱️","รับเรื่องเฉลี่ย",dur(st.avg_accept_s),"ตั้งแต่กดปุ่มถึงมีคนรับ","")}${kpi("📡","เกตเวย์ออนไลน์",gw.length?`${gwOn}/${gw.length}`:"0",!gw.length?"ยังไม่มีเกตเวย์":gwBad.length?"มีเกตเวย์ขาดการเชื่อมต่อ":"ทำงานปกติ",gwBad.length?"red":gw.length?"grn":"","gateways")}${(()=>{const h=st.devices||{active:0};if(!h.active)return kpi("🔘","ปุ่มส่งสัญญาณปกติ","0","ยังไม่มีปุ่มที่ใช้งาน","","devices");
+    const bad=h.offline+h.never;return kpi("🔘","ปุ่มส่งสัญญาณปกติ",`${h.ok}/${h.active}`,bad?`ขาดการติดต่อ ${bad} เครื่อง${h.late?` · เลยรอบ ${h.late}`:""}`:h.late?`เลยรอบ ${h.late} เครื่อง — รอรอบถัดไป`:"ส่งตามรอบทุกเครื่อง",bad?"red":h.late?"amb":"grn","devices")})()}</div>
   <div class="card ${nNew?"alarm":""}"><h3>เคสที่ยังเปิดอยู่ (${open.length})</h3>${open.length?`<div class="acs">${open.map(card).join("")}</div>`:`<div class="empty"><div class="big">✅</div><h4>ทุกบ้านปลอดภัย</h4><p class="mut">ไม่มีเคสค้าง — ระบบจะแจ้งเตือนพร้อมเสียงทันทีเมื่อมีการกดปุ่ม${audioOn?"":" (เปิดเสียงเตือนที่มุมขวาบน)"}</p></div>`}</div>
   <div class="card"><h3>เคสล่าสุด</h3>${recent.length?`<table><tr><th>#</th><th>ผู้ป่วย</th><th>สถานะ</th><th>เวลา</th><th>ผู้รับเรื่อง</th><th></th></tr>${recent.map(row).join("")}</table>`:'<p class="mut">ยังไม่มีเคส</p>'}</div>`;
   lister("cases",$("#main").lastElementChild,{noun:"เคส"});
   document.querySelectorAll("[data-a=view]").forEach(b=>b.onclick=()=>showCase(b.dataset.id));
+  document.querySelectorAll(".kpi[data-go]").forEach(k=>{const go=()=>{page=k.dataset.go;render();scrollTo(0,0)};k.onclick=go;k.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go()}}});
   if(openCaseAfter){const id=openCaseAfter;openCaseAfter=0;showCase(id)}});
 /* ---- preset messages to the patient's device screen (FPort 12; English text is fixed in the firmware) ---- */
 let _devMsgs=null;const devMsgs=async()=>_devMsgs||(_devMsgs=await api("/device-messages"));
@@ -1009,8 +1036,9 @@ async function gwRemote(g){
 const loadDevices=guard(async()=>{
   const [ds,ps,aiOk]=await Promise.all([api("/devices"),api("/patients"),aiReady()]);if(page!=="devices")return;
   const LC=["ready","active","repair","retired","lost"];
-  $("#main").innerHTML=`${aiOk&&canEdit()&&ds.length?`<div class="card"><div class="row">${aiBtn("devices","","AI วิเคราะห์อุปกรณ์ทั้งหมด")}<span class="mut">ให้ AI ช่วยดูแบตเตอรี่ สัญญาณ และเครื่องที่เงียบ (ไม่ส่งชื่อผู้ป่วย/รหัสเครื่อง)</span></div><div data-aibox="devices:"></div></div>`:""}${canEdit()?`<div class="card"><h3>เพิ่มอุปกรณ์</h3><div class="row"><input id="ndu" placeholder="DevEUI 16 หลัก" size="20" maxlength="23"><input id="ndl" placeholder="ป้าย เช่น บ้านลุงสม"><button class="btn p" id="nda">เพิ่ม</button></div><p class="mut">สำหรับลงทะเบียนเครื่องที่โปรแกรมไว้แล้ว — ถ้าเป็นเครื่องใหม่ ใช้เมนู "ติดตั้งอุปกรณ์" (ผู้ดูแลระบบ) จะง่ายกว่า</p></div>`:""}<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>ตำแหน่ง GPS</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr data-rid="${d.id}"><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}${d.offline?' <b style="color:var(--red)">ออฟไลน์</b>':""}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${fmt(d.last_seen)}</td><td>${locCell(d.loc)}</td><td>${esc(d.fw)}${fwBadge(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
+  $("#main").innerHTML=`${aiOk&&canEdit()&&ds.length?`<div class="card"><div class="row">${aiBtn("devices","","AI วิเคราะห์อุปกรณ์ทั้งหมด")}<span class="mut">ให้ AI ช่วยดูแบตเตอรี่ สัญญาณ และเครื่องที่เงียบ (ไม่ส่งชื่อผู้ป่วย/รหัสเครื่อง)</span></div><div data-aibox="devices:"></div></div>`:""}${canEdit()?`<div class="card"><h3>เพิ่มอุปกรณ์</h3><div class="row"><input id="ndu" placeholder="DevEUI 16 หลัก" size="20" maxlength="23"><input id="ndl" placeholder="ป้าย เช่น บ้านลุงสม"><button class="btn p" id="nda">เพิ่ม</button></div><p class="mut">สำหรับลงทะเบียนเครื่องที่โปรแกรมไว้แล้ว — ถ้าเป็นเครื่องใหม่ ใช้เมนู "ติดตั้งอุปกรณ์" (ผู้ดูแลระบบ) จะง่ายกว่า</p></div>`:""}<div class="card"><table><tr><th>ป้าย</th><th>DevEUI</th><th>สถานะ</th><th>ผู้ป่วย</th><th>แบต/ไฟ</th><th>สัญญาณ</th><th>เห็นล่าสุด</th><th>ตำแหน่ง GPS</th><th>fw</th><th></th></tr>${ds.map(d=>`<tr data-rid="${d.id}"><td>${esc(d.label)}${Object.keys(d.config_override||{}).length?' <span class="tag" title="ใช้ค่าเฉพาะเครื่อง">ค่าเฉพาะ</span>':""}${d.config_pending?' <span class="tag" style="color:var(--amb)" title="ค่าใหม่ยังไม่ถึงเครื่อง">⏳ รอเครื่องรับค่า</span>':""}</td><td><code>${d.dev_eui}</code></td><td>${d.lifecycle}<br>${linkBadge(d)}</td><td>${esc(d.patient||"-")}</td><td>${d.battery==null||d.battery===255?"-":d.battery+"%"} ${d.mains_ok===false?"⚡ไฟดับ":""}</td><td>${d.rssi??"-"} dBm / ${d.snr??"-"}</td><td>${d.last_seen?`<span data-ago="${esc(d.last_seen)}">${ago(d.last_seen)}</span><div class="mut" style="font-size:12.5px">${fmt(d.last_seen)}</div>`:"-"}</td><td>${locCell(d.loc)}</td><td>${esc(d.fw)}${fwBadge(d.fw)}</td><td>${canEdit()?`<button class="btn" data-id="${d.id}">แก้ไข</button>`:""}</td></tr>`).join("")}</table><p class="mut">อุปกรณ์ใหม่ลงทะเบียนอัตโนมัติจากเครื่องมือ provision (สถานะ ready) → ผูกผู้ป่วยแล้วตั้งเป็น active ก่อนติดตั้งที่บ้าน</p></div>`;
   aiWire($("#main"));
+  if(seenFlash){const tr=$(`#main tr[data-rid="${seenFlash}"]`);seenFlash=0;if(tr){tr.classList.add("seen");setTimeout(()=>tr.classList.remove("seen"),2400)}}
   const dById=i=>ds.find(x=>x.id==i),dBody=(d,lc)=>({dev_eui:d.dev_eui,label:d.label,lifecycle:lc,patient_id:d.patient_id});
   lister("devices",$("#main").lastElementChild,{noun:"เครื่อง",reload:loadDevices,bulk:[
     {label:"ตั้งเป็น ready",only:i=>dById(i).lifecycle!=="ready",run:i=>api("/devices/"+i,{method:"PUT",body:dBody(dById(i),"ready")})},

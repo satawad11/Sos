@@ -100,6 +100,10 @@ class Engine:
         if up.config_ver != (dev.config_ver & 0xFF) and up.msg_type in (codec.T_HEARTBEAT, codec.T_POLL):
             self._send_config(db, dev)
         db.commit()
+        # every uplink: screens update the device's link badge / last-seen at once (after commit, like case events)
+        self.publish({"type": "device_seen", "device_id": dev.id, "dev_eui": dev.dev_eui, "last_seen": aware(dev.last_seen).isoformat() if dev.last_seen else None,
+                      "battery": dev.battery, "mains_ok": dev.mains_ok, "rssi": dev.last_rssi, "snr": dev.last_snr,
+                      **settings_store.device_link(db, dev, now)})
         return result
 
     def handle_gateway_report(self, db: Session, gateway_id: str, raw) -> str:
