@@ -54,6 +54,7 @@ class Engine:
         db.add(CaseEvent(case_id=case.id, kind=kind, actor=actor, detail=detail))
 
     def _pub(self, case: Case, what: str):
+        # Always called after db.commit(): a dashboard that reacts to the event must find the row already stored.
         self.publish({"type": what, "case_id": case.id, "state": case.state, "overdue": case.overdue})
 
     # ---------- uplink ----------
@@ -184,9 +185,12 @@ class Engine:
         self._event(db, case, "created", battery=up.battery, mains_ok=up.mains_ok, after_hours=ah)
         esc = settings_store.get(db, "escalation")
         case.esc_step = 0
-        self._notify_step(db, case, 0)
         case.next_escalation_at = now + timedelta(seconds=esc["escalate_after_s"])
+        # Commit and tell the dashboards first: they re-read the case as soon as the event arrives, and the LINE
+        # call below can take seconds per recipient (timeouts up to 10 s) — the screen must not wait for it.
+        db.commit()
         self._pub(case, "case_new")
+        self._notify_step(db, case, 0)
         return "created"
 
     def _test(self, db, dev, up, now) -> str:
@@ -194,7 +198,7 @@ class Engine:
                     is_test=True, state="closed", closed_at=now, close_reason="test", created_at=now)
         db.add(case); db.flush()
         self._event(db, case, "test_received", battery=up.battery)
-        self._pub(case, "case_test")
+        db.commit(); self._pub(case, "case_test")
         if self.notifier is not None and settings_store.get(db, "self_test").get("confirm_line"):
             try:   # tell the responsible อสม. the monthly test went through (never blocks the device reply)
                 cg = first_caregivers(db).get(dev.patient_id) if dev.patient_id else None
@@ -210,7 +214,7 @@ class Engine:
             case.state = "cancelled"; case.next_escalation_at = None
             self._drop_msg(db, case)
             self._event(db, case, "cancelled_by_device")
-            self._pub(case, "case_update")
+            db.commit(); self._pub(case, "case_update")
             return "cancelled"
         return "ignored"
 
@@ -251,7 +255,7 @@ class Engine:
         if up.msg_seen == p["seq"]:
             self._event(db, case, "message_delivered", seq=p["seq"], code=p["code"], value=p["value"])
             case.msg_pending = None
-            self._pub(case, "case_msg")
+            db.commit(); self._pub(case, "case_msg")
             return "msg_delivered"
         if case.state not in OPEN_STATES:
             return None
@@ -368,7 +372,7 @@ class Engine:
             age = (now - aware(case.created_at)).total_seconds()
             if not case.overdue and age >= esc["overdue_after_s"]:
                 case.overdue = True; n += 1
-                self._event(db, case, "overdue"); self._pub(case, "case_update")
+                self._event(db, case, "overdue"); db.commit(); self._pub(case, "case_update")
             nxt = aware(case.next_escalation_at)
             if nxt and now >= nxt:
                 n += 1

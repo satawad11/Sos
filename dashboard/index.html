@@ -473,6 +473,11 @@ html[data-theme=dark]{color-scheme:dark}html[data-theme=light]{color-scheme:ligh
 .fwdone{display:flex;gap:12px;align-items:flex-start;margin-top:14px;padding:14px;border-radius:10px;background:var(--grn2)}.fwdone svg.i{flex:none;width:22px;height:22px;color:var(--grn)}
 @keyframes fwspin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.fws li.s-run .fwi{animation:none}}
+
+.top .btn.snd.ring{background:var(--red);color:#fff;border-color:var(--red);animation:sndp 1.2s ease-in-out infinite}
+.top .btn.snd.lock{background:var(--amb2);color:color-mix(in srgb,var(--amb) 70%,var(--ink));border-color:color-mix(in srgb,var(--amb) 45%,transparent)}
+@keyframes sndp{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--red) 25%,transparent)}}
+@media(prefers-reduced-motion:reduce){.top .btn.snd.ring{animation:none}}
 </style></head>
 <body>
 <div id="app"></div><div id="toast" aria-live="polite"></div>
@@ -482,7 +487,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=iso=>iso?new Date(iso).toLocaleString("th-TH-u-ca-buddhist",{timeZone:"Asia/Bangkok",dateStyle:"short",timeStyle:"medium"}):"-";
 const ST={new:"รอรับเรื่อง",accepted:"รับเรื่องแล้ว",closed:"ปิดเคส",cancelled:"ยกเลิกโดยผู้ป่วย"};
-let token=sessionStorage.getItem("tk")||"",role=sessionStorage.getItem("role")||"",page="cases",ws=null,timer=null,audioOn=false;
+let token=sessionStorage.getItem("tk")||"",role=sessionStorage.getItem("role")||"",page="cases",ws=null,timer=null,audioOn=(()=>{try{return localStorage.getItem("snd")!=="0"}catch(e){return true}})();
 async function api(path,opt={}){
   const r=await fetch("/api"+path,{...opt,headers:{"content-type":"application/json",...(token?{authorization:"Bearer "+token}:{}),...(opt.headers||{})},body:opt.body&&JSON.stringify(opt.body)});
   if(r.status===401&&!path.startsWith("/login")){logout();throw new Error("หมดเวลา กรุณาเข้าสู่ระบบใหม่")}
@@ -544,18 +549,18 @@ const DVI={offline:"ขาดการติดต่อ",battery:"แบตเ�
 async function onEvt(m){
   const id=m.case_id;
   if(m.type==="case_new"){let c=null;try{c=await api(`/cases/${id}`)}catch(e){}
-    notify({id:`c${id}n`,kind:"sos",title:`เคสฉุกเฉินใหม่ #${id}`,body:c?.patient?`${c.patient.full_name} · ${c.patient.address||""}`:"",go:{case:id}});sosPopup(id,c)}
+    alarmAdd(id);notify({id:`c${id}n`,kind:"sos",title:`เคสฉุกเฉินใหม่ #${id}`,body:c?.patient?`${c.patient.full_name} · ${c.patient.address||""}`:"",go:{case:id}});sosPopup(id,c)}
   else if(m.type==="case_update"){
     if(m.overdue&&m.state==="new")notify({id:`c${id}o`,kind:"warn",title:`เคส #${id} เกินเวลารับเรื่อง`,body:"ยังไม่มีผู้รับเรื่อง",go:{case:id}});
     else if(m.state==="accepted")notify({id:`c${id}a`,kind:"info",title:`รับเรื่องเคส #${id} แล้ว`,go:{case:id}});
     else if(m.state==="closed")notify({id:`c${id}c`,kind:"ok",title:`ปิดเคส #${id} แล้ว`,go:{case:id}});
-    if(m.state!=="new")sosDrop(id)}
-  else if(m.type==="case_test")notify({kind:"info",title:"ได้รับสัญญาณทดสอบปุ่ม",go:{page:"selftest"}});
+    if(m.state!=="new"){sosDrop(id);alarmDrop(id)}}
+  else if(m.type==="case_test"){beep();notify({kind:"info",title:"ได้รับสัญญาณทดสอบปุ่ม",go:{page:"selftest"}})}
   else if(m.type==="gateway_state")notify({kind:m.state==="offline"?"warn":"ok",title:m.state==="offline"?`เกตเวย์ ${m.gateway_id} ขาดการเชื่อมต่อ`:`เกตเวย์ ${m.gateway_id} กลับมาออนไลน์`,go:{page:"gateways"}});
   else if(m.type==="device_state"){const k=Object.keys(DVI).find(k=>(m.issue||"").startsWith("device_"+k));if(!k)return;const ok=/_ok$/.test(m.issue);
     notify({kind:ok?"ok":"warn",title:`อุปกรณ์ ${m.dev_eui}: ${DVI[k]}${ok?" — กลับมาปกติ":""}`,go:{page:"devices"}})}}
 async function ncSeed(){if(ncSeed.done)return;ncSeed.done=true;   // open cases that arrived while nobody was signed in
-  try{const cs=await api("/cases?state=new");cs.filter(c=>!c.is_test).forEach(c=>notify({id:`c${c.id}n`,kind:"sos",title:`เคสฉุกเฉินใหม่ #${c.id}`,body:c.patient?`${c.patient.full_name} · ${c.patient.address||""}`:"",go:{case:c.id},at:c.created_at}))}catch(e){}}
+  try{const cs=await api("/cases?state=new");alarmSet(cs.filter(c=>!c.is_test).map(c=>c.id));cs.filter(c=>!c.is_test).forEach(c=>notify({id:`c${c.id}n`,kind:"sos",title:`เคสฉุกเฉินใหม่ #${c.id}`,body:c.patient?`${c.patient.full_name} · ${c.patient.address||""}`:"",go:{case:c.id},at:c.created_at}))}catch(e){}}
 
 // emergency popup: one modal that lists every new case not yet handled in this browser
 const sosQ=new Map();
@@ -569,19 +574,71 @@ function sosPopup(id,c){sosQ.set(+id,c);let d=$("#sos");
     <p class="sos-t">เคส #${fid}${fc?` · กดปุ่มเมื่อ ${new Date(fc.created_at).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"})} น. · ${esc(fc.device?.label||fc.device?.dev_eui||"")}`:""}</p>
     ${rest.length?`<p class="sos-m">และมีเคสใหม่อีก ${rest.length} เคส: ${rest.map(([i])=>"#"+i).join(", ")}</p>`:""}
     <div class="sos-f">${p?.phone?`<a class="btn" href="tel:${esc(p.phone)}">${ico("phone")}โทร ${esc(p.phone)}</a>`:""}<button class="btn r" id="sosgo" type="button">เปิดเคส #${fid}</button></div>
-    <button class="sos-x" type="button" id="sosx">ปิดหน้าต่างนี้ เคสยังรอรับเรื่องอยู่</button>`;
-  $("#sosgo").onclick=()=>{sosClose();openCaseAfter=fid;page="cases";render();scrollTo(0,0)};$("#sosx").onclick=sosClose;
+    <button class="sos-x" type="button" id="sosx">ปิดหน้าต่างและหยุดเสียง 2 นาที เคสยังรอรับเรื่องอยู่</button>`;
+  $("#sosgo").onclick=()=>{sosClose();openCaseAfter=fid;page="cases";render();scrollTo(0,0)};$("#sosx").onclick=()=>{sosClose();if(SND.timer)alarmMute(2)};
   if(!d.open){d.showModal();$("#sosgo").focus()}}
 function sosDrop(id){if(!sosQ.delete(+id))return;if(!sosQ.size)sosClose();else{const [i,c]=[...sosQ.entries()].pop();sosQ.delete(i);sosPopup(i,c)}}
 function sosClose(){sosQ.clear();const d=$("#sos");if(d?.open)d.close()}
 
 const guard=f=>async(...a)=>{try{return await f(...a)}catch(e){toast(e.message,"err")}};
-function logout(){token="";page="cases";sessionStorage.clear();if(ws)ws.close();render()}
-function beep(){if(!audioOn)return;try{const c=new AudioContext(),o=c.createOscillator();o.frequency.value=880;o.connect(c.destination);o.start();setTimeout(()=>{o.stop();c.close()},700)}catch{}}
+function logout(){token="";page="cases";sessionStorage.clear();wsGen++;if(ws){ws.onclose=null;ws.close()}alarmSet([]);render()}
+// ---------------------------------------------------------------- live link (WebSocket)
+// One connection at a time: every connect bumps wsGen, so callbacks of an older socket can never schedule another
+// reconnect (that loop used to replace a healthy connection every 3 s and lose events in between).
+// A ping every 25 s notices a dead link (sleeping laptop, Wi-Fi switch, proxy timeout); after a reconnect the open
+// cases are re-read, so nothing that happened while offline is missed.
+let wsGen=0,wsLast=0,wsDown=false;
 function connectWS(){
-  if(ws)ws.close();ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws?token="+encodeURIComponent(token));
-  ws.onmessage=e=>{const m=JSON.parse(e.data);onEvt(m).catch(()=>{});if(m.type==="case_new")beep();if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()};
-  ws.onopen=()=>setConn(true);ws.onclose=()=>{setConn(false);if(token)setTimeout(connectWS,3000)}}
+  const gen=++wsGen;if(ws){ws.onopen=ws.onclose=ws.onmessage=null;try{ws.close()}catch(e){}}
+  const s=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws?token="+encodeURIComponent(token));ws=s;
+  s.onopen=()=>{if(gen!==wsGen)return;wsLast=Date.now();setConn(true);if(wsDown){wsDown=false;liveResync()}};
+  s.onmessage=e=>{if(gen!==wsGen)return;wsLast=Date.now();let m;try{m=JSON.parse(e.data)}catch(_){return}if(m.type!=="pong")liveEvent(m)};
+  s.onclose=()=>{if(gen!==wsGen)return;setConn(false);wsDown=true;if(token)setTimeout(()=>{if(gen===wsGen&&token)connectWS()},2000)}}
+setInterval(()=>{if(!token||!ws)return;
+  if(ws.readyState===1){if(Date.now()-wsLast>60000){wsDown=true;setConn(false);connectWS()}else try{ws.send("ping")}catch(e){}}},25000);
+document.addEventListener("visibilitychange",()=>{if(document.hidden||!token)return;if(!ws||ws.readyState>1||Date.now()-wsLast>40000){wsDown=true;connectWS()}});
+addEventListener("online",()=>{if(token){wsDown=true;connectWS()}});
+async function liveResync(){
+  try{const cs=await api("/cases?state=new");alarmSet(cs.filter(c=>!c.is_test).map(c=>c.id))}catch(e){}
+  if(page==="cases"&&!caseOpen)loadCases();else if(page==="map")loadMap?.()}
+
+// ---------------------------------------------------------------- alarm sound
+// One AudioContext, unlocked by the first click/tap/key on the page (browsers block sound before that).
+// While any new case is unanswered the siren repeats every 3 s, until the case is accepted/closed or someone
+// presses "หยุดเสียง 2 นาที". The on/off choice is remembered per browser (on by default).
+const SND={ctx:null,timer:0,muteUntil:0,cases:new Set()};
+function sndCtx(){if(!SND.ctx){const A=window.AudioContext||window.webkitAudioContext;if(!A)return null;try{SND.ctx=new A()}catch(e){return null}}return SND.ctx}
+const sndReady=()=>SND.ctx?.state==="running";
+function sndUnlock(){const c=sndCtx();if(c&&c.state!=="running")c.resume().then(()=>{sndUI();alarmSync()}).catch(()=>{})}
+["pointerdown","keydown","touchend"].forEach(t=>document.addEventListener(t,sndUnlock,{capture:true,passive:true}));
+function tones(seq,vol=.22){const c=sndCtx();if(!c||c.state!=="running")return false;let t=c.currentTime+.02;
+  for(const [f,d] of seq){const o=c.createOscillator(),g=c.createGain();o.type="triangle";o.frequency.value=f;
+    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(vol,t+.02);g.gain.setValueAtTime(vol,t+d-.04);g.gain.exponentialRampToValueAtTime(.0001,t+d);
+    o.connect(g).connect(c.destination);o.start(t);o.stop(t+d+.02);t+=d}return true}
+const siren=()=>tones([[988,.28],[740,.28],[988,.28],[740,.28],[988,.28],[740,.28]],.28);
+function beep(){if(audioOn)tones([[880,.12],[1175,.18]],.18)}            // short chime: sound switched on, test press
+function alarmSet(ids){SND.cases=new Set(ids);alarmSync()}
+function alarmAdd(id){SND.cases.add(+id);alarmSync()}
+function alarmDrop(id){SND.cases.delete(+id);alarmSync()}
+function alarmSync(){const ring=audioOn&&SND.cases.size>0&&Date.now()>=SND.muteUntil;
+  if(ring&&!SND.timer){siren();SND.timer=setInterval(()=>{if(Date.now()<SND.muteUntil)return;siren()},3000)}
+  else if(!ring&&SND.timer){clearInterval(SND.timer);SND.timer=0}
+  if(SND.muteUntil&&Date.now()>=SND.muteUntil){SND.muteUntil=0}sndUI()}
+function alarmMute(min=2){SND.muteUntil=Date.now()+min*60000;alarmSync();toast(`หยุดเสียงเตือน ${min} นาที เคสยังรอรับเรื่องอยู่`,"info");setTimeout(alarmSync,min*60000+200)}
+function sndUI(){const b=$("#snd");if(!b)return;const ringing=audioOn&&SND.cases.size>0&&Date.now()>=SND.muteUntil,locked=audioOn&&!sndReady();
+  const [ic,lbl,cls,tip]=!audioOn?["volx","เปิดเสียงเตือน","","เสียงเตือนปิดอยู่ — กดเพื่อเปิด"]
+    :ringing?["vol","หยุดเสียง 2 นาที","ring","มีเคสใหม่รอรับเรื่อง — กดเพื่อหยุดเสียงชั่วคราว"]
+    :locked?["volx","แตะเพื่อเปิดเสียง","lock","เบราว์เซอร์ยังไม่อนุญาตให้เล่นเสียง — คลิกที่ใดก็ได้บนหน้านี้หนึ่งครั้ง"]
+    :SND.muteUntil>Date.now()?["volx",`หยุดเสียงถึง ${new Date(SND.muteUntil).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"})}`,"","กดเพื่อให้เสียงกลับมาดังทันที"]
+    :["vol","เสียงเปิด","on","เสียงเตือนเปิดอยู่ — กดเพื่อปิด"];
+  b.className="btn snd "+cls;b.title=tip;b.innerHTML=`${ico(ic)}<span class="lbl">${lbl}</span>`}
+function sndClick(){sndUnlock();
+  if(!audioOn){audioOn=true;lsSet("snd","1");setTimeout(()=>{beep();alarmSync()},60);return}
+  if(SND.cases.size&&Date.now()>=SND.muteUntil){alarmMute(2);return}
+  if(SND.muteUntil>Date.now()){SND.muteUntil=0;alarmSync();return}
+  audioOn=false;lsSet("snd","0");alarmSync()}
+setInterval(sndUI,30000);
+function liveEvent(m){onEvt(m).catch(()=>{});if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
 const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",integrations:"🔗",settings:"⚙️",audit:"📜",account:"👤"};
@@ -653,7 +710,7 @@ function render(){
   new MutationObserver(()=>{if(!$("#main #back"))crumb(null)}).observe($("#main"),{childList:true});
   ncInit();ncSeed();thmInit();fwLatest();
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
-  $("#out").onclick=logout;$("#pw").onclick=()=>{page="account";render()};$("#snd").onclick=()=>{audioOn=!audioOn;beep();render()};
+  $("#out").onclick=logout;$("#pw").onclick=()=>{page="account";render()};$("#snd").onclick=sndClick;sndUI();
   clearInterval(timer);(({cases:loadCases,map:loadMap,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,selftest:loadSelftest,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,chirpstack:loadChirpstack,integrations:loadIntegrations,update:loadUpdate,account:loadAccount,settings:loadSettings,audit:loadAudit})[page])();
   if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
   if(!ws||ws.readyState>1)connectWS()}

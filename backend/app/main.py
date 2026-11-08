@@ -24,9 +24,14 @@ class Hub:
             asyncio.run_coroutine_threadsafe(self._send(event), self.loop)
 
     async def _send(self, event):
-        for ws in list(self.clients):
-            try: await ws.send_json(event)
-            except Exception: self.clients.discard(ws)
+        # all screens at once; a stalled connection (sleeping laptop, dead Wi-Fi) is dropped instead of delaying the rest
+        async def one(ws):
+            try: await asyncio.wait_for(ws.send_json(event), timeout=5)
+            except Exception:
+                self.clients.discard(ws)
+                try: await ws.close()
+                except Exception: pass
+        await asyncio.gather(*(one(ws) for ws in list(self.clients)))
 
 
 hub = Hub()
@@ -101,8 +106,12 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
                 await websocket.close(code=4401); return
         await websocket.accept(); hub.clients.add(websocket)
         try:
-            while True: await websocket.receive_text()
+            while True:                       # the dashboard sends "ping" every 25 s to notice a dead link quickly
+                if await websocket.receive_text() == "ping":
+                    await websocket.send_json({"type": "pong"})
         except WebSocketDisconnect:
+            pass
+        finally:
             hub.clients.discard(websocket)
 
     import os
