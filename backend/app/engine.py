@@ -56,7 +56,7 @@ class Engine:
         except codec.CodecError as e:
             log.warning("bad payload from %s: %s", dev_eui, e)
             return "bad_payload"
-        dev = db.query(Device).filter_by(dev_eui=dev_eui).first()
+        dev = db.query(Device).filter_by(dev_eui=dev_eui.lower()).first()
         if dev is None:
             log.warning("unknown device %s", dev_eui)
             return "unknown_device"

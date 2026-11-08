@@ -594,7 +594,7 @@ def set_device_config(did: int, b: DeviceConfigIn, db: Session = Depends(get_db)
             "effective": settings_store.effective_device_cfg(db, d)}
 
 
-def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str = "staff") -> dict:
+def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str = "staff", heard: dict | None = None) -> dict:
     st, reason = gwmod.classify(g, now, g.offline_min or off, move_m)
     crit, warn = gwmod.critical(g.report), gwmod.warnings(g.report)
     mv = gwmod.moved_m(g, now, move_m)
@@ -609,7 +609,7 @@ def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str
             "status": st, "offline": st == "offline", "reason": reason or (g.offline_reason if st == "offline" else ""),
             "last_seen": iso(g.last_seen), "last_report_at": iso(g.last_report_at),
             "state_changed_at": iso(g.state_changed_at), "uplinks_total": g.uplinks_total or 0,
-            "devices": n_dev.get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc,
+            "devices": n_dev.get(g.gateway_id, 0), "devices_heard": (heard or {}).get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc,
             "notes": g.notes or "", "offline_min": g.offline_min, "offline_min_effective": g.offline_min or off,
             "alert_ids": g.alert_ids, "agent": rep.get("agent") is True}
 
@@ -634,12 +634,13 @@ def set_patient_location(pid: int, b: LocationIn, db: Session = Depends(get_db),
 def gateways(db: Session = Depends(get_db), u=Depends(current_user)):
     off = settings_store.get(db, "offline")["gateway_offline_min"]
     now = utcnow()
-    n_dev: dict[str, int] = {}
-    for d in db.query(Device).filter(Device.lifecycle == "active").all():
+    n_dev: dict[str, int] = {}; heard: dict[str, int] = {}     # active devices / every non-retired device last heard here
+    for d in db.query(Device).filter(Device.lifecycle != "retired").all():
         if d.last_gateway:
-            n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
+            heard[d.last_gateway] = heard.get(d.last_gateway, 0) + 1
+            if d.lifecycle == "active": n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
     mv = settings_store.get(db, "geo")["gateway_move_m"]
-    return [gw_dict(g, now, off, n_dev, mv, u.role) for g in db.query(Gateway).order_by(Gateway.id).all()]
+    return [gw_dict(g, now, off, n_dev, mv, u.role, heard) for g in db.query(Gateway).order_by(Gateway.id).all()]
 
 
 def _quality(rssi, snr):
@@ -658,13 +659,14 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
     goff = settings_store.get(db, "offline")["gateway_offline_min"]
     doff = settings_store.get(db, "offline")["device_offline_min"]
     gcfg = settings_store.get(db, "geo")
-    n_dev: dict[str, int] = {}
+    n_dev: dict[str, int] = {}; heard: dict[str, int] = {}
     devs = db.query(Device).filter(Device.lifecycle != "retired").order_by(Device.id).all()
     for d in devs:
+        if d.last_gateway: heard[d.last_gateway] = heard.get(d.last_gateway, 0) + 1
         if d.lifecycle == "active" and d.last_gateway: n_dev[d.last_gateway] = n_dev.get(d.last_gateway, 0) + 1
     gws, gpos = [], {}
     for g in db.query(Gateway).filter(Gateway.enabled.isnot(False)).order_by(Gateway.id).all():
-        x = gw_dict(g, now, goff, n_dev, gcfg["gateway_move_m"], u.role)
+        x = gw_dict(g, now, goff, n_dev, gcfg["gateway_move_m"], u.role, heard)
         loc = x["loc"]; pos = loc["registered"] or (loc["gps"] if loc["gps"] and loc["gps"]["fresh"] else None)
         src = "registered" if loc["registered"] else ("gps" if pos else None)
         if pos: gpos[g.gateway_id] = (pos["lat"], pos["lon"])
