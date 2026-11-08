@@ -461,13 +461,28 @@ def delete_cg(cid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
     return {"ok": True}
 
 
+BIND_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
 @router.post("/caregivers/{cid}/bind-code")
-def bind_code(cid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
-    if not db.get(Caregiver, cid): raise HTTPException(404)
-    code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(8))
+def bind_code(cid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin), eng=Depends(get_engine)):
+    cg = db.get(Caregiver, cid)
+    if not cg: raise HTTPException(404)
+    code = "".join(secrets.choice(BIND_ALPHABET) for _ in range(8))
     db.add(BindCode(code=code, caregiver_id=cid, expires_at=utcnow() + timedelta(minutes=30)))
     audit(db, u.username, "bindcode_create", str(cid)); db.commit()
-    return {"code": code, "expires_minutes": 30}
+    # One QR for the caregiver's phone: LINE opens a chat with our Official Account with the code already typed
+    # (https://line.me/R/oaMessage/<basic id>/?<text>), so binding is "scan, then tap send".
+    info = getattr(getattr(eng, "notifier", None), "bot_info", lambda: None)()
+    oa = None
+    if info:
+        from urllib.parse import quote
+        from . import mfa
+        bid = quote(info["basicId"], safe="")
+        msg = f"https://line.me/R/oaMessage/{bid}/?{code}"
+        oa = {"name": info.get("displayName") or "", "basic_id": info["basicId"], "add_url": f"https://line.me/R/ti/p/{bid}",
+              "message_url": msg, "qr_svg": mfa.qr_svg(msg)}
+    return {"code": code, "expires_minutes": 30, "name": cg.full_name, "oa": oa}
 
 
 @router.post("/caregivers/{cid}/unbind")
@@ -1437,16 +1452,29 @@ async def line_webhook(request: Request, db: Session = Depends(get_db), eng=Depe
         uid = (ev.get("source") or {}).get("userId", "")
         tok = ev.get("replyToken", "")
         reply = (lambda t: notifier.reply_text(tok, t)) if notifier and tok else (lambda t: None)
-        if ev.get("type") == "message" and (ev.get("message") or {}).get("type") == "text":
-            code = ev["message"]["text"].strip().upper()
-            bc = db.query(BindCode).filter_by(code=code, used=False).first()
+        bound = db.query(Caregiver).filter_by(line_user_id=uid, active=True).first() if uid else None
+        if ev.get("type") == "follow":
+            reply(f"ยินดีต้อนรับกลับครับ บัญชีนี้ผูกกับ {bound.full_name} อยู่แล้ว ระบบจะส่งแจ้งเหตุมาที่แชทนี้" if bound else
+                  "สวัสดีครับ นี่คือบัญชีแจ้งเหตุฉุกเฉินของ รพ.สต.\n\nถ้าคุณเป็น อสม./ผู้ดูแลผู้ป่วย: ขอรหัสผูกบัญชี 8 ตัวจากเจ้าหน้าที่ "
+                  "แล้วพิมพ์ส่งในแชทนี้ (หรือสแกน QR จากหน้าจอเจ้าหน้าที่) เพื่อรับแจ้งเหตุทาง LINE")
+        elif ev.get("type") == "message" and (ev.get("message") or {}).get("type") == "text":
+            code = "".join(ev["message"]["text"].split()).upper()          # tolerate spaces typed in the middle
+            looks_like_code = len(code) == 8 and all(c in BIND_ALPHABET for c in code)
+            bc = db.query(BindCode).filter_by(code=code, used=False).first() if looks_like_code else None
             if bc and aware(bc.expires_at) > utcnow():
                 cg = db.get(Caregiver, bc.caregiver_id)
                 cg.line_user_id, bc.used = uid, True
                 audit(db, "line", "line_bind", str(cg.id)); db.commit()
-                reply(f"ผูกบัญชีสำเร็จ: {cg.full_name}")
+                friend = getattr(notifier, "is_friend", lambda _u: None)(uid)
+                reply(f"ผูกบัญชีสำเร็จ: {cg.full_name}\nเมื่อผู้ป่วยกดปุ่มแจ้งเหตุ ระบบจะส่งข้อความมาที่แชทนี้ พร้อมปุ่ม \"รับเรื่อง\""
+                      + ("\n\n⚠️ กรุณากด \"เพิ่มเพื่อน\" บัญชีนี้ด้วย ไม่เช่นนั้นจะไม่ได้รับแจ้งเหตุ" if friend is False else ""))
+            elif looks_like_code:
+                reply("รหัสไม่ถูกต้องหรือหมดอายุแล้ว (ใช้ได้ 30 นาที ครั้งเดียว) — ขอรหัสใหม่จากเจ้าหน้าที่")
+            elif bound:
+                reply(f"บัญชีนี้ผูกกับ {bound.full_name} แล้ว ระบบจะส่งแจ้งเหตุมาที่แชทนี้\n"
+                      "ข้อความที่พิมพ์ในแชทนี้ไม่ถึงเจ้าหน้าที่ — ถ้าเร่งด่วนโทร 1669")
             else:
-                reply("รหัสไม่ถูกต้องหรือหมดอายุ")
+                reply("ยังไม่ได้ผูกบัญชี: ขอรหัส 8 ตัวจากเจ้าหน้าที่ รพ.สต. แล้วพิมพ์ส่งในแชทนี้")
         elif ev.get("type") == "postback":
             data = (ev.get("postback") or {}).get("data", "")
             if data.startswith("accept:"):

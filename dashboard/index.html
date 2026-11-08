@@ -489,6 +489,11 @@ tr.seen td{animation:seen 2.4s ease-out}
 .kpi.go{cursor:pointer}.kpi.go:hover{background:color-mix(in srgb,var(--pri) 4%,var(--card))}.kpi.go:focus-visible{outline:2px solid var(--pri);outline-offset:-2px}
 @media(prefers-reduced-motion:reduce){tr.seen td{animation:none}}
 @media(min-width:1024px){.kpis{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}}
+
+.bindq{display:flex;gap:16px;align-items:center;margin:4px 0 8px}.bindq .qr{flex:none;width:168px;background:#fff;border-radius:10px;padding:6px;border:1px solid var(--bd)}.bindq .qr svg{display:block;width:100%;height:auto}
+.bindq ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;color:var(--ink)}
+dialog.dlg:has(.bindq){width:min(560px,calc(100vw - 32px))}
+@media(max-width:560px){.bindq{flex-direction:column;align-items:flex-start}}
 </style></head>
 <body>
 <div id="app"></div><div id="toast" aria-live="polite"></div>
@@ -599,6 +604,15 @@ function sosPopup(id,c){sosQ.set(+id,c);let d=$("#sos");
     <button class="sos-x" type="button" id="sosx">ปิดหน้าต่างและหยุดเสียง 2 นาที เคสยังรอรับเรื่องอยู่</button>`;
   $("#sosgo").onclick=()=>{sosClose();openCaseAfter=fid;page="cases";render();scrollTo(0,0)};$("#sosx").onclick=()=>{sosClose();if(SND.timer)alarmMute(2)};
   if(!d.open){d.showModal();$("#sosgo").focus()}}
+// LINE bind dialog: one QR that opens the OA chat with the code typed (scan → tap send), the code for typing by hand
+function bindHTML(r){const oa=r.oa;
+  return `${oa?`<div class="bindq"><div class="qr">${oa.qr_svg}</div><ol>
+      <li>ให้ อสม. เปิดกล้องมือถือหรือ LINE แล้ว<b>สแกน QR นี้</b></li>
+      <li>LINE จะเปิดแชทกับ <b>${esc(oa.name||oa.basic_id)}</b> พร้อมรหัสที่พิมพ์ไว้แล้ว → กด <b>ส่ง</b></li>
+      <li>กด <b>เพิ่มเพื่อน</b> ด้วย (ถ้ายังไม่ได้เพิ่ม) ไม่เช่นนั้นจะไม่ได้รับแจ้งเหตุ</li></ol></div>
+    <p class="mut">ถ้าสแกนไม่ได้: เพิ่มเพื่อน <a href="${esc(oa.add_url)}" target="_blank" rel="noopener">${esc(oa.basic_id)}</a> แล้วพิมพ์รหัสนี้ส่งในแชท</p>`
+   :`<p>ให้ อสม. เพิ่มเพื่อนบัญชี LINE OA ของ รพ.สต. แล้วพิมพ์รหัสนี้ส่งในแชท</p>`}
+   <div class="bigcode">${esc(r.code)}</div><p class="mut">ใช้ได้ ${esc(r.expires_minutes)} นาที ครั้งเดียว · ผูกสำเร็จแล้ว อสม. จะได้ข้อความ "ผูกบัญชีสำเร็จ" และรายชื่อจะขึ้น ✅</p>`}
 function sosDrop(id){if(!sosQ.delete(+id))return;if(!sosQ.size)sosClose();else{const [i,c]=[...sosQ.entries()].pop();sosQ.delete(i);sosPopup(i,c)}}
 function sosClose(){sosQ.clear();const d=$("#sos");if(d?.open)d.close()}
 
@@ -929,7 +943,7 @@ const loadCaregivers=guard(async()=>{
   $("#main").innerHTML=`${canEdit()?`<div class="card"><h3>เพิ่ม อสม./ผู้ดูแล</h3><div class="row"><input id="n" placeholder="ชื่อ-สกุล"><input id="r" value="อสม."><input id="ph" placeholder="โทร"><button class="btn p" id="add">เพิ่ม</button></div></div>`:""}
   <div class="card"><table><tr><th>ชื่อ</th><th>บทบาท</th><th>โทร</th><th>LINE</th><th></th></tr>${cs.map(c=>`<tr data-rid="${c.id}"><td>${esc(c.full_name)}${c.active?"":" (ปิดใช้งาน)"}</td><td>${esc(c.role)}</td><td>${esc(c.phone)}</td><td>${c.line_bound?"✅ ผูกแล้ว":"❌ ยังไม่ผูก"}</td><td style="white-space:nowrap">${canEdit()?`<button class="btn" data-bind="${c.id}">สร้างรหัสผูก LINE</button>${c.line_bound?` <button class="btn" data-un="${c.id}">ยกเลิกผูก</button>`:""} <button class="btn" data-ce="${c.id}">แก้ไข</button> <button class="btn" data-ct="${c.id}">${c.active?"ปิดใช้งาน":"เปิดใช้งาน"}</button>`:""}${role==="admin"?` <button class="btn r" data-cd="${c.id}">ลบ</button>`:""}</td></tr>`).join("")}</table><p class="mut">วิธีผูก: กดสร้างรหัส → ให้ อสม. เพิ่มเพื่อนบัญชี LINE ของ รพ.สต. แล้วพิมพ์รหัสนั้นส่งไป (รหัสใช้ได้ 30 นาที ครั้งเดียว)</p></div>`;
   if($("#add"))$("#add").onclick=guard(async()=>{await api("/caregivers",{method:"POST",body:{full_name:$("#n").value,role:$("#r").value,phone:$("#ph").value}});loadCaregivers()});
-  document.querySelectorAll("[data-bind]").forEach(b=>b.onclick=guard(async()=>{const r=await api(`/caregivers/${b.dataset.bind}/bind-code`,{method:"POST"});dlg({icon:"integrations",title:"รหัสผูก LINE",html:`<p>ให้ อสม. พิมพ์รหัสนี้ในแชท LINE ของ รพ.สต.</p><div class="bigcode">${esc(r.code)}</div><p class="mut">หมดอายุใน ${esc(r.expires_minutes)} นาที</p>`,ok:"ปิด",cancel:false})}));
+  document.querySelectorAll("[data-bind]").forEach(b=>b.onclick=guard(async()=>{const r=await api(`/caregivers/${b.dataset.bind}/bind-code`,{method:"POST"});dlg({icon:"integrations",title:`ผูก LINE: ${r.name||""}`,html:bindHTML(r),ok:"ปิด",cancel:false}).then(()=>loadCaregivers?.())}));
   document.querySelectorAll("[data-un]").forEach(b=>b.onclick=guard(async()=>{if(await ask("ยกเลิกการผูก LINE?")){await api(`/caregivers/${b.dataset.un}/unbind`,{method:"POST"});loadCaregivers()}}));
   const cgBody=(c,o)=>({full_name:c.full_name,role:c.role,phone:c.phone,active:c.active,...o}),cById=i=>cs.find(x=>x.id==i);
   lister("caregivers",$("#main").lastElementChild,{noun:"คน",reload:loadCaregivers,bulk:[

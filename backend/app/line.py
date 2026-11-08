@@ -92,5 +92,35 @@ class LineNotifier:
         text = f"📍 พิกัดสดจากอุปกรณ์ ({name}) จับดาวเทียมได้ {sats} ดวง{far}\n{maps_url(lat, lon)}"
         return self._post(PUSH_URL, {"to": cg.line_user_id, "messages": [{"type": "text", "text": text}]})
 
+    # ---- the Official Account itself (for the bind QR) and friendship (push only reaches friends) ----
+    _info: tuple[float, dict | None] = (0.0, None)
+
+    def bot_info(self) -> dict | None:
+        """{"basicId": "@xxxx", "displayName": ...} of the OA, cached 10 min; None without a token / on error."""
+        import time
+        if time.time() - self._info[0] < 600 and self._info[1]:
+            return self._info[1]
+        if not self.token:
+            return None
+        try:
+            r = self.http.get("https://api.line.me/v2/bot/info", headers={"Authorization": f"Bearer {self.token}"})
+            info = r.json() if r.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            info = None
+        if info and info.get("basicId"):
+            LineNotifier._info = (time.time(), {k: info.get(k) for k in ("basicId", "displayName", "pictureUrl")})
+            return LineNotifier._info[1]
+        return None
+
+    def is_friend(self, user_id: str) -> bool | None:
+        """True/False from the profile API (404 = not a friend / blocked); None when it cannot tell."""
+        if not self.token or not user_id:
+            return None
+        try:
+            r = self.http.get(f"https://api.line.me/v2/bot/profile/{user_id}", headers={"Authorization": f"Bearer {self.token}"})
+        except httpx.HTTPError:
+            return None
+        return True if r.status_code == 200 else False if r.status_code == 404 else None
+
     def reply_text(self, reply_token: str, text: str):
         self._post(REPLY_URL, {"replyToken": reply_token, "messages": [{"type": "text", "text": text}]})
