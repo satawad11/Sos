@@ -27,3 +27,11 @@
     username="chirpstack"
     password="$MQTT_CHIRPSTACK_PASSWORD"
     json=true
+
+# Gateway map in the ChirpStack web UI. OpenStreetMap blocks tile requests from ChirpStack's UI when the browser fetches them
+# directly ("Access blocked"), so the tiles go through Caddy on the ChirpStack domain (scripts/enable-chirpstack-domain.sh:
+# /osm-tiles/*, behind the same IP allow-list, identifying this system to OSM). Through the SSH tunnel (localhost:8080) that
+# path does not exist and the map stays grey; everything else works.
+[ui]
+  tileserver="/osm-tiles/{z}/{x}/{y}.png"
+  map_attribution="&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors"

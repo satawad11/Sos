@@ -38,6 +38,9 @@
    - สคริปต์ตรวจ config ของ Caddy ก่อน ถ้าผิดจะย้อนกลับให้อัตโนมัติ · Caddy ขอใบรับรอง HTTPS ให้เอง
 3. เปิด `https://lns.dmtc.ac.th` → ถ้ายังเป็น `admin/admin` **เปลี่ยนรหัสผ่านทันที**
 4. ในแดชบอร์ด หน้า ChirpStack จะมีปุ่ม "เปิดหน้า ChirpStack"
+5. แผนที่เกตเวย์ในหน้า ChirpStack โหลดภาพแผนที่ผ่านเซิร์ฟเวอร์เรา (`/osm-tiles/…` บนโดเมนนี้ ตั้งใน `infra/chirpstack/chirpstack.toml` ส่วน `[ui]`)
+   เพราะ OpenStreetMap บล็อกการขอภาพจากหน้าเว็บ ChirpStack โดยตรง ("Access blocked") — path นี้อยู่หลัง allow-list เดียวกัน
+   และระบุชื่อระบบตามนโยบายของ OSM · ถ้าเปิดผ่าน SSH tunnel แผนที่จะเป็นสีเทา (ส่วนอื่นใช้ได้ปกติ)
 
 ปิดกลับเป็นแบบ SSH tunnel อย่างเดียว: `sudo bash scripts/enable-chirpstack-domain.sh --disable`
 
