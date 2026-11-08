@@ -580,7 +580,7 @@ function logout(){token="";page="cases";sessionStorage.clear();if(ws)ws.close();
 function beep(){if(!audioOn)return;try{const c=new AudioContext(),o=c.createOscillator();o.frequency.value=880;o.connect(c.destination);o.start();setTimeout(()=>{o.stop();c.close()},700)}catch{}}
 function connectWS(){
   if(ws)ws.close();ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws?token="+encodeURIComponent(token));
-  ws.onmessage=e=>{const m=JSON.parse(e.data);onEvt(m).catch(()=>{});if(m.type==="case_new")beep();if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases")loadCases();if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()};
+  ws.onmessage=e=>{const m=JSON.parse(e.data);onEvt(m).catch(()=>{});if(m.type==="case_new")beep();if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()};
   ws.onopen=()=>setConn(true);ws.onclose=()=>{setConn(false);if(token)setTimeout(connectWS,3000)}}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
@@ -735,7 +735,7 @@ function aiWire(root){
     b.onclick=guard(async()=>{b.disabled=true;b.textContent="✨ AI กำลังวิเคราะห์…";
       try{const r=await api("/ai/diagnose",{method:"POST",body:{scope,id:id?+id:null}});AIOUT[k]=r;show(k,r)}finally{b.disabled=false;b.textContent=old}})})}
 
-const loadCases=guard(async()=>{
+const loadCases=guard(async()=>{caseOpen=0;
   const [open,recent,st,gw]=await Promise.all([api("/cases?state=new,accepted"),api("/cases?limit=200"),api("/stats"),api("/gateways")]);
   if(page!=="cases")return;
   const row=c=>`<tr><td>#${c.id}</td><td>${esc(c.patient?c.patient.full_name:"(ไม่ทราบผู้ป่วย) "+c.device.dev_eui)}<div class="mut">${esc(c.patient?.address||"")} ${c.patient?.phone?`${esc(c.patient.phone)}`:""}</div></td><td><span class="tag ${c.state}">${ST[c.state]}</span>${c.overdue&&c.state==="new"?' <b style="color:var(--red)">เกินเวลา!</b>':""}${c.after_hours?' <span class="tag">นอกเวลา</span>':""}</td><td>${fmt(c.created_at)}</td><td>${esc(c.accepted_by)}</td><td><button class="btn" data-id="${c.id}" data-a="view">รายละเอียด</button></td></tr>`;
@@ -753,8 +753,37 @@ const loadCases=guard(async()=>{
   lister("cases",$("#main").lastElementChild,{noun:"เคส"});
   document.querySelectorAll("[data-a=view]").forEach(b=>b.onclick=()=>showCase(b.dataset.id));
   if(openCaseAfter){const id=openCaseAfter;openCaseAfter=0;showCase(id)}});
+/* ---- preset messages to the patient's device screen (FPort 12; English text is fixed in the firmware) ---- */
+let _devMsgs=null;const devMsgs=async()=>_devMsgs||(_devMsgs=await api("/device-messages"));
+const oled=lines=>`<div style="display:inline-block;background:#0b1220;color:#7dd3fc;font:600 14px/1.35 ui-monospace,Consolas,monospace;padding:8px 12px;border-radius:8px;min-width:150px;white-space:pre">${lines.map(esc).join("\n")}</div>`;
+let caseOpen=0;
+function caseMsgCard(c){
+  if(c.is_test||!(c.state==="new"||c.state==="accepted")){
+    const last=[...c.events].reverse().find(e=>e.kind==="message_sent");
+    return last?`<div class="card"><h3>ข้อความบนจออุปกรณ์</h3><p class="mut">ข้อความล่าสุด: ${esc(last.detail.text||"")}</p></div>`:""}
+  const del=[...c.events].reverse().find(e=>e.kind==="message_delivered"),sent=[...c.events].reverse().find(e=>e.kind==="message_sent");
+  const status=c.msg_pending?`<p>⏳ <b>กำลังส่งไปที่อุปกรณ์</b> (ส่งซ้ำอัตโนมัติจนกว่าจะขึ้นจอ)<br>${oled(c.msg_pending.lines)}</p>`
+    :del?`<p>✅ <b>ขึ้นจออุปกรณ์แล้ว</b> <span class="mut">${fmt(del.at)}</span><br>${oled(sent&&sent.detail.seq===del.detail.seq?(sent.detail.text||"").split(" / "):[])}</p>`:"";
+  if(!canEdit())return status?`<div class="card"><h3>ข้อความบนจออุปกรณ์</h3>${status}</div>`:"";
+  return `<div class="card" id="msgcard"><h3>📟 ส่งข้อความขึ้นจออุปกรณ์ผู้ป่วย</h3>
+  ${c.msg_capable?"":`<div class="warn">เฟิร์มแวร์อุปกรณ์นี้ (${esc(c.device.fw||"เก่า")}) ยังไม่รองรับข้อความ — อัปเดตเป็นเวอร์ชัน 0.2 ขึ้นไป</div>`}
+  ${status}
+  <div class="row"><select id="mcode"><option value="">— เลือกข้อความ —</option></select>
+  <label id="mvalw" style="display:none">ถึงใน <input id="mval" type="number" min="1" max="255" value="10" style="width:70px"> นาที</label>
+  <button class="btn p" id="msend" ${c.msg_capable?"":"disabled"}>ส่งข้อความ</button></div>
+  <div id="mprev" style="margin-top:8px"></div>
+  <p class="hint">จออุปกรณ์แสดงเป็นภาษาอังกฤษสั้น ๆ (ตามตัวอย่างด้านบน) พร้อมเสียงบี๊บ 3 ครั้ง · ข้อความถึงภายในประมาณ 10–30 วินาที ขณะเคสยังเปิดอยู่ · อุปกรณ์รับข้อความได้นานสุด 30 นาทีหลังกดปุ่ม/หลังรับเรื่อง · ส่งข้อความใหม่จะแทนข้อความที่ยังไม่ขึ้นจอ</p></div>`}
+async function wireCaseMsg(c){
+  const sel=$("#mcode");if(!sel)return;const ms=await devMsgs();
+  sel.innerHTML+=ms.map(m=>`<option value="${m.code}">${esc(m.th)}</option>`).join("");
+  const draw=()=>{const m=ms.find(x=>x.code==sel.value);$("#mvalw").style.display=m&&m.value==="minutes"?"":"none";
+    $("#mprev").innerHTML=m?`<span class="mut">ตัวอย่างบนจอ:</span><br>${oled(m.lines.map(l=>l.replace("{v}",String(+$("#mval").value||0))))}`:""};
+  sel.onchange=draw;$("#mval").oninput=draw;
+  $("#msend").onclick=guard(async()=>{const m=ms.find(x=>x.code==sel.value);if(!m){toast("เลือกข้อความก่อน","warn");return}
+    const v=m.value==="minutes"?Math.round(+$("#mval").value):0;if(m.value==="minutes"&&!(v>=1&&v<=255)){toast("ใส่จำนวนนาที 1–255","warn");return}
+    await api(`/cases/${c.id}/message`,{method:"POST",body:{code:m.code,value:v}});toast("ส่งข้อความแล้ว — รออุปกรณ์รับ");showCase(c.id)})}
 const showCase=guard(async id=>{
-  const c=await api("/cases/"+id);
+  const c=await api("/cases/"+id);caseOpen=+id;
   $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h2>เคส #${c.id} <span class="tag ${c.state}">${ST[c.state]}</span></h2>
   <p><b>${esc(c.patient?.full_name||"ไม่ทราบผู้ป่วย")}</b><br>${esc(c.patient?.address||"")} ${esc(c.patient?.village||"")}<br>${c.patient?.phone?`<a href="tel:${esc(c.patient.phone)}">${esc(c.patient.phone)}</a>`:""} ${c.patient?.lat!=null?`· <a target="_blank" rel="noopener" href="https://maps.google.com/?q=${c.patient.lat},${c.patient.lon}">แผนที่</a>`:""}</p>
   <p class="mut">${esc(c.patient?.notes||"")}</p>
@@ -762,12 +791,13 @@ const showCase=guard(async id=>{
   <p>อุปกรณ์ ${esc(c.device.label)} (${c.device.dev_eui}) · แบต ${c.device.battery??"-"}% · ไฟบ้าน ${c.device.mains_ok===false?"ดับ":"ปกติ"}</p>
   ${canEdit()&&c.state==="new"?`<button class="btn g" id="acc">✅ รับเรื่อง (ส่งสัญญาณกลับอุปกรณ์)</button> `:""}
   ${canEdit()&&(c.state==="new"||c.state==="accepted")?`<div class="row"><input id="note" placeholder="บันทึก (ถ้ามี)" size="40"><button class="btn p" id="cls">ปิดเคส</button><button class="btn r" id="fal">เหตุผิดพลาด</button></div>`:""}
-  </div><div class="card"><h3>ไทม์ไลน์</h3><table>${c.events.map(e=>`<tr><td>${fmt(e.at)}</td><td>${esc(e.kind)}</td><td>${esc(e.actor)}</td><td class="mut">${esc(JSON.stringify(e.detail))}</td></tr>`).join("")}</table></div>`;crumb(`เคส #${c.id}`);
+  </div>${caseMsgCard(c)}<div class="card"><h3>ไทม์ไลน์</h3><table>${c.events.map(e=>`<tr><td>${fmt(e.at)}</td><td>${esc(e.kind)}</td><td>${esc(e.actor)}</td><td class="mut">${esc(JSON.stringify(e.detail))}</td></tr>`).join("")}</table></div>`;crumb(`เคส #${c.id}`);
   $("#back").onclick=()=>render();
   const act=(url,body)=>guard(async()=>{await api(url,{method:"POST",body});toast("บันทึกแล้ว");showCase(id)});
   if($("#acc"))$("#acc").onclick=act(`/cases/${id}/accept`);
   if($("#cls"))$("#cls").onclick=()=>act(`/cases/${id}/close`,{reason:"resolved",note:$("#note").value})();
-  if($("#fal"))$("#fal").onclick=()=>act(`/cases/${id}/close`,{reason:"false_alarm",note:$("#note").value})()});
+  if($("#fal"))$("#fal").onclick=()=>act(`/cases/${id}/close`,{reason:"false_alarm",note:$("#note").value})();
+  await wireCaseMsg(c)});
 
 const loadPatients=guard(async()=>{
   const [ps,cs]=await Promise.all([api("/patients"),api("/caregivers")]);

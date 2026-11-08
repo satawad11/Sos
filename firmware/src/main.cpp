@@ -1,4 +1,4 @@
-// Patient SOS device firmware v0.1 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
+// Patient SOS device firmware v0.2 — Heltec WiFi LoRa 32 V3, RadioLib LoRaWAN OTAA, AS923.
 // NOT hardware-tested yet: follow firmware/README.md bench tests before any patient use.
 #include <Arduino.h>
 #include <Preferences.h>
@@ -65,11 +65,26 @@ enum UiMode : uint8_t {
   UI_SENT_WAIT,      // L1 ok, waiting for human
   UI_FAIL,           // L1 timeout (60 s) — fast blink + buzzer
   UI_ACCEPTED, UI_CLOSED, UI_FALSE_ALARM, UI_AFTER_HOURS,
-  UI_CANCELLED, UI_TEST_OK, UI_TEST_FAIL
+  UI_CANCELLED, UI_TEST_OK, UI_TEST_FAIL,
+  UI_MSG             // preset message from staff (FPort 12)
 };
 volatile UiMode g_ui = UI_BOOT;
 volatile uint8_t g_uiBattery = 255;
 volatile bool    g_uiMains = true;
+volatile uint8_t g_msgCode = 0, g_msgVal = 0;   // message on screen (UI_MSG)
+volatile bool    g_accepted = false;            // staff accepted the current alert (green LED under a message)
+
+// Preset messages — codes MUST match backend/app/codec.py MESSAGES. Max 16 characters per line; %u = value.
+struct MsgText { const char* l1; const char* l2; };
+const MsgText kMsgs[] = {
+  {"MESSAGE", ""},                        // 0 unused
+  {"HELP COMING", "ETA %u MIN"},          // 1 volunteer/staff on the way
+  {"AMBULANCE", "ETA %u MIN"},            // 2
+  {"STAFF WILL CALL", "ANSWER PHONE"},    // 3
+  {"STAY STILL", "DO NOT GET UP"},        // 4
+  {"WE GOT IT", "NO NEED TO PRESS"},      // 5
+};
+const uint8_t kMsgCount = sizeof(kMsgs) / sizeof(kMsgs[0]);
 volatile uint32_t g_uiSince = 0;
 volatile bool    g_buttonDown = false;
 volatile uint32_t g_buttonDownAt = 0;
@@ -143,6 +158,7 @@ void uiTask(void*) {
       case UI_CANCELLED: green = true; red = true; bz = (t < 300); break;
       case UI_TEST_OK: green = pat(now, 100, 100); bz = (t < 400) && pat(t, 100, 100); break;
       case UI_TEST_FAIL: red = pat(now, 100, 100); bz = (t < 1000) && pat(t, 100, 100); break;
+      case UI_MSG: green = g_accepted; red = !g_accepted; bz = (t < 900) && pat(t, 150, 150); break;   // 3 beeps
     }
     // brief confirmation beep while holding button (feedback that hold counted)
     if (g_buttonDown && holdFired && t > 0) bz = bz || (now - g_buttonDownAt < g_cfg.hold_ms + 200);
@@ -152,7 +168,7 @@ void uiTask(void*) {
     // ---- OLED (English / digits only; Thai goes via LINE & the staff) ----
     if (now - lastDraw > 250) {
       lastDraw = now;
-      const char* l1 = ""; const char* l2 = "";
+      const char* l1 = ""; const char* l2 = ""; static char mb1[20], mb2[20];
       switch (g_ui) {
         case UI_BOOT: l1 = "SOS DEVICE"; l2 = "starting"; break;
         case UI_NOT_PROVISIONED: l1 = "NOT SETUP"; l2 = "run provision"; break;
@@ -169,6 +185,12 @@ void uiTask(void*) {
         case UI_CANCELLED: l1 = "CANCELLED"; l2 = ""; break;
         case UI_TEST_OK: l1 = "TEST OK"; l2 = "link works"; break;
         case UI_TEST_FAIL: l1 = "TEST FAILED"; l2 = "no network"; break;
+        case UI_MSG: {
+          uint8_t c = g_msgCode;
+          if (c > 0 && c < kMsgCount) { snprintf(mb1, sizeof mb1, kMsgs[c].l1, g_msgVal); snprintf(mb2, sizeof mb2, kMsgs[c].l2, g_msgVal); }
+          else { snprintf(mb1, sizeof mb1, "MESSAGE %u", c); snprintf(mb2, sizeof mb2, "update firmware"); }
+          l1 = mb1; l2 = mb2; break;
+        }
       }
       oled.clearBuffer();
       oled.drawStr(0, 16, l1); oled.drawStr(0, 34, l2);
@@ -199,9 +221,9 @@ uint8_t flagsNow(bool test = false) {
 // returns: <0 radio error, 0 sent/no downlink, >0 downlink window. Fills down[] / downLen / confirming.
 uint8_t g_downPort = 0;   // fPort of the last received downlink (from LoRaWANEvent_t)
 int16_t sendFrame(MsgType t, uint8_t alertId, uint8_t port, bool confirmed, uint8_t pollCount,
-                  uint8_t* down, size_t* downLen, bool* confirming, bool test = false) {
+                  uint8_t* down, size_t* downLen, bool* confirming, bool test = false, uint8_t extraFlags = 0) {
   uint8_t pct = readBatteryPct();
-  uint8_t p[8] = {(uint8_t)((PROTO_VER << 4) | t), alertId, flagsNow(test), pct,
+  uint8_t p[8] = {(uint8_t)((PROTO_VER << 4) | t), alertId, (uint8_t)(flagsNow(test) | extraFlags), pct,
                   FW_MAJOR, FW_MINOR, g_cfg.ver, pollCount};
   node.setDeviceStatus(pct == 255 ? 255 : (uint8_t)map(pct, 0, 100, 1, 254));
   LoRaWANEvent_t up, dn; memset(&dn, 0, sizeof dn);
@@ -212,8 +234,15 @@ int16_t sendFrame(MsgType t, uint8_t alertId, uint8_t port, bool confirmed, uint
   return s;
 }
 
+uint8_t g_msgSeen = 0;    // seq of the last MSG shown for the current alert (echoed to the server as a receipt)
 void applyDownlink(const uint8_t* d, size_t n, uint8_t port, uint8_t alertId, int* ackResult) {
-  if (port == FPORT_ACK_L2 && n == 3 && d[0] == ((PROTO_VER << 4) | T_ACK_L2) && d[1] == alertId && ackResult)
+  if (port == FPORT_MSG && n == 5 && d[0] == ((PROTO_VER << 4) | T_MSG) && d[1] == alertId && alertId != 0) {
+    if (d[2] != g_msgSeen) {            // a re-sent copy of the same message is not shown (or beeped) twice
+      g_msgSeen = d[2]; g_msgCode = d[3]; g_msgVal = d[4]; setUi(UI_MSG);
+      Serial.printf("[msg] seq=%u code=%u value=%u\n", d[2], d[3], d[4]);
+    }
+  }
+  else if (port == FPORT_ACK_L2 && n == 3 && d[0] == ((PROTO_VER << 4) | T_ACK_L2) && d[1] == alertId && ackResult)
     *ackResult = d[2];
   else if (port == FPORT_CONFIG && n == 6 && d[0] == ((PROTO_VER << 4) | T_CONFIG)) {
     g_cfg.ver = d[1]; g_cfg.heartbeat_min = max<uint16_t>(5, d[2] * 5); g_cfg.poll_s = constrain(d[3], 5, 120);
@@ -297,6 +326,9 @@ uint8_t  curAlert = 0;
 bool     l1Ok = false;
 uint32_t alertStart = 0, nextTry = 0, nextPoll = 0, doneAt = 0;
 uint8_t  tries = 0, pollCount = 0;
+uint8_t  ackShown = 0;          // ACK_L2 result the device shows for curAlert (reported back so the server stops re-sending)
+uint32_t acceptedAt = 0;
+bool     g_repress = false;     // patient pressed again after acceptance -> resend ALERT (server logs "pressed again")
 uint32_t nextHeartbeat = 0;
 
 void endAlert(UiMode m) { phase = P_IDLE; setUi(m); doneAt = millis(); }
@@ -320,28 +352,42 @@ void doAlertStep() {
     }
     return;
   }
-  if (now - alertStart > POLL_MAX_MS) { endAlert(UI_READY); return; }
+  if (g_repress) {                                 // pressed again while help is on the way: tell the server, stay accepted
+    g_repress = false;
+    int16_t s = sendFrame(T_ALERT, curAlert, FPORT_EVENT, true, 0, down, &dl, &conf);
+    Serial.printf("[alert] pressed again, L1=%d\n", conf);
+    if (s > 0 && dl > 0) applyDownlink(down, dl, g_downPort, curAlert, &ack);   // a queued MSG may ride on this one
+    return;
+  }
+  // stop polling 30 min after the alert (or after acceptance); the screen keeps the last state for DONE_DISPLAY_MS
+  if (now - (g_accepted ? acceptedAt : alertStart) > POLL_MAX_MS) { endAlert(g_accepted ? g_ui : UI_READY); return; }
   if (now < nextPoll) return;
   pollCount++;
 #if SOS_GPS
   sendLocIfAny(curAlert);                          // retry on the early polls if there was no fix at first
 #endif
-  int16_t s = sendFrame(T_POLL, curAlert, FPORT_POLL, false, pollCount, down, &dl, &conf);
-  nextPoll = millis() + (uint32_t)g_cfg.poll_s * 1000UL;
+  // byte 7 = last shown MSG seq (receipt) instead of the poll counter; flags carry the ACK result already shown
+  int16_t s = sendFrame(T_POLL, curAlert, FPORT_POLL, false, g_msgSeen, down, &dl, &conf, false,
+                        (uint8_t)((ackShown << F_ACK_SHIFT) | F_MSG_SEQ));
+  uint16_t every = g_accepted ? max<uint16_t>(g_cfg.poll_s, ACCEPTED_POLL_MIN_S) : g_cfg.poll_s;
+  nextPoll = millis() + (uint32_t)every * 1000UL;
   if (s > 0 && dl > 0) {
     applyDownlink(down, dl, g_downPort, curAlert, &ack);
   }
   switch (ack) {
-    case 1: endAlert(UI_ACCEPTED); break;
-    case 2: endAlert(UI_CLOSED); break;
-    case 3: endAlert(UI_FALSE_ALARM); break;
-    case 4: if (g_ui != UI_AFTER_HOURS) setUi(UI_AFTER_HOURS); break;   // keep polling: a volunteer may still accept
+    case 1:                                        // accepted: keep polling (slower) so staff messages can arrive
+      if (!g_accepted) { g_accepted = true; acceptedAt = millis(); ackShown = 1; if (g_ui != UI_MSG) setUi(UI_ACCEPTED); }
+      break;
+    case 2: ackShown = 2; endAlert(UI_CLOSED); break;
+    case 3: ackShown = 3; endAlert(UI_FALSE_ALARM); break;
+    case 4: ackShown = 4; if (g_ui != UI_AFTER_HOURS && g_ui != UI_MSG) setUi(UI_AFTER_HOURS); break;   // keep polling: a volunteer may still accept
     default: break;
   }
 }
 
 void startAlert() {
   curAlert = nextAlertId(); phase = P_ALERT; l1Ok = false; tries = 0; pollCount = 0;
+  ackShown = 0; g_msgSeen = 0; g_accepted = false; g_repress = false;
   alertStart = millis(); nextTry = 0; setUi(UI_SENDING);
 #if SOS_GPS
   g_locSent = false; g_locTries = 0;
@@ -419,6 +465,7 @@ void loop() {
   if (g_pressEvent) {
     g_pressEvent = false;
     if (phase == P_IDLE) startAlert();                 // hold reached hold_ms
+    else if (phase == P_ALERT && g_accepted) g_repress = true;
   }
   if (phase == P_ALERT && g_buttonDown && millis() - g_buttonDownAt > CANCEL_HOLD_MS + g_cfg.hold_ms
       && g_ui == UI_SENT_WAIT && millis() - alertStart < 45000UL) {

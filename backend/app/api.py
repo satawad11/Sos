@@ -11,7 +11,7 @@ from .auth import (admin_only, audit, check_pw, current_user, hash_pw, make_toke
                    make_mfa_ticket, user_from_mfa_ticket)
 from . import mfa
 from .db import get_db
-from .engine import aware
+from .engine import aware, msg_capable
 from .models import (Assignment, AuditLog, BindCode, Case, Caregiver, Device, Gateway, GatewayCommand, Holiday, Notification,
                      Patient, User, utcnow)
 from .config import env
@@ -21,6 +21,7 @@ from . import linecfg
 from . import ai
 from . import geo
 from . import privacy, reports
+from . import codec
 from . import provision as prov
 
 router = APIRouter(prefix="/api")
@@ -182,7 +183,8 @@ def case_dict(c: Case, events=False, role: str = "staff"):
          "created_at": iso(c.created_at), "accepted_at": iso(c.accepted_at), "accepted_by": c.accepted_by,
          "closed_at": iso(c.closed_at), "close_reason": c.close_reason, "note": c.note,
          "device": {"id": c.device.id, "dev_eui": c.device.dev_eui, "label": c.device.label,
-                    "battery": c.device.battery, "mains_ok": c.device.mains_ok},
+                    "battery": c.device.battery, "mains_ok": c.device.mains_ok,
+                    "fw": c.device.fw_version},
          "patient": None}
     if c.patient:
         p = c.patient
@@ -194,6 +196,9 @@ def case_dict(c: Case, events=False, role: str = "staff"):
         home = round(geo.distance_m(c.patient.lat, c.patient.lon, c.loc_lat, c.loc_lon)) if c.patient and c.patient.lat is not None else None
         d["loc"] = {"lat": c.loc_lat, "lon": c.loc_lon, "at": iso(c.loc_at), "sats": c.loc_sats, "hdop": c.loc_hdop,
                     "home_distance_m": home, "url": geo.maps_url(c.loc_lat, c.loc_lon)}
+    d["msg_pending"] = ({**c.msg_pending, "lines": codec.msg_preview(c.msg_pending["code"], c.msg_pending["value"])}
+                        if c.msg_pending else None)
+    d["msg_capable"] = msg_capable(c.device)
     if events:
         d["events"] = [{"at": iso(e.at), "kind": e.kind, "actor": e.actor, "detail": e.detail} for e in c.events]
     return d
@@ -222,6 +227,27 @@ def accept(cid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin), e
     try: c = eng.accept(db, cid, u.display_name or u.username)
     except LookupError: raise HTTPException(404)
     audit(db, u.username, "case_accept", str(cid)); db.commit()
+    return case_dict(c, events=True)
+
+
+@router.get("/device-messages")
+def device_messages(u=Depends(current_user)):
+    """Preset messages that can be shown on the patient's device (text is fixed in the firmware)."""
+    return [{"code": k, "th": m["th"], "lines": list(m["en"]), "value": m["value"]} for k, m in codec.MESSAGES.items()]
+
+
+class MessageIn(BaseModel):
+    code: int
+    value: int = 0
+
+
+@router.post("/cases/{cid}/message")
+def send_message(cid: int, body: MessageIn, db: Session = Depends(get_db), u=Depends(staff_or_admin),
+                 eng=Depends(get_engine)):
+    try: c = eng.send_message(db, cid, u.display_name or u.username, body.code, body.value)
+    except LookupError: raise HTTPException(404)
+    except ValueError as e: raise HTTPException(422, str(e))
+    audit(db, u.username, "case_message", str(cid), code=body.code, value=body.value); db.commit()
     return case_dict(c, events=True)
 
 
