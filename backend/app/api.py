@@ -656,7 +656,7 @@ def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str
             "state_changed_at": iso(g.state_changed_at), "uplinks_total": g.uplinks_total or 0,
             "devices": n_dev.get(g.gateway_id, 0), "devices_heard": (heard or {}).get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc,
             "notes": g.notes or "", "offline_min": g.offline_min, "offline_min_effective": g.offline_min or off,
-            "alert_ids": g.alert_ids, "agent": rep.get("agent") is True}
+            "alert_ids": g.alert_ids, "alerts_muted": bool(g.alerts_muted), "agent": rep.get("agent") is True}
 
 
 class LocationIn(BaseModel):
@@ -772,6 +772,7 @@ class GatewayPatch(BaseModel):
     reset_offline: bool = False         # back to the global value
     alert_ids: list[int] | None = None  # per-gateway LINE recipients for this gateway's alerts; admin only
     reset_alerts: bool = False          # back to the global list
+    alerts_muted: bool | None = None    # known broken: no LINE for this gateway until it is back online (staff+)
 
 
 @router.post("/gateways")
@@ -844,6 +845,9 @@ def patch_gateway(gid: int, b: GatewayPatch, db: Session = Depends(get_db), u=De
             if ids and {c.id for c in db.query(Caregiver).filter(Caregiver.id.in_(ids)).all()} != set(ids):
                 raise HTTPException(422, "unknown caregiver id")
             g.alert_ids = ids or None
+    if b.alerts_muted is not None and b.alerts_muted != bool(g.alerts_muted):
+        g.alerts_muted = b.alerts_muted
+        audit(db, u.username, "gateway_alerts_muted" if b.alerts_muted else "gateway_alerts_unmuted", g.gateway_id)
     audit(db, u.username, "gateway_update", g.gateway_id, label=g.label, enabled=g.enabled is not False,
           located=g.lat is not None, offline_min=g.offline_min, own_recipients=g.alert_ids is not None)
     db.commit()
@@ -978,7 +982,9 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
             raise HTTPException(422, "repeat_min must be 0 (off) or 10-1440")
         found = {c.id for c in db.query(Caregiver).filter(Caregiver.id.in_(ids)).all()} if ids else set()
         if set(ids) - found: raise HTTPException(422, "unknown caregiver id")
-        value = {"caregiver_ids": sorted(set(ids)), "repeat_min": rep}
+        gl = value.get("gateway_line", settings_store.get(db, "system_alert").get("gateway_line", True))
+        if not isinstance(gl, bool): raise HTTPException(422, "gateway_line must be true/false")
+        value = {"caregiver_ids": sorted(set(ids)), "repeat_min": rep, "gateway_line": gl}
     if key == "privacy":
         def _int(k, lo, hi):
             v = value.get(k)

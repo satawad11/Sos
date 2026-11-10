@@ -498,6 +498,10 @@ dialog.dlg:has(.bindq){width:min(560px,calc(100vw - 32px))}
 /* last-known values of a silent button */
 td.lv small{display:none}
 tr.stale td.lv{color:var(--mut)}tr.stale td.lv small{display:block;font-size:12px;color:var(--mut)}
+<style>/* gateway LINE mute */
+.gm-tag{display:inline-block;margin-top:4px;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--amb-bg,#fff4dc);color:var(--amb,#9a6200)}
+.gm-on{padding:9px 12px;border-radius:10px;margin:4px 0 10px;background:var(--amb-bg,#fff4dc);color:var(--amb,#9a6200);font-size:13.5px}
+:where(html[data-theme=dark]) .gm-tag,:where(html[data-theme=dark]) .gm-on{background:rgba(245,170,40,.14);color:#f3c46b}
 </style></head>
 <body>
 <div id="app"></div><div id="toast" aria-live="polite"></div>
@@ -979,7 +983,7 @@ const loadGateways=guard(async()=>{
   const [gs,aiOk]=await Promise.all([api("/gateways"),aiReady()]);if(page!=="gateways")return;
   const why=g=>g.status==="offline"?(g.reason==="radio"?(g.critical.join("; ")||"ตัวรับสัญญาณ LoRa ใช้ไม่ได้"):"ไม่ได้รับสัญญาณเกินเวลาที่กำหนด"):g.critical.concat(g.warnings).join("; ");
   $("#main").innerHTML=`${aiOk&&canEdit()&&gs.length?`<div class="card"><div class="row">${aiBtn("gateways","","AI วิเคราะห์เกตเวย์ทั้งหมด")}<span class="mut">ให้ AI ช่วยอ่านค่าสถานะ (ส่งเฉพาะค่าทางเทคนิค ไม่มีชื่อ/ตำแหน่ง)</span></div><div data-aibox="gateways:"></div></div>`:""}${role==="admin"?`<div class="card"><h3>เพิ่มเกตเวย์</h3><div class="row"><input id="gi" placeholder="Gateway ID 16 หลัก" size="24" title="ได้จาก sudo ./install-gateway.sh --show-id"><input id="gl" placeholder="ป้าย เช่น รพ.สต. ม.3"><button class="btn p" id="ga">เพิ่ม</button></div><p class="mut">ไม่ต้องเพิ่มเองก็ได้ ระบบจะเพิ่มให้เองเมื่อเกตเวย์เชื่อมต่อครั้งแรก — เพิ่มล่วงหน้าเพื่อตั้งป้ายชื่อ</p></div>`:""}
-  <div class="card">${gs.length?`<table><tr><th>สถานะ</th><th>ป้าย / ID</th><th>เห็นล่าสุด</th><th>รายงานล่าสุด</th><th title="active = เปิดใช้งานแล้ว · ได้ยิน = ทุกเครื่องที่ส่งสัญญาณผ่านเกตเวย์นี้ล่าสุด">อุปกรณ์ (active / ได้ยิน)</th><th>เฟรมสะสม</th><th>CPU / ทำงานมาแล้ว</th><th>ตำแหน่ง</th><th>ข้อสังเกต</th><th></th></tr>${gs.map(g=>{const r=g.report||{};return`<tr data-rid="${g.id}"><td style="white-space:nowrap">${GWS[g.status][0]} ${GWS[g.status][1]}</td><td>${esc(g.label||"-")}<div class="mut"><code>${esc(g.gateway_id)}</code></div></td><td>${ago(g.last_seen)}</td><td>${ago(g.last_report_at)}</td><td><b>${g.devices}</b><span class="mut"> / ${g.devices_heard??g.devices}</span>${(g.devices_heard??0)>g.devices?`<br><button type="button" class="lnk" data-gwdev>${g.devices_heard-g.devices} เครื่องยังไม่ active</button>`:""}</td><td>${g.uplinks_total}</td><td>${r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-"} / ${upt(r.uptime_s)}</td><td>${g.loc.registered?gmap(g.loc.registered.lat,g.loc.registered.lon,"📍 แผนที่"):'<span class="mut">ยังไม่ระบุ</span>'}${g.loc.moved_m!=null?` <b style="color:var(--amb)">ย้าย ${dist(g.loc.moved_m)}?</b>`:""}</td><td style="color:${g.status==="offline"?"var(--red)":"var(--amb)"}">${esc(why(g))}</td><td>${canEdit()?`<button class="btn" data-g="${g.id}">แก้ไข</button>`:""}</td></tr>`}).join("")}</table>`:'<p class="mut">ยังไม่มีเกตเวย์ — ติดตั้งตาม INSTALL-2 แล้วเกตเวย์จะปรากฏที่นี่เอง</p>'}
+  <div class="card">${gs.length?`<table><tr><th>สถานะ</th><th>ป้าย / ID</th><th>เห็นล่าสุด</th><th>รายงานล่าสุด</th><th title="active = เปิดใช้งานแล้ว · ได้ยิน = ทุกเครื่องที่ส่งสัญญาณผ่านเกตเวย์นี้ล่าสุด">อุปกรณ์ (active / ได้ยิน)</th><th>เฟรมสะสม</th><th>CPU / ทำงานมาแล้ว</th><th>ตำแหน่ง</th><th>ข้อสังเกต</th><th></th></tr>${gs.map(g=>{const r=g.report||{};return`<tr data-rid="${g.id}"><td style="white-space:nowrap">${GWS[g.status][0]} ${GWS[g.status][1]}${g.alerts_muted?'<div class="gm-tag" title="ปิดการแจ้งเตือน LINE ไว้ จะเปิดเองเมื่อกลับมาออนไลน์">🔕 ปิดแจ้งเตือน</div>':""}</td><td>${esc(g.label||"-")}<div class="mut"><code>${esc(g.gateway_id)}</code></div></td><td>${ago(g.last_seen)}</td><td>${ago(g.last_report_at)}</td><td><b>${g.devices}</b><span class="mut"> / ${g.devices_heard??g.devices}</span>${(g.devices_heard??0)>g.devices?`<br><button type="button" class="lnk" data-gwdev>${g.devices_heard-g.devices} เครื่องยังไม่ active</button>`:""}</td><td>${g.uplinks_total}</td><td>${r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-"} / ${upt(r.uptime_s)}</td><td>${g.loc.registered?gmap(g.loc.registered.lat,g.loc.registered.lon,"📍 แผนที่"):'<span class="mut">ยังไม่ระบุ</span>'}${g.loc.moved_m!=null?` <b style="color:var(--amb)">ย้าย ${dist(g.loc.moved_m)}?</b>`:""}</td><td style="color:${g.status==="offline"?"var(--red)":"var(--amb)"}">${esc(why(g))}</td><td>${canEdit()?`<button class="btn" data-g="${g.id}">แก้ไข</button>`:""}</td></tr>`}).join("")}</table>`:'<p class="mut">ยังไม่มีเกตเวย์ — ติดตั้งตาม INSTALL-2 แล้วเกตเวย์จะปรากฏที่นี่เอง</p>'}
   <p class="mut">เกตเวย์ส่งรายงานตัวเองทุก 1 นาที ถ้าเงียบเกินที่ตั้งไว้ (หน้าตั้งค่า → ออฟไลน์) หรือตัวรับสัญญาณ LoRa เสียเกิน 3 นาที ระบบจะส่ง LINE แจ้งผู้รับที่เลือกไว้ในหน้าตั้งค่า</p></div>`;
   const gById=i=>gs.find(x=>x.id==i);
   lister("gateways",$("#main").lastElementChild,{noun:"เครื่อง",reload:loadGateways,bulk:role==="admin"?[
@@ -990,6 +994,7 @@ const loadGateways=guard(async()=>{
   if($("#ga"))$("#ga").onclick=guard(async()=>{const r=await api("/gateways",{method:"POST",body:{gateway_id:$("#gi").value,label:$("#gl").value}});toast("เพิ่มแล้ว"+csNote(r.chirpstack));loadGateways()});
   document.querySelectorAll("button[data-g]").forEach(b=>b.onclick=guard(async()=>{const g=gs.find(x=>x.id==b.dataset.g),r=g.report||{};devEdit=true;
     const cgs=role==="admin"?await api("/caregivers"):[];
+    let sysGwLine=true;try{sysGwLine=(await api("/settings")).system_alert.gateway_line!==false}catch(e){}
     const row=(k,v)=>`<tr><th style="width:230px">${k}</th><td>${v}</td></tr>`;
     $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${GWS[g.status][0]} ${esc(g.gateway_id)}</h3>
       <div class="row">ป้าย <input id="gl2" value="${esc(g.label)}" maxlength="64"></div>
@@ -1004,6 +1009,11 @@ const loadGateways=guard(async()=>{
       <div class="chips" id="gcg">${role==="admin"?(cgs.filter(c=>c.active).map(c=>`<label class="chip"><input type="checkbox" value="${c.id}" ${(g.alert_ids||[]).includes(c.id)?"checked":""}><span>${esc(c.full_name)}${c.line_bound?"":" (ยังไม่ผูก LINE)"}</span></label>`).join("")||'<span class="mut">ยังไม่มีผู้ดูแล</span>'):'<span class="mut">เฉพาะผู้ดูแลระบบ</span>'}</div>
       ${role==="admin"?`<div class="row"><button class="btn p" id="gss">บันทึกการตั้งค่า</button>${g.alert_ids!=null?'<button class="btn" id="gcr">ใช้ผู้รับตามหน้าตั้งค่า</button>':""}</div>`:`<div class="row"><button class="btn p" id="gss">บันทึกหมายเหตุ</button></div>`}
       <p class="hint">ถ้าไม่มีผู้รับที่ผูก LINE ไว้เลย ระบบจะแจ้งผู้ดูแลคนสุดท้ายที่ผูกไว้เสมอ เพื่อไม่ให้การแจ้งเตือนหายไปเงียบ ๆ</p></div>
+    <div class="card"><h3>${ico("bell")} การแจ้งเตือน LINE ของเกตเวย์นี้</h3>
+      ${g.alerts_muted?`<div class="gm-on">🔕 ปิดการแจ้งเตือนอยู่ — ไม่ส่ง LINE (ทั้งแจ้งครั้งแรกและเตือนซ้ำ) จนกว่าเกตเวย์จะกลับมาออนไลน์ แล้วจะเปิดให้เองอัตโนมัติ</div>`:""}
+      <div class="row"><label class="sw"><input type="checkbox" id="gmu" ${g.alerts_muted?"":"checked"} ${canEdit()?"":"disabled"}><i></i><span id="gmut">${g.alerts_muted?"ปิด":"เปิด"}</span></label>
+        <span class="mut">ปิดได้เมื่อรู้แล้วว่าเครื่องเสีย/กำลังซ่อม · สถานะบนแดชบอร์ดยังแสดงตามจริง</span></div>
+      ${!sysGwLine?'<p class="hint">หมายเหตุ: ตอนนี้ปิดการแจ้งเตือนเกตเวย์ทาง LINE ทั้งระบบอยู่ (หน้าตั้งค่า → แจ้งเตือน)</p>':""}</div>
     ${role==="admin"?`<div class="card" id="grm"><h3>สั่งงานระยะไกล</h3><div id="grb"><span class="mut">กำลังโหลด…</span></div></div>`:""}
     <div class="card"><h3>ตำแหน่งเกตเวย์</h3>
       <p>ตำแหน่งที่ลงทะเบียน: ${g.loc.registered?`${g.loc.registered.lat.toFixed(5)}, ${g.loc.registered.lon.toFixed(5)} ${gmap(g.loc.registered.lat,g.loc.registered.lon)}`:'<span class="mut">ยังไม่ระบุ</span>'}</p>
@@ -1023,7 +1033,10 @@ const loadGateways=guard(async()=>{
       if(role==="admin"){const v=$("#gof").value.trim();if(v!==""){if(!(+v>=3&&+v<=240)){toast("เวลาออฟไลน์ต้องอยู่ระหว่าง 3–240 นาที");return}body.offline_min=Math.round(+v)}
         const ids=[...document.querySelectorAll("#gcg input:checked")].map(i=>+i.value);if(ids.length||g.alert_ids!=null)body.alert_ids=ids}
       glp(body)};
-    if($("#gofr"))$("#gofr").onclick=()=>glp({reset_offline:true});if($("#gcr"))$("#gcr").onclick=()=>glp({reset_alerts:true});
+    if($("#gofr"))$("#gofr").onclick=()=>glp({reset_offline:true});
+    $("#gmu").onchange=async e=>{const on=e.target.checked;
+      if(!on&&!await ask(`ปิดการแจ้งเตือน LINE ของเกตเวย์ ${g.label||g.gateway_id}?\nจะไม่มี LINE เรื่องเครื่องนี้จนกว่ามันจะกลับมาออนไลน์ (แล้วจะเปิดให้เองอัตโนมัติ)\nปุ่มผู้ป่วยที่อยู่หลังเกตเวย์นี้อาจส่งเหตุไม่ถึง — ควรรีบซ่อมหรือติดตั้งเครื่องสำรอง`)){e.target.checked=true;return}
+      glp({alerts_muted:!on})};if($("#gcr"))$("#gcr").onclick=()=>glp({reset_alerts:true});
     aiWire($("#main"));
     if(role==="admin")gwRemote(g)}))});
 
@@ -1175,6 +1188,7 @@ const loadSettings=guard(async()=>{
   <div class="sec" data-sec="notify" ${setSec==="notify"?"":"hidden"}>
    <div class="card">${head("alert","ผู้รับแจ้งเตือนระบบ","คนที่ได้รับ LINE เมื่อเกตเวย์ขาดการเชื่อมต่อ และเมื่อปุ่มผู้ป่วยเงียบหาย/แบตต่ำ/ไฟดับ")}
     ${fld("เลือกผู้รับ","ต้องผูก LINE แล้วจึงจะได้รับ · ถ้าไม่เลือกใครเลย ระบบจะแจ้ง “ผู้รับสุดท้าย” แทน",`<div class="row">${active.map(c=>`<label class="chip" title="${c.line_bound?"":"ยังไม่ผูก LINE"}"><input type="checkbox" class="sa" value="${c.id}" ${sa.caregiver_ids.includes(c.id)?"checked":""} ${dis}><span>${esc(c.full_name)}${c.line_bound?"":" ⚠"}</span></label>`).join("")||'<span class="mut">ยังไม่มี อสม./ผู้ดูแล — เพิ่มได้ที่เมนู อสม./ผู้ดูแล</span>'}</div>`)}
+    ${fld("แจ้งเตือนเกตเวย์ทาง LINE","ปิด = ไม่ส่ง LINE เรื่องเกตเวย์ขาด/กลับมาเลย (ยังแสดงบนแดชบอร์ด) · ถ้าเสียแค่บางเครื่อง ให้ปิดที่หน้าเกตเวย์เครื่องนั้นแทน",`<label class="sw"><input type="checkbox" id="sgl" ${sa.gateway_line!==false?"checked":""} ${dis}><i></i><span id="sglt">${sa.gateway_line!==false?"เปิด":"ปิด"}</span></label>`)}
     ${fld("เตือนซ้ำทุก","ถ้าปัญหายังไม่หาย · ใส่ 0 = ไม่เตือนซ้ำ (ช่วงที่ใช้ได้ 10–1440 นาที)",`${num("sar",sa.repeat_min,0,1440,"นาที")}<div class="hint" id="sarh"></div>${chips("sar",[[0,"ไม่เตือนซ้ำ"],[30,"30 นาที"],[60,"1 ชม."],[120,"2 ชม."]])}`)}
     ${adm?`<div class="row" style="margin-top:6px"><button class="btn" id="s6">ส่ง LINE ทดสอบ</button><span class="mut">ควรกดทดสอบทุกครั้งหลังเปลี่ยนผู้รับ (ทดสอบจากค่าที่บันทึกแล้ว)</span></div><div id="testres" class="hint"></div>`:""}</div>
    <div class="card">${head("chip","แจ้งเตือนปุ่มผู้ป่วย","เตือนเมื่อปุ่มในบ้านผู้ป่วยเงียบหาย แบตเตอรี่ต่ำ หรือไฟบ้านดับ")}
@@ -1225,7 +1239,7 @@ const loadSettings=guard(async()=>{
   const get=()=>({
     office_hours:{days:[...document.querySelectorAll(".dy:checked")].map(x=>+x.value),start:$v("st"),end:$v("en")},
     escalation:{escalate_after_s:N("ea"),overdue_after_s:N("ov"),final_caregiver_id:$v("fin")?+$v("fin"):null,max_rounds:1},
-    system_alert:{caregiver_ids:[...document.querySelectorAll(".sa:checked")].map(x=>+x.value),repeat_min:N("sar")},
+    system_alert:{caregiver_ids:[...document.querySelectorAll(".sa:checked")].map(x=>+x.value),repeat_min:N("sar"),gateway_line:$("#sgl").checked},
     device_alert:{enabled:$("#dae").checked,battery_low_pct:N("dab"),mains_grace_min:N("dam"),issue_repeat_h:N("dar"),quiet_night:$("#daq").checked},
     device_defaults:{heartbeat_min:N("hb"),poll_s:N("po"),buzzer:N("bz"),hold_ms:Math.round(N("ho")*1000)},
     offline:{device_offline_min:N("do"),gateway_offline_min:N("go")}});
@@ -1237,7 +1251,7 @@ const loadSettings=guard(async()=>{
   const hints=()=>{$("#eah").textContent="= "+human(N("ea"));$("#ovh").textContent="= "+human(N("ov"))+(N("ov")<=N("ea")?" · ควรมากกว่าเวลาแจ้งต่อ":"");
     $("#sarh").textContent=N("sar")===0?"ไม่เตือนซ้ำ":"= ทุก "+humanMin(N("sar"));
     $("#doh").textContent="= "+humanMin(N("do"))+(N("do")<N("hb")*2?` · ควรอย่างน้อย ${N("hb")*2} นาที (2 เท่าของรอบรายงาน)`:"");
-    $("#daet").textContent=$("#dae").checked?"เปิด":"ปิด";$("#daqt").textContent=$("#daq").checked?"เปิด":"ปิด"};
+    $("#daet").textContent=$("#dae").checked?"เปิด":"ปิด";$("#daqt").textContent=$("#daq").checked?"เปิด":"ปิด";$("#sglt").textContent=$("#sgl").checked?"เปิด":"ปิด"};
   const refresh=()=>{hints();const ch=changed();$("#sb").hidden=!ch.length;$("#sbn").textContent=ch.length;$("#sbl").textContent=ch.map(k=>NAMES[k]).join(", ");
     document.querySelectorAll("#pills button").forEach(b=>b.classList.toggle("dirty",ch.some(k=>SECOF[k]===b.dataset.s)))};
   const validate=()=>{let bad=null;document.querySelectorAll("#sr input[type=number]").forEach(i=>{const box=i.closest(".inp");const v=i.value===""?NaN:+i.value;const ok=!isNaN(v)&&v>=+i.min&&v<=+i.max;box.classList.toggle("bad3",!ok);

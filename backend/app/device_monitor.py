@@ -56,12 +56,23 @@ class DeviceMonitor:
             return f"{base} ({d.patient.full_name})"
         return base
 
-    def _any_gateway_up(self, db: Session, now: datetime) -> bool:
-        gws = db.query(Gateway).filter(Gateway.enabled.is_not(False)).all()
+    def _gateways(self, db: Session, now: datetime) -> tuple[bool, set[str]]:
+        """(any gateway up?, ids of gateways that are down). Gateways whose monitoring was switched off still count: a broken
+        gateway someone switched off must not turn into one "button silent" LINE per patient device behind it."""
+        gws = db.query(Gateway).all()
         if not gws:
-            return True                                  # nothing registered: cannot tell, do not suppress
+            return True, set()                           # nothing registered: cannot tell, do not suppress
         off = settings_store.get(db, "offline")["gateway_offline_min"]
-        return any(classify(g, now, off)[0] != "offline" for g in gws)
+        down = set()
+        for g in gws:
+            if g.enabled is False:
+                ls = _aware(g.last_seen)
+                bad = ls is None or (now - ls) > timedelta(minutes=g.offline_min or off)
+            else:
+                bad = classify(g, now, g.offline_min or off)[0] == "offline"
+            if bad:
+                down.add(g.gateway_id.lower())
+        return len(down) < len(gws), down
 
     @staticmethod
     def _night(now: datetime) -> bool:
@@ -89,7 +100,7 @@ class DeviceMonitor:
         repeat_calm = cfg.get("issue_repeat_h", 0) * 60
         quiet = cfg.get("quiet_night", True) and self._night(now)
         low, grace = cfg["battery_low_pct"], cfg["mains_grace_min"]
-        gw_up = self._any_gateway_up(db, now)
+        gw_up, gw_down = self._gateways(db, now)
         n = 0
         for d in db.query(Device).filter(Device.lifecycle != "active", Device.watch.is_not(None)).all():
             d.watch = None                               # retired/ready/lost devices carry no stale alert state
@@ -104,7 +115,9 @@ class DeviceMonitor:
             # condition per issue: True = problem, False = fine, None = unknown/keep state
             ls = _aware(d.last_seen)
             conds = {
-                "offline": None if not gw_up or ls is None else (now - ls) > timedelta(minutes=off_min),
+                # silent behind a gateway that is down: the gateway alert covers it (and stays quiet if that one is muted)
+                "offline": None if not gw_up or ls is None or (d.last_gateway or "").lower() in gw_down
+                           else (now - ls) > timedelta(minutes=off_min),
                 "battery": None if d.battery is None or d.battery == 255 else
                            (True if d.battery < low else (False if d.battery >= low + BATT_HYSTERESIS else None)),
                 "mains": None if d.mains_ok is None else d.mains_ok is False,

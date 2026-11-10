@@ -202,19 +202,21 @@ class GatewayMonitor:
         if not mqtt_ok or (self.grace_until and now < _aware(self.grace_until)):
             return 0                       # our own link is down/just came back: reports are missing because of US
         off = settings_store.get(db, "offline")["gateway_offline_min"]
-        repeat = settings_store.get(db, "system_alert").get("repeat_min", 60)
+        sa = settings_store.get(db, "system_alert")
+        repeat, line_on = sa.get("repeat_min", 60), sa.get("gateway_line", True) is not False
         changed = 0
         for g in db.query(Gateway).filter(Gateway.enabled.is_not(False)).all():
             goff = g.offline_min or off                 # per-gateway threshold overrides the global one
+            line = line_on and not g.alerts_muted        # LINE off for all gateways (settings) or this one ("known broken")
             st, reason = classify(g, now, goff)
             if st == "offline":
                 if g.state != "offline":
                     g.state, g.state_changed_at, g.offline_reason, g.offline_notified_at = "offline", now, reason, now
-                    self._alert(db, g, self._down_text(g, reason, now, goff), "gateway_offline")
+                    self._alert(db, g, self._down_text(g, reason, now, goff), "gateway_offline", line)
                     changed += 1
                 else:
                     last = _aware(g.offline_notified_at)
-                    if repeat and last and (now - last) >= timedelta(minutes=repeat):
+                    if line and repeat and last and (now - last) >= timedelta(minutes=repeat):
                         g.offline_notified_at = now
                         self._alert(db, g, "⏰ เตือนซ้ำ: " + self._down_text(g, g.offline_reason, now, goff, short=True),
                                     "gateway_offline_repeat")
@@ -222,10 +224,11 @@ class GatewayMonitor:
                 if g.state == "offline":
                     was = _aware(g.state_changed_at)
                     g.state, g.state_changed_at, g.offline_reason = "online", now, ""
+                    g.alerts_muted = False                      # repaired: its alerts switch back on by themselves
                     if g.offline_notified_at:
                         g.offline_notified_at = None
                         self._alert(db, g, f"✅ เกตเวย์ {self._name(g)} กลับมาออนไลน์แล้ว"
-                                           + (f" (ขาดไปประมาณ {_mins(now - was)})" if was else ""), "gateway_online")
+                                           + (f" (ขาดไปประมาณ {_mins(now - was)})" if was else ""), "gateway_online", line_on)
                     changed += 1
                 elif g.state != "online":
                     g.state, g.state_changed_at = "online", now
@@ -279,10 +282,13 @@ class GatewayMonitor:
             res.append({"caregiver": c.full_name, "ok": ok, "detail": detail})
         return res
 
-    def _alert(self, db: Session, g: Gateway, text: str, action: str):
-        results = self.send_system(db, text, g.alert_ids)
-        if not results:
+    def _alert(self, db: Session, g: Gateway, text: str, action: str, line: bool = True):
+        """line=False: LINE is switched off (all gateways, or this one is muted as known broken). The state change is
+        still logged and pushed to the dashboard."""
+        results = self.send_system(db, text, g.alert_ids) if line else []
+        if line and not results:
             log.warning("%s for %s but nobody is configured to receive system alerts", action, g.gateway_id)
+        extra = {} if line else {"line": "muted" if g.alerts_muted else "off"}
         db.add(AuditLog(actor="system", action=action, target=g.gateway_id,
-                        detail={"recipients": results, "no_recipients": not results}))
+                        detail={"recipients": results, "no_recipients": line and not results, **extra}))
         self.publish({"type": "gateway_state", "gateway_id": g.gateway_id, "state": g.state})

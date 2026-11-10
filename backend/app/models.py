@@ -222,6 +222,7 @@ class Gateway(Base):
     notes: Mapped[str] = mapped_column(Text, default="")                    # free text for staff (where it is mounted, who to call...)
     offline_min: Mapped[int | None] = mapped_column(Integer, nullable=True)  # per-gateway override of offline.gateway_offline_min
     alert_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)      # per-gateway override of the system-alert recipients
+    alerts_muted: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)  # known broken: no LINE until back online
 
 
 class GatewayCommand(Base):
