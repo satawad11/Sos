@@ -5,6 +5,7 @@ from datetime import timedelta, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from . import settings_store
 from .auth import (admin_only, audit, check_pw, current_user, hash_pw, make_token, password_problem, staff_or_admin,
@@ -189,7 +190,7 @@ def case_dict(c: Case, events=False, role: str = "staff"):
     if c.patient:
         p = c.patient
         d["patient"] = {"id": p.id, "full_name": p.full_name, "address": p.address, "village": p.village,
-                        "phone": p.phone, "lat": p.lat, "lon": p.lon, "notes": p.notes}
+                        "phone": p.phone, "lat": p.lat, "lon": p.lon, "notes": p.notes, "priority": p.priority or "normal"}
         if role == "viewer": d["patient"] = privacy.mask_patient(d["patient"])
     d["loc"] = None
     if c.loc_lat is not None and role != "viewer":
@@ -278,7 +279,29 @@ class PatientIn(BaseModel):
     active: bool = True
 
 
-def pat_dict(p: Patient, db: Session, role: str = "staff"):
+PRIORITIES = ("normal", "watch", "critical")
+
+
+def case_stats(db: Session) -> dict[int, dict]:
+    """Per patient: cases in the last 7 / 30 days and the last case ever (real devices only, never self-tests)."""
+    cfg = settings_store.get(db, "frequent")
+    now = utcnow(); d7, d30 = now - timedelta(days=7), now - timedelta(days=30)
+    out: dict[int, dict] = {}
+    for pid, created, reason in db.query(Case.patient_id, Case.created_at, Case.close_reason).filter(
+            Case.patient_id.isnot(None), Case.is_test.is_(False), Case.created_at >= d30).all():
+        if reason == "false_alarm" and not cfg["count_false_alarm"]: continue
+        st = out.setdefault(pid, {"cases_7d": 0, "cases_30d": 0})
+        st["cases_30d"] += 1
+        if aware(created) >= d7: st["cases_7d"] += 1
+    return out
+
+
+def last_cases(db: Session) -> dict[int, datetime]:
+    return {pid: t for pid, t in db.query(Case.patient_id, func.max(Case.created_at)).filter(
+        Case.patient_id.isnot(None), Case.is_test.is_(False)).group_by(Case.patient_id).all()}
+
+
+def pat_dict(p: Patient, db: Session, role: str = "staff", stats: dict | None = None, last: dict | None = None, cfg: dict | None = None):
     asg = db.query(Assignment).filter_by(patient_id=p.id).order_by(Assignment.priority).all()
     dev = db.query(Device).filter_by(patient_id=p.id).first()
     out = {"id": p.id, "full_name": p.full_name, "age": p.age, "address": p.address, "village": p.village,
@@ -287,14 +310,39 @@ def pat_dict(p: Patient, db: Session, role: str = "staff"):
             "consent_ok": privacy.consent_ok(p), "consent_at": iso(p.consent_at), "consent_by": p.consent_by,
             "consent_note": p.consent_note, "consent_withdrawn_at": iso(p.consent_withdrawn_at),
             "anonymized_at": iso(p.anonymized_at),
+            "priority": p.priority or "normal", "priority_at": iso(p.priority_at), "priority_by": p.priority_by,
             "assignments": [{"priority": a.priority, "caregiver_id": a.caregiver_id,
                              "name": a.caregiver.full_name} for a in asg]}
+    st = (stats or {}).get(p.id, {})
+    cfg = cfg or settings_store.get(db, "frequent")
+    out["cases_7d"], out["cases_30d"] = st.get("cases_7d", 0), st.get("cases_30d", 0)
+    out["last_case_at"] = iso((last or {}).get(p.id))
+    out["frequent_week"] = out["cases_7d"] >= cfg["week_threshold"] > 0
+    out["frequent_month"] = out["cases_30d"] >= cfg["month_threshold"] > 0
     return privacy.mask_patient(out) if role == "viewer" else out
 
 
 @router.get("/patients")
 def patients(db: Session = Depends(get_db), u=Depends(current_user)):
-    return [pat_dict(p, db, u.role) for p in db.query(Patient).order_by(Patient.id).all()]
+    stats, last, cfg = case_stats(db), last_cases(db), settings_store.get(db, "frequent")
+    return [pat_dict(p, db, u.role, stats, last, cfg) for p in db.query(Patient).order_by(Patient.id).all()]
+
+
+class PriorityIn(BaseModel):
+    priority: str
+
+
+@router.put("/patients/{pid}/priority")
+def set_priority(pid: int, b: PriorityIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    p = db.get(Patient, pid)
+    if not p: raise HTTPException(404)
+    if b.priority not in PRIORITIES: raise HTTPException(422, "priority must be normal, watch or critical")
+    if p.anonymized_at: raise HTTPException(409, "ข้อมูลผู้ป่วยรายนี้ถูกลบ (ทำให้ไม่ระบุตัวตน) แล้ว")
+    old = p.priority or "normal"
+    if old != b.priority:
+        p.priority, p.priority_at, p.priority_by = b.priority, utcnow(), u.username
+        audit(db, u.username, "patient_priority", str(pid), frm=old, to=b.priority); db.commit()
+    return {"id": p.id, "priority": p.priority}
 
 
 @router.post("/patients")
@@ -1006,6 +1054,13 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
         if d2 and d2 <= d1: raise HTTPException(422, "second_day must be after remind_day (or 0)")
         value = {"enabled": value["enabled"], "remind_day": d1, "second_day": d2, "remind_time": value["remind_time"],
                  "confirm_line": value["confirm_line"]}
+    if key == "frequent":
+        w, m, fa = value.get("week_threshold"), value.get("month_threshold"), value.get("count_false_alarm")
+        if any(isinstance(x, bool) or not isinstance(x, int) for x in (w, m)) or not (0 <= w <= 50 and 0 <= m <= 200):
+            raise HTTPException(422, "week_threshold 0-50 and month_threshold 0-200 (0 = off)")
+        if not isinstance(fa, bool): raise HTTPException(422, "count_false_alarm must be true/false")
+        value = {"week_threshold": w, "month_threshold": m, "count_false_alarm": fa}
+        audit(db, u.username, "settings_frequent", "", week=w, month=m, false_alarm=fa)
     if key == "security":
         on, roles = value.get("mfa_enabled"), value.get("mfa_roles", ["admin"])
         if not isinstance(on, bool): raise HTTPException(422, "mfa_enabled must be true/false")

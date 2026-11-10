@@ -21,6 +21,7 @@ DEFAULTS: dict[str, dict] = {
     "message": {"afterhours_text": "นอกเวลาราชการ กรุณาโทร 1669"},
     "org": {"name": "", "partner": "", "system_name": "ระบบปุ่มแจ้งเหตุฉุกเฉินผู้ป่วยติดบ้านด้วย LoRaWAN",
             "reporter_name": "", "reporter_title": "ผู้รายงาน", "approver_name": "", "approver_title": "ผู้อำนวยการ รพ.สต."},   # PDF report header/signers
+    "frequent": {"week_threshold": 3, "month_threshold": 6, "count_false_alarm": True},   # "presses often": cases in the last 7 / 30 days (patients page)
     "security": {"mfa_enabled": False, "mfa_roles": ["admin"]},       # 2-step sign-in policy (off until an admin turns it on)
     "self_test": {"enabled": True, "remind_day": 1, "second_day": 15, "remind_time": "10:00", "confirm_line": True},   # monthly button test (app/selftest.py)
 }

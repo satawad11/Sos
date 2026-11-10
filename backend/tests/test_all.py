@@ -1715,3 +1715,46 @@ def test_ai_diagnose_gateways_and_devices_anonymous(env_, monkeypatch):
         assert client.post("/api/ai/diagnose", json={"scope": "gateways"}, headers=hv).status_code == 403          # viewers cannot
     finally:
         with SessionLocal() as db: linecfg.save(db, "gemini", "")
+
+
+def test_patient_priority_and_press_frequency(env_, monkeypatch):
+    eng, downs, notif, client, ids = env_
+    from app.models import Case, Patient, Device, User
+    from app.auth import hash_pw
+    from datetime import timedelta
+    h = login(client)
+    with SessionLocal() as db:
+        db.add(User(username="v5", password_hash=hash_pw("password12345"), role="viewer")); db.commit()
+        now = datetime.now(timezone.utc)
+        dev = db.query(Device).first(); pid = ids["p"]
+        p2 = Patient(full_name="คนที่สอง", active=True); db.add(p2); db.flush(); pid2 = p2.id
+        def mk(days, patient=pid, **kw):
+            db.add(Case(device_id=dev.id, patient_id=patient, alert_id=1, state="closed", created_at=now - timedelta(days=days), **kw))
+        mk(1); mk(2); mk(3, close_reason="false_alarm"); mk(10); mk(20); mk(40)          # in 7d: 3, in 30d: 5, 40d ago excluded
+        mk(1, is_test=True)                                                                # self-test never counts
+        mk(2, patient=pid2)
+        db.commit()
+    hv = login(client, "v5")
+    by = lambda hh: {x["id"]: x for x in client.get("/api/patients", headers=hh).json()}
+    a = by(h)[pid]
+    assert (a["cases_7d"], a["cases_30d"]) == (3, 5) and a["priority"] == "normal"
+    assert a["frequent_week"] is True and a["frequent_month"] is False and a["last_case_at"]            # defaults: 3 / 6
+    assert by(h)[pid2]["cases_7d"] == 1 and by(h)[pid2]["frequent_week"] is False
+    # do not count false alarms -> 2 in a week
+    s = client.get("/api/settings", headers=h).json()["frequent"]; assert s == {"week_threshold": 3, "month_threshold": 6, "count_false_alarm": True}
+    assert client.put("/api/settings/frequent", json={"week_threshold": 3, "month_threshold": 6, "count_false_alarm": False}, headers=h).status_code == 200
+    a = by(h)[pid]; assert (a["cases_7d"], a["cases_30d"], a["frequent_week"]) == (2, 4, False)
+    assert client.put("/api/settings/frequent", json={"week_threshold": 99, "month_threshold": 6, "count_false_alarm": True}, headers=h).status_code == 422
+    assert client.put("/api/settings/frequent", json={"week_threshold": 2, "month_threshold": 4, "count_false_alarm": False}, headers=h).status_code == 200
+    a = by(h)[pid]; assert a["frequent_week"] and a["frequent_month"]
+    # manual priority: roles, validation, audit; editing other fields does not reset it
+    assert client.put(f"/api/patients/{pid}/priority", json={"priority": "critical"}, headers=hv).status_code == 403
+    assert client.put(f"/api/patients/{pid}/priority", json={"priority": "urgent!!"}, headers=h).status_code == 422
+    assert client.put(f"/api/patients/{pid}/priority", json={"priority": "critical"}, headers=h).json()["priority"] == "critical"
+    body = {k: a[k] for k in ("full_name", "age", "address", "village", "phone", "lat", "lon", "notes", "active")}
+    assert client.put(f"/api/patients/{pid}", json=body, headers=h).status_code == 200
+    a = by(h)[pid]; assert a["priority"] == "critical" and a["priority_by"] == "admin" and a["priority_at"]
+    assert any(x["action"] == "patient_priority" for x in client.get("/api/audit", headers=h).json())
+    assert by(hv)[pid]["priority"] == "critical" and by(hv)[pid]["address"] == ""                      # viewer sees the level, still no address
+    cs = client.get("/api/cases", headers=h).json()
+    assert all(c["patient"]["priority"] == "critical" for c in cs if c["patient"] and c["patient"]["id"] == pid)

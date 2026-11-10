@@ -58,6 +58,10 @@ class Patient(Base):
     consent_note: Mapped[str] = mapped_column(String(128), default="")     # e.g. consent form number / who consented (guardian)
     consent_withdrawn_at: Mapped[datetime | None] = _dt(nullable=True)
     anonymized_at: Mapped[datetime | None] = _dt(nullable=True)
+    # staff-set care priority: normal | watch (เฝ้าระวัง) | critical (วิกฤต). Independent of the automatic "presses often" ranking.
+    priority: Mapped[str] = mapped_column(String(10), default="normal")
+    priority_at: Mapped[datetime | None] = _dt(nullable=True)
+    priority_by: Mapped[str] = mapped_column(String(64), default="")
 
 
 class Device(Base):
