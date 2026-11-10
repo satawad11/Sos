@@ -79,6 +79,7 @@ class Device(Base):
     last_rssi: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_snr: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_gateway: Mapped[str] = mapped_column(String(16), default="")
+    heard_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)     # {gateway_id: iso of the last uplink it received}
     loc_lat: Mapped[float | None] = mapped_column(Float, nullable=True)    # last GPS fix reported by the device (optional hardware)
     loc_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
     loc_at: Mapped[datetime | None] = _dt(nullable=True)
@@ -222,7 +223,12 @@ class Gateway(Base):
     notes: Mapped[str] = mapped_column(Text, default="")                    # free text for staff (where it is mounted, who to call...)
     offline_min: Mapped[int | None] = mapped_column(Integer, nullable=True)  # per-gateway override of offline.gateway_offline_min
     alert_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)      # per-gateway override of the system-alert recipients
-    alerts_muted: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)  # known broken: no LINE until back online
+    alerts_muted: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)  # in maintenance: no LINE for it
+    maint_since: Mapped[datetime | None] = _dt(nullable=True)
+    maint_until: Mapped[datetime | None] = _dt(nullable=True)              # maint_end == "time": maintenance ends at this time
+    maint_end: Mapped[str | None] = mapped_column(String(8), nullable=True)  # online (ends when it is back) | time | manual
+    maint_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    maint_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class GatewayCommand(Base):

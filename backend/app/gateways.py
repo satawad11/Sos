@@ -207,8 +207,11 @@ class GatewayMonitor:
         changed = 0
         for g in db.query(Gateway).filter(Gateway.enabled.is_not(False)).all():
             goff = g.offline_min or off                 # per-gateway threshold overrides the global one
-            line = line_on and not g.alerts_muted        # LINE off for all gateways (settings) or this one ("known broken")
             st, reason = classify(g, now, goff)
+            if g.alerts_muted and g.maint_end == "time" and g.maint_until and now >= _aware(g.maint_until):
+                # still down -> one LINE now (a gateway that only now goes offline gets the normal alert just below)
+                self.end_maint(db, g, "system", "expired", now, line_on, st == "offline" and g.state == "offline")
+            line = line_on and not g.alerts_muted        # LINE off for all gateways (settings) or this one (maintenance)
             if st == "offline":
                 if g.state != "offline":
                     g.state, g.state_changed_at, g.offline_reason, g.offline_notified_at = "offline", now, reason, now
@@ -224,11 +227,13 @@ class GatewayMonitor:
                 if g.state == "offline":
                     was = _aware(g.state_changed_at)
                     g.state, g.state_changed_at, g.offline_reason = "online", now, ""
-                    g.alerts_muted = False                      # repaired: its alerts switch back on by themselves
-                    if g.offline_notified_at:
+                    if g.alerts_muted and g.maint_end in (None, "online"):
+                        g.offline_notified_at = None             # repaired: maintenance ends by itself, with its own message
+                        self.end_maint(db, g, "system", "online", now, line_on, False)
+                    elif g.offline_notified_at:
                         g.offline_notified_at = None
                         self._alert(db, g, f"✅ เกตเวย์ {self._name(g)} กลับมาออนไลน์แล้ว"
-                                           + (f" (ขาดไปประมาณ {_mins(now - was)})" if was else ""), "gateway_online", line_on)
+                                           + (f" (ขาดไปประมาณ {_mins(now - was)})" if was else ""), "gateway_online", line)
                     changed += 1
                 elif g.state != "online":
                     g.state, g.state_changed_at = "online", now
@@ -282,13 +287,48 @@ class GatewayMonitor:
             res.append({"caregiver": c.full_name, "ok": ok, "detail": detail})
         return res
 
+    # ---- maintenance (no LINE for this gateway; the dashboard still shows its real state) ----
+    def start_maint(self, db: Session, g: Gateway, actor: str, end: str, until: datetime | None, reason: str, now: datetime):
+        fresh = not g.alerts_muted
+        g.alerts_muted, g.maint_end, g.maint_reason, g.maint_by = True, end, reason, actor
+        g.maint_until = until if end == "time" else None
+        if fresh or g.maint_since is None:
+            g.maint_since = now
+        db.add(AuditLog(actor=actor, action="gateway_maint_on" if fresh else "gateway_maint_change", target=g.gateway_id,
+                        detail={"end": end, "until": until.isoformat() if until and end == "time" else None, "reason": reason}))
+        self.publish({"type": "gateway_state", "gateway_id": g.gateway_id, "state": g.state, "maint": True})
+
+    def end_maint(self, db: Session, g: Gateway, actor: str, why: str, now: datetime, line_on: bool = True,
+                  still_down: bool | None = None):
+        """why: manual | expired | online. Ending while the gateway is still offline sends one LINE (its alerts are back on);
+        ending because it came back sends a 'repair done' LINE instead of the usual recovery message."""
+        if not g.alerts_muted:
+            return
+        since, reason = _aware(g.maint_since), g.maint_reason or ""
+        g.alerts_muted, g.maint_since, g.maint_until, g.maint_end, g.maint_reason, g.maint_by = False, None, None, None, None, None
+        db.add(AuditLog(actor=actor, action="gateway_maint_off", target=g.gateway_id,
+                        detail={"why": why, "minutes": round((now - since).total_seconds() / 60) if since else None}))
+        if still_down is None:
+            still_down = g.state == "offline"
+        if why == "online":                              # logged as gateway_online too: closes the outage in the reports
+            self._alert(db, g, f"✅ ซ่อมบำรุงเสร็จ: เกตเวย์ {self._name(g)} กลับมาออนไลน์แล้ว"
+                               + (f" (ใช้เวลาประมาณ {_mins(now - since)})" if since else ""), "gateway_online", line_on)
+        elif still_down:
+            g.offline_notified_at = now                  # reminders continue from here
+            head = "⏰ หมดเวลาซ่อมบำรุงแล้ว" if why == "expired" else "🔧 ปิดโหมดซ่อมบำรุงแล้ว"
+            self._alert(db, g, f"{head} แต่เกตเวย์ {self._name(g)} ยังออฟไลน์อยู่"
+                               + (f"\nงานซ่อม: {reason}" if reason else "")
+                               + "\nปุ่มแจ้งเหตุของผู้ป่วยที่อยู่ในระยะเกตเวย์นี้อาจส่งสัญญาณมาไม่ถึง", "gateway_maint_overdue", line_on)
+        else:
+            self.publish({"type": "gateway_state", "gateway_id": g.gateway_id, "state": g.state, "maint": False})
+
     def _alert(self, db: Session, g: Gateway, text: str, action: str, line: bool = True):
-        """line=False: LINE is switched off (all gateways, or this one is muted as known broken). The state change is
+        """line=False: LINE is switched off (all gateways, or this one is in maintenance). The state change is
         still logged and pushed to the dashboard."""
         results = self.send_system(db, text, g.alert_ids) if line else []
         if line and not results:
             log.warning("%s for %s but nobody is configured to receive system alerts", action, g.gateway_id)
-        extra = {} if line else {"line": "muted" if g.alerts_muted else "off"}
+        extra = {} if line else {"line": "maintenance" if g.alerts_muted else "off"}
         db.add(AuditLog(actor="system", action=action, target=g.gateway_id,
                         detail={"recipients": results, "no_recipients": line and not results, **extra}))
         self.publish({"type": "gateway_state", "gateway_id": g.gateway_id, "state": g.state})

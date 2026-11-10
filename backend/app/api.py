@@ -656,7 +656,34 @@ def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str
             "state_changed_at": iso(g.state_changed_at), "uplinks_total": g.uplinks_total or 0,
             "devices": n_dev.get(g.gateway_id, 0), "devices_heard": (heard or {}).get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc,
             "notes": g.notes or "", "offline_min": g.offline_min, "offline_min_effective": g.offline_min or off,
-            "alert_ids": g.alert_ids, "alerts_muted": bool(g.alerts_muted), "agent": rep.get("agent") is True}
+            "alert_ids": g.alert_ids, "alerts_muted": bool(g.alerts_muted), "agent": rep.get("agent") is True,
+            "maint": {"since": iso(g.maint_since), "until": iso(g.maint_until), "end": g.maint_end or "online",
+                      "reason": g.maint_reason or "", "by": g.maint_by or ""} if g.alerts_muted else None}
+
+
+@router.get("/gateways/{gid}/impact")
+def gateway_impact(gid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    """Patient buttons received by this gateway in the last 7 days, and which of them no other working gateway heard —
+    those are the people to call while it is down / in maintenance."""
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    now, me = utcnow(), g.gateway_id.lower()
+    off = settings_store.get(db, "offline")["gateway_offline_min"]
+    up = {x.gateway_id.lower() for x in db.query(Gateway).all()
+          if x.gateway_id.lower() != me and gwmod.classify(x, now, x.offline_min or off)[0] in ("online", "warning")}
+    rows = []
+    for d in (db.query(Device).options(joinedload(Device.patient)).filter(Device.lifecycle == "active")
+              .order_by(Device.label).all()):
+        hb = {k.lower() for k, v in (d.heard_by or {}).items() if now - aware(datetime.fromisoformat(v)) < timedelta(days=7)}
+        if not hb and d.last_gateway: hb = {d.last_gateway.lower()}          # older data: only the last gateway is known
+        if me not in hb: continue
+        others = sorted(hb & up)
+        p = d.patient if d.patient and not d.patient.anonymized_at else None
+        rows.append({"device_id": d.id, "label": d.label or d.dev_eui, "dev_eui": d.dev_eui, "last_seen": iso(d.last_seen),
+                     "only_here": not others, "other_gateways": others,
+                     "patient": {"id": p.id, "full_name": p.full_name, "phone": p.phone, "village": p.village} if p else None})
+    rows.sort(key=lambda r: (not r["only_here"], r["label"]))
+    return {"gateway_id": g.gateway_id, "total": len(rows), "only_here": sum(r["only_here"] for r in rows), "devices": rows}
 
 
 class LocationIn(BaseModel):
@@ -716,6 +743,7 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
         src = "registered" if loc["registered"] else ("gps" if pos else None)
         if pos: gpos[g.gateway_id] = (pos["lat"], pos["lon"])
         gws.append({"gateway_id": g.gateway_id, "label": g.label, "status": x["status"], "offline": x["offline"], "reason": x["reason"],
+                    "maint": x["maint"] is not None,
                     "last_seen": x["last_seen"], "devices": x["devices"], "lat": pos["lat"] if pos else None,
                     "lon": pos["lon"] if pos else None, "pos_src": src})
     dvs, links = [], []
@@ -760,6 +788,13 @@ class GatewayIn(BaseModel):
     label: str = Field(default="", max_length=64)
 
 
+class MaintIn(BaseModel):
+    on: bool
+    end: str = "online"                 # online (ends when the gateway is back) | time (until) | manual
+    until: datetime | None = None
+    reason: str = Field(default="", max_length=200)
+
+
 class GatewayPatch(BaseModel):
     label: str | None = Field(default=None, max_length=64)
     enabled: bool | None = None
@@ -772,7 +807,9 @@ class GatewayPatch(BaseModel):
     reset_offline: bool = False         # back to the global value
     alert_ids: list[int] | None = None  # per-gateway LINE recipients for this gateway's alerts; admin only
     reset_alerts: bool = False          # back to the global list
-    alerts_muted: bool | None = None    # known broken: no LINE for this gateway until it is back online (staff+)
+    alerts_muted: bool | None = None    # legacy switch: True = maintenance until it is back online, False = end maintenance
+    maintenance: MaintIn | None = None
+
 
 
 @router.post("/gateways")
@@ -821,6 +858,7 @@ def patch_gateway(gid: int, b: GatewayPatch, db: Session = Depends(get_db), u=De
         g.enabled = b.enabled
         if not b.enabled:
             g.state, g.offline_notified_at = "unknown", None     # retired: stop alerting and forget the offline episode
+            if g.alerts_muted: get_engine().gw.end_maint(db, g, u.username, "manual", utcnow(), False)
     if b.use_gps:
         if g.gps_lat is None: raise HTTPException(409, "เกตเวย์นี้ยังไม่เคยส่งพิกัด GPS")
         g.lat, g.lon = g.gps_lat, g.gps_lon
@@ -845,9 +883,23 @@ def patch_gateway(gid: int, b: GatewayPatch, db: Session = Depends(get_db), u=De
             if ids and {c.id for c in db.query(Caregiver).filter(Caregiver.id.in_(ids)).all()} != set(ids):
                 raise HTTPException(422, "unknown caregiver id")
             g.alert_ids = ids or None
-    if b.alerts_muted is not None and b.alerts_muted != bool(g.alerts_muted):
-        g.alerts_muted = b.alerts_muted
-        audit(db, u.username, "gateway_alerts_muted" if b.alerts_muted else "gateway_alerts_unmuted", g.gateway_id)
+    m = b.maintenance
+    if m is None and b.alerts_muted is not None:
+        m = MaintIn(on=b.alerts_muted)
+    if m is not None:
+        mon, now = get_engine().gw, utcnow()
+        if m.on:
+            if g.enabled is False: raise HTTPException(409, "เกตเวย์นี้ปิดการเฝ้าระวังอยู่")
+            if m.end not in ("online", "time", "manual"): raise HTTPException(422, "end must be online, time or manual")
+            until = None
+            if m.end == "time":
+                until = aware(m.until) if m.until else None
+                if until is None or until <= now + timedelta(minutes=4) or until > now + timedelta(days=14):
+                    raise HTTPException(422, "เวลาสิ้นสุดต้องอยู่ระหว่าง 5 นาทีถึง 14 วันจากตอนนี้")
+            mon.start_maint(db, g, u.username, m.end, until, m.reason.strip(), now)
+        else:
+            sa = settings_store.get(db, "system_alert")
+            mon.end_maint(db, g, u.username, "manual", now, sa.get("gateway_line", True) is not False)
     audit(db, u.username, "gateway_update", g.gateway_id, label=g.label, enabled=g.enabled is not False,
           located=g.lat is not None, offline_min=g.offline_min, own_recipients=g.alert_ids is not None)
     db.commit()

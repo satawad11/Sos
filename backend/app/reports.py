@@ -73,8 +73,31 @@ def _cases(db: Session, start: datetime, end: datetime, tests=False) -> list[Cas
             .filter(Case.created_at >= start, Case.created_at < end, Case.is_test.is_(tests)).order_by(Case.id).all())
 
 
+def _windows(db: Session, on: str, off: str, end: datetime) -> dict[str, list[tuple[datetime, datetime | None]]]:
+    rows = (db.query(AuditLog).filter(AuditLog.action.in_((on, off)), AuditLog.at < end).order_by(AuditLog.at, AuditLog.id).all())
+    open_: dict[str, datetime] = {}; out: dict[str, list] = {}
+    for r in rows:
+        at = _aware(r.at)
+        if r.action == on:
+            open_.setdefault(r.target, at)
+        elif r.target in open_:
+            out.setdefault(r.target, []).append((open_.pop(r.target), at))
+    for t, a in open_.items():
+        out.setdefault(t, []).append((a, None))
+    return out
+
+
+def _overlap(lo: datetime, hi: datetime, wins, now: datetime) -> float:
+    s = 0.0
+    for a, b in wins:
+        x, y = max(lo, a), min(hi, b or now)
+        if y > x: s += (y - x).total_seconds()
+    return s
+
+
 def _gateway_outages(db: Session, start: datetime, end: datetime) -> list[dict]:
-    """Pair gateway_offline / gateway_online audit rows into outage episodes, clipped to [start, end)."""
+    """Pair gateway_offline / gateway_online audit rows into outage episodes, clipped to [start, end).
+    Time spent in maintenance (gateway_maint_on/off) is reported apart (maint_min), not as downtime."""
     rows = (db.query(AuditLog).filter(AuditLog.action.in_(("gateway_offline", "gateway_online")), AuditLog.at < end)
             .order_by(AuditLog.at, AuditLog.id).all())
     labels = {g.gateway_id: g.label for g in db.query(Gateway).all()}
@@ -88,15 +111,20 @@ def _gateway_outages(db: Session, start: datetime, end: datetime) -> list[dict]:
             eps.append((r.target, open_.pop(r.target), at))
     eps += [(t, a, None) for t, a in open_.items()]
     now = min(utcnow(), end)
+    maint = _windows(db, "gateway_maint_on", "gateway_maint_off", end)
     per: dict[str, dict] = {}
     for gid, a, b in eps:
         b2 = b or now
         lo, hi = max(a, start), min(b2, end)
         if hi <= lo: continue
-        g = per.setdefault(gid, {"gateway_id": gid, "label": labels.get(gid, ""), "outages": 0, "downtime_min": 0.0, "ongoing": False})
-        g["outages"] += 1; g["downtime_min"] += (hi - lo).total_seconds() / 60
+        m = _overlap(lo, hi, maint.get(gid, []), now)
+        g = per.setdefault(gid, {"gateway_id": gid, "label": labels.get(gid, ""), "outages": 0, "downtime_min": 0.0,
+                                 "maint_min": 0.0, "ongoing": False})
+        down = (hi - lo).total_seconds() - m
+        if down >= 60: g["outages"] += 1                 # an outage that was all maintenance is not an outage
+        g["downtime_min"] += max(down, 0) / 60; g["maint_min"] += m / 60
         g["ongoing"] = g["ongoing"] or b is None
-    return [{**g, "downtime_min": round(g["downtime_min"], 1)} for g in per.values()]
+    return [{**g, "downtime_min": round(g["downtime_min"], 1), "maint_min": round(g["maint_min"], 1)} for g in per.values()]
 
 
 def summary(db: Session, start: datetime, end: datetime, d1: date, d2: date, names: bool) -> dict:

@@ -24,7 +24,8 @@ def parse_up_event(raw: bytes) -> tuple[str, int, bytes, dict] | None:
     rx = j.get("rxInfo") or []
     if rx:
         best = max(rx, key=lambda r: r.get("rssi", -999))
-        meta = {"gateway_id": best.get("gatewayId", ""), "rssi": best.get("rssi"), "snr": best.get("snr")}
+        meta = {"gateway_id": best.get("gatewayId", ""), "rssi": best.get("rssi"), "snr": best.get("snr"),
+                "gateways": sorted({str(r.get("gatewayId", "")).lower() for r in rx if r.get("gatewayId")})}
     return dev_eui, fport, data, meta
 
 

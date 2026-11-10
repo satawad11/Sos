@@ -30,6 +30,21 @@ def msg_capable(dev: Device | None) -> bool:
     return (major, minor) >= (0, 2)
 
 
+HEARD_KEEP = timedelta(days=7)
+
+
+def _heard(dev: Device, meta: dict, now: datetime) -> None:
+    """Remember every gateway that received this device lately (ChirpStack lists all of them per uplink), so the dashboard can
+    tell which patients depend on one gateway only."""
+    ids = list(meta.get("gateways") or []) or ([meta["gateway_id"]] if meta.get("gateway_id") else [])
+    if not ids:
+        return
+    h = {k: v for k, v in (dev.heard_by or {}).items() if now - aware(datetime.fromisoformat(v)) < HEARD_KEEP}
+    for i in ids:
+        h[str(i).lower()] = now.isoformat()
+    dev.heard_by = h
+
+
 class Notifier(Protocol):
     def notify_case(self, db: Session, case: Case, caregiver: Caregiver, reminder: bool) -> tuple[bool, str]: ...
 
@@ -83,6 +98,7 @@ class Engine:
         if meta.get("gateway_id"):
             dev.last_gateway = meta["gateway_id"]
             self.gw.on_uplink(db, meta["gateway_id"], now)
+        _heard(dev, meta, now)
         result = "ok"
         if dev.lifecycle not in ("active", "ready"):
             result = "inactive_device"          # repair/retired/lost: record health only
@@ -139,6 +155,7 @@ class Engine:
         if "snr" in meta: dev.last_snr = meta["snr"]
         if meta.get("gateway_id"):
             dev.last_gateway = meta["gateway_id"]; self.gw.on_uplink(db, meta["gateway_id"], now)
+        _heard(dev, meta, now)
         dev.loc_lat, dev.loc_lon, dev.loc_at, dev.loc_sats, dev.loc_hdop = loc.lat, loc.lon, now, loc.sats, loc.hdop
         case = (db.query(Case).filter(Case.device_id == dev.id, Case.alert_id == loc.alert_id, Case.is_test.is_(False),
                                       Case.created_at > now - timedelta(minutes=30)).order_by(Case.id.desc()).first())

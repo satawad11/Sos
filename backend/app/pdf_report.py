@@ -185,9 +185,10 @@ def build(db: Session, month: str, names: bool, actor: str) -> bytes:
     pdf.kpis([("ปุ่มที่ใช้งาน", str(dv["active"]), "ณ วันที่พิมพ์", BLUE), ("ออฟไลน์", str(dv["offline_now"]), "ไม่ส่งสัญญาณตามรอบ", RED if dv["offline_now"] else GREEN),
               ("แบตเตอรี่ต่ำ", str(dv["low_battery"]), "ต่ำกว่า 20%", AMBER if dv["low_battery"] else GREEN), ("ไฟบ้านดับ", str(dv["mains_lost"]), "ใช้แบตเตอรี่สำรอง", AMBER if dv["mains_lost"] else GREEN)])
     if s["gateways"]:
-        pdf.table(["เกตเวย์", "ขาดการเชื่อมต่อ (ครั้ง)", "รวมเวลา", "สถานะ"],
-                  [[g["label"] or g["gateway_id"], g["outages"], f"{g['downtime_min']:.0f} นาที", "ยังขาดอยู่" if g["ongoing"] else "กลับมาแล้ว"] for g in s["gateways"]],
-                  [70, 40, 36, 32], ["L", "R", "R", "L"])
+        pdf.table(["เกตเวย์", "ขาดการเชื่อมต่อ (ครั้ง)", "รวมเวลาขาด", "ปิดซ่อมบำรุง", "สถานะ"],
+                  [[g["label"] or g["gateway_id"], g["outages"], f"{g['downtime_min']:.0f} นาที",
+                    f"{g.get('maint_min', 0):.0f} นาที" if g.get("maint_min") else "-", "ยังขาดอยู่" if g["ongoing"] else "กลับมาแล้ว"] for g in s["gateways"]],
+                  [58, 34, 30, 30, 26], ["L", "R", "R", "R", "L"])
     else:
         pdf.set_font("Sarabun", "", 11.5); pdf.cell(0, 6.5, "เกตเวย์ทำงานต่อเนื่อง ไม่มีการขาดการเชื่อมต่อในเดือนนี้", new_x="LMARGIN", new_y="NEXT")
 
