@@ -71,7 +71,7 @@ class MqttWorker:
     def _on_connect(self, client, userdata, flags, rc, props=None):
         self.connected = (rc == 0)
         log.info("MQTT connected rc=%s", rc)
-        client.subscribe("application/+/device/+/event/up", qos=1)
+        client.subscribe("application/+/device/+/event/+", qos=1)     # up + join/ack/txack/log/status (app/netmon.py)
         client.subscribe(f"{env.gw_topic_prefix}/gateway/+/sos/health", qos=1)
         client.subscribe(f"{env.gw_topic_prefix}/gateway/+/sos/cmd-result", qos=1)
         if self.connected:
@@ -100,6 +100,21 @@ class MqttWorker:
                     except Exception:
                         log.exception("gateway report handling failed"); db.rollback()
             return
+        from . import netmon
+        tk = netmon.parse_topic(msg.topic)
+        if tk and tk[1] != "up":
+            j = netmon.loads(msg.payload)
+            if j is not None:
+                with SessionLocal() as db:
+                    try: self.engine.netmon.on_event(db, tk[1], tk[0], j)
+                    except Exception: log.exception("net event handling failed"); db.rollback()
+            return
+        if tk:
+            j = netmon.loads(msg.payload)
+            if j is not None:                       # radio history first, separately: it must never block an alarm
+                with SessionLocal() as db:
+                    try: self.engine.netmon.on_uplink(db, tk[0], j)
+                    except Exception: log.exception("uplink logging failed"); db.rollback()
         parsed = parse_up_event(msg.payload)
         if not parsed:
             return
@@ -122,6 +137,9 @@ class MqttWorker:
         body = {"devEui": dev_eui, "confirmed": False, "fPort": fport, "data": codec.b64(payload)}
         info = self.client.publish(topic, json.dumps(body), qos=1)
         log.info("downlink queued %s fport=%s rc=%s", dev_eui, fport, info.rc)
+        with SessionLocal() as db:
+            try: self.engine.netmon.on_downlink(db, dev_eui, fport, len(payload))
+            except Exception: log.exception("downlink logging failed"); db.rollback()
 
     def send_gw_command(self, gateway_id: str, payload: dict) -> bool:
         """Publish a signed command to one gateway (QoS 1, not retained: a command must never fire later, after a reconnect)."""

@@ -718,7 +718,9 @@ function sndClick(){sndUnlock();
   if(SND.muteUntil>Date.now()){SND.muteUntil=0;alarmSync();return}
   audioOn=false;lsSet("snd","0");alarmSync()}
 setInterval(sndUI,30000);
-function liveEvent(m){if(m.type==="device_seen"){devSeen(m);return}onEvt(m).catch(()=>{});if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){if("maint" in m)toast(m.maint?"เกตเวย์เข้าโหมดซ่อมบำรุง":"เกตเวย์ออกจากโหมดซ่อมบำรุง","info");else toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update"||m.type==="case_repeat")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()}
+function liveEvent(m){if((m.type==="ping"||m.type==="net_event")&&netDev&&$("#netc")&&m.dev_eui===netDev.dev_eui){clearTimeout(window._netT);window._netT=setTimeout(()=>netCard(netDev),800);if(m.type==="ping"&&m.status==="acked")toast("ปุ่มยืนยันรับข้อความทดสอบแล้ว ✅","ok")}
+  if(m.type==="net_event"||m.type==="ping"){if(page==="netlive"&&window._netLive)window._netLive(m);return}
+  if(m.type==="device_seen"){devSeen(m);return}onEvt(m).catch(()=>{});if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){if("maint" in m)toast(m.maint?"เกตเวย์เข้าโหมดซ่อมบำรุง":"เกตเวย์ออกจากโหมดซ่อมบำรุง","info");else toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update"||m.type==="case_repeat")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
 const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",integrations:"🔗",settings:"⚙️",audit:"📜",account:"👤"};
@@ -1183,6 +1185,7 @@ const loadDevices=guard(async()=>{
       <div class="row"><button class="btn p" id="svc">ส่งค่าไปยังเครื่อง</button><button class="btn" id="rsc">กลับไปใช้ค่ากลางทั้งหมด</button></div></div>`:"";
     $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>${d.dev_eui}</h3><div class="row">ป้าย <input id="l" value="${esc(d.label)}"></div><div class="row">สถานะ <select id="lc">${LC.map(x=>`<option ${x===d.lifecycle?"selected":""}>${x}</option>`).join("")}</select></div><div class="row">เฟิร์มแวร์ <b>${esc(d.fw||"-")}</b>${fwBadge(d.fw)}${role==="admin"?' <button class="btn sm" type="button" id="fwup">อัปเดตผ่าน USB</button>':""}</div><div class="row">ผู้ป่วย <select id="pt"><option value="">- ไม่ผูก -</option>${ps.map(p=>`<option value="${p.id}" ${p.id===d.patient_id?"selected":""}>${esc(p.full_name)}${p.consent_ok?"":" (ยังไม่มีความยินยอม PDPA)"}</option>`).join("")}</select></div>${aiOk&&canEdit()?`<div class="row">${aiBtn("devices",d.id,"AI วิเคราะห์เครื่องนี้")}</div><div data-aibox="devices:${d.id}"></div>`:""}<div class="row"><button class="btn p" id="sv">บันทึก</button>${role==="admin"?'<button class="btn r" id="dxl">ลบอุปกรณ์นี้</button>':""}</div>${role==="admin"?`<div class="row"><button class="btn" id="fln">รีเซ็ตตัวนับ join (DevNonce)</button><span class="mut">ใช้เมื่อเครื่องขึ้น NO NETWORK ค้างหลังรีบูต/อัปโหลดเฟิร์มแวร์ ทั้งที่เกตเวย์ออนไลน์ — ChirpStack จะลืม DevNonce เก่าแล้วเครื่อง join ได้ในรอบถัดไป</span></div>`:""}</div>${cfgCard}`;crumb(`อุปกรณ์ ${d.label||d.dev_eui}`);if($("#fwup"))$("#fwup").onclick=()=>{devEdit=false;page="install";render();setTimeout(()=>$("#fwcard")?.scrollIntoView({behavior:"smooth"}),600)};
     $("#back").onclick=()=>{devEdit=false;render()};
+    {const c=$("#main .card");if(c){const n=document.createElement("div");n.id="netc";c.after(n);netCard(d)}}
     $("#sv").onclick=guard(async()=>{const pid=$("#pt").value?Number($("#pt").value):null;let r;
       try{r=await api("/devices/"+d.id,{method:"PUT",body:{dev_eui:d.dev_eui,label:$("#l").value,lifecycle:$("#lc").value,patient_id:pid}})}
       catch(e){const p=ps.find(x=>x.id===pid);if(!p||!/ความยินยอม/.test(e.message))throw e;
@@ -1290,6 +1293,7 @@ const loadSettings=guard(async()=>{
     ${fld("เตือนเมื่อไฟบ้านดับนานกว่า","ไฟกระพริบสั้น ๆ จะไม่เตือน และถ้าไฟติด ๆ ดับ ๆ ภายใน 30 นาทีนับเป็นครั้งเดียว (ช่วง 1–240 นาที)",num("dam",da.mains_grace_min,1,240,"นาที"))}
     ${fld("เตือนซ้ำเรื่องแบต/ไฟดับ","ปกติแจ้งครั้งเดียวต่อเหตุการณ์ (แบตแจ้งอีกครั้งเมื่อต่ำกว่า 10%) · ปุ่มเงียบหายยังเตือนซ้ำตาม 'เตือนซ้ำทุก' ด้านบน",`${num("dar",da.issue_repeat_h??0,0,72,"ชม.")}${chips("dar",[[0,"ไม่เตือนซ้ำ"],[6,"6 ชม."],[12,"12 ชม."],[24,"วันละครั้ง"]])}`)}
     ${fld("งดส่งตอนกลางคืน","เรื่องแบต/ไฟดับช่วง 21:00–07:00 รอส่งตอนเช้า ถ้าหายก่อนเช้าจะไม่ส่งเลย · ปุ่มเงียบหายยังส่งทันที",`<label class="sw"><input type="checkbox" id="daq" ${da.quiet_night??true?"checked":""} ${dis}><i></i><span id="daqt">${da.quiet_night??true?"เปิด":"ปิด"}</span></label>`)}</div>
+    ${fld("เตือนเมื่อสัญญาณวิทยุอ่อนมาก","ปุ่มยังส่งได้แต่ใกล้หลุด (margin ต่ำกว่า 3 dB หรือข้อความหาย ≥30%) — แจ้งครั้งเดียวต่อเหตุการณ์ ตัดสินหลังได้รับอย่างน้อย 8 ข้อความ",`<label class="sw"><input type="checkbox" id="das" ${da.signal_alert??true?"checked":""} ${dis}><i></i><span>${da.signal_alert??true?"เปิด":"ปิด"}</span></label>`)}
   </div>
   <div class="sec" data-sec="device" ${setSec==="device"?"":"hidden"}>
    <div class="card">${head("chip","ค่าเริ่มต้นของปุ่มผู้ป่วย","ส่งลงปุ่มทุกเครื่องอัตโนมัติผ่านรอบ heartbeat · เฉพาะบางเครื่องตั้งแยกได้ที่เมนูอุปกรณ์")}
@@ -1333,7 +1337,7 @@ const loadSettings=guard(async()=>{
     office_hours:{days:[...document.querySelectorAll(".dy:checked")].map(x=>+x.value),start:$v("st"),end:$v("en")},
     escalation:{escalate_after_s:N("ea"),overdue_after_s:N("ov"),final_caregiver_id:$v("fin")?+$v("fin"):null,max_rounds:1},
     system_alert:{caregiver_ids:[...document.querySelectorAll(".sa:checked")].map(x=>+x.value),repeat_min:N("sar"),gateway_line:$("#sgl").checked},
-    device_alert:{enabled:$("#dae").checked,battery_low_pct:N("dab"),mains_grace_min:N("dam"),issue_repeat_h:N("dar"),quiet_night:$("#daq").checked},
+    device_alert:{enabled:$("#dae").checked,battery_low_pct:N("dab"),mains_grace_min:N("dam"),issue_repeat_h:N("dar"),quiet_night:$("#daq").checked,signal_alert:$("#das").checked},
     device_defaults:{heartbeat_min:N("hb"),poll_s:N("po"),buzzer:N("bz"),hold_ms:Math.round(N("ho")*1000)},
     offline:{device_offline_min:N("do"),gateway_offline_min:N("go")}});
   const NAMES={office_hours:"เวลาทำการ",escalation:"การแจ้งต่อ",system_alert:"ผู้รับแจ้งเตือน",device_alert:"แจ้งเตือนปุ่มผู้ป่วย",device_defaults:"ค่าเริ่มต้นปุ่ม",offline:"ตรวจจับออฟไลน์"};
@@ -1363,6 +1367,59 @@ const loadSettings=guard(async()=>{
   const bindHol=()=>document.querySelectorAll("[data-h]").forEach(b=>b.onclick=guard(async()=>{await api("/holidays/"+b.dataset.h,{method:"DELETE"});$("#hol").innerHTML=holRows(await api("/holidays"));bindHol()}));
   $("#ha").onclick=guard(async()=>{if(!$("#hd").value)throw new Error("เลือกวันที่ก่อน");await api("/holidays",{method:"POST",body:{day:$("#hd").value,name:$("#hn").value}});$("#hd").value="";$("#hn").value="";$("#hol").innerHTML=holRows(await api("/holidays"));bindHol();toast("เพิ่มวันหยุดแล้ว")});
   bindHol();refresh()});
+
+// ---------------- device page: radio link quality, diagnosis, ping test (backend app/netmon.py, app/netapi.py) ----------------
+const NQCOL={good:"var(--grn)",fair:"var(--pri)",weak:"var(--amb)",bad:"var(--red)",unknown:"var(--mut)"};
+const nqTag=(q,th)=>`<span class="tag" style="background:${NQCOL[q]||NQCOL.unknown};color:#fff">${esc(th||q)}</span>`;
+let netDays=7,netDev=null;
+function sigChart(pts){                     // link margin over time, with the "about to drop" (3 dB) and "weak" (6 dB) lines
+  const P=pts.filter(p=>p.margin!=null);if(P.length<2)return'<p class="mut">ยังมีข้อมูลไม่พอสำหรับกราฟ (ต้องได้รับอย่างน้อย 2 ข้อความ)</p>';
+  const W=640,H=180,L=34,R=8,T=8,B=22,t0=+new Date(P[0].at),t1=+new Date(P[P.length-1].at)||t0+1;
+  const ys=P.map(p=>p.margin),lo=Math.min(0,...ys)-1,hi=Math.max(14,...ys)+1;
+  const X=t=>L+(W-L-R)*((t-t0)/Math.max(1,t1-t0)),Y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+  const band=(a,b,c)=>`<rect x="${L}" y="${Y(Math.min(b,hi))}" width="${W-L-R}" height="${Math.max(0,Y(Math.max(a,lo))-Y(Math.min(b,hi)))}" fill="${c}" opacity=".10"/>`;
+  const line=P.map((p,i)=>`${i?"L":"M"}${X(+new Date(p.at)).toFixed(1)},${Y(p.margin).toFixed(1)}`).join("");
+  const dots=P.map(p=>{const m=p.margin,c=m<3?NQCOL.bad:m<6?NQCOL.weak:m<10?NQCOL.fair:NQCOL.good;
+    return`<circle cx="${X(+new Date(p.at)).toFixed(1)}" cy="${Y(m).toFixed(1)}" r="2.6" fill="${c}"><title>${fmt(p.at)} · margin ${m} dB · RSSI ${p.rssi} · SNR ${p.snr} · SF${p.sf??"?"} · ${p.gw||""}</title></circle>`}).join("");
+  const ticks=[0,3,6,10].filter(v=>v>=lo&&v<=hi).map(v=>`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--bd)" stroke-dasharray="3 3"/><text x="${L-4}" y="${Y(v)+4}" font-size="10" text-anchor="end" fill="var(--mut)">${v}</text>`).join("");
+  const d0=new Date(t0),d1=new Date(t1),dl=x=>x.toLocaleDateString("th-TH",{day:"numeric",month:"short",timeZone:"Asia/Bangkok"});
+  return`<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" role="img" aria-label="กราฟ link margin">
+    ${band(lo,3,NQCOL.bad)}${band(3,6,NQCOL.weak)}${ticks}<path d="${line}" fill="none" stroke="var(--pri)" stroke-width="1.2" opacity=".55"/>${dots}
+    <text x="${L}" y="${H-6}" font-size="10" fill="var(--mut)">${dl(d0)}</text><text x="${W-R}" y="${H-6}" font-size="10" text-anchor="end" fill="var(--mut)">${dl(d1)}</text>
+    <text x="4" y="${T+8}" font-size="10" fill="var(--mut)">dB</text></svg>
+    <div class="mut" style="font-size:12px">link margin = SNR เหนือขีดที่วิทยุยังถอดรหัสได้ · ต่ำกว่า 3 dB (แถบแดง) = ใกล้หลุด · 3–6 dB (แถบเหลือง) = อ่อน</div>`}
+async function netCard(d){
+  netDev=d;const box=$("#netc");if(!box)return;
+  let n;try{n=await api(`/devices/${d.id}/network?days=${netDays}`)}catch(e){box.innerHTML=`<div class="card warn">${esc(e.message)}</div>`;return}
+  if(!$("#netc")||netDev!==d)return;
+  const st=n.stats,s=n.sig||{},canAct=canEdit(),hb=n.heartbeat_min;
+  const fixBtn=f=>!canAct||!f.fix?"":f.fix==="flush_nonces"&&role==="admin"?`<button class="btn" data-fix="flush_nonces">ล้าง DevNonce</button>`
+    :f.fix==="reprovision"&&role==="admin"?`<button class="btn" data-fix="reprovision">ไปหน้าติดตั้งอุปกรณ์</button>`:f.fix==="ping"?`<button class="btn" data-fix="ping">ทดสอบส่งกลับ</button>`:"";
+  const dg=(n.diagnosis||[]).map(f=>`<div class="row" style="align-items:flex-start;gap:8px"><span>${f.level==="error"?"⛔":f.level==="warning"?"⚠️":"✅"}</span><div style="flex:1"><b>${esc(f.title)}</b><div class="mut">${esc(f.detail)}</div></div>${fixBtn(f)}</div>`).join("");
+  const pend=(n.pings||[]).find(p=>p.status==="queued"||p.status==="sent");
+  const pings=n.pings?`<h4>ทดสอบส่งกลับ (ping)</h4>
+    <p class="mut">ส่งข้อความทดสอบจากเซิร์ฟเวอร์ → เกตเวย์ → ปุ่ม แล้วรอปุ่มยืนยัน เพื่อให้มั่นใจว่า ACK "รับเรื่องแล้ว" จะถึงผู้ป่วยจริง ·
+      ปุ่มประหยัดไฟ รับข้อความได้เฉพาะตอนส่งสัญญาณขึ้นมา (ทุก ${hb} นาที) จึงใช้เวลาประมาณ ${hb}–${2*hb} นาที · ปุ่มไม่ดัง/ไม่แสดงอะไร</p>
+    ${canAct?`<div class="row"><button class="btn p" id="nping" ${pend?"disabled":""}>📡 ทดสอบส่งกลับ</button>${pend?`<span class="mut">⏳ ${esc(pend.status_th)} (เริ่ม ${fmt(pend.created_at)})</span>`:""}</div>`:""}
+    ${n.pings.length?`<table><tr><th>เวลา</th><th>ผล</th><th>โดย</th></tr>${n.pings.map(p=>`<tr><td>${fmt(p.created_at)}</td><td>${p.status==="acked"?"✅":p.status==="queued"||p.status==="sent"?"⏳":"⚠️"} ${esc(p.status_th)}${p.note?` <span class="mut">${esc(p.note)}</span>`:""}</td><td>${esc(p.actor)}</td></tr>`).join("")}</table>`:""}`:"";
+  const evs=n.events?`<details><summary>เหตุการณ์ล่าสุดจาก ChirpStack (${n.events.length})</summary><table>${n.events.map(e=>`<tr><td style="white-space:nowrap">${fmt(e.at)}</td><td>${esc(e.kind)}</td><td>${e.level==="error"?"⛔ ":e.level==="warning"?"⚠️ ":""}${esc(e.text)}</td></tr>`).join("")}</table></details>`:"";
+  box.innerHTML=`<div class="card"><h3>สัญญาณและการเชื่อมต่อ</h3>
+    <div class="row">คุณภาพสัญญาณตอนนี้ ${nqTag(s.q||"unknown",n.quality_th[s.q||"unknown"])}
+      <span class="mut">margin ${s.margin??"-"} dB · RSSI ${s.rssi??"-"} dBm · SNR ${s.snr??"-"} dB${s.sf?` · SF${s.sf}`:""}${s.loss!=null?` · ข้อความหาย ${s.loss}%`:""} (จาก ${s.n||0} ข้อความล่าสุด)</span></div>
+    <h4>การวินิจฉัย</h4>${dg||'<p class="mut">ยังไม่มีข้อมูล</p>'}
+    <h4>ย้อนหลัง <select id="ndays">${[7,30,90].map(x=>`<option value="${x}" ${x===netDays?"selected":""}>${x} วัน</option>`).join("")}</select>
+      <span class="mut">${st.n} ข้อความ · ${nqTag(st.q,st.q_th)} margin กลาง ${st.margin??"-"} dB${st.loss!=null?` · หาย ${st.loss}%`:""}</span></h4>
+    ${sigChart(st.points)}
+    ${st.gateways.length?`<table><tr><th>เกตเวย์ที่ได้ยิน</th><th>ข้อความ</th><th>margin กลาง</th><th>RSSI กลาง</th></tr>${st.gateways.map(g=>`<tr><td><code>${esc(g.gateway_id)}</code></td><td>${g.n}</td><td>${nqTag(g.q,(g.margin??"-")+" dB")}</td><td>${g.rssi??"-"} dBm</td></tr>`).join("")}</table>`:""}
+    ${pings}${evs}</div>`;
+  $("#ndays").onchange=e=>{netDays=+e.target.value;netCard(d)};
+  if($("#nping"))$("#nping").onclick=guard(async()=>{const r=await api(`/devices/${d.id}/ping`,{method:"POST"});toast(`ส่งคำสั่งทดสอบแล้ว — รอผลประมาณ ${r.eta_min[0]}–${r.eta_min[1]} นาที`);netCard(d)});
+  box.querySelectorAll("[data-fix]").forEach(b=>b.onclick=guard(async()=>{const f=b.dataset.fix;
+    if(f==="ping"){$("#nping")?.click();return}
+    if(f==="reprovision"){devEdit=false;page="install";render();return}
+    if(f==="flush_nonces"){if(!await ask(`ล้าง DevNonce ของ ${d.dev_eui} ใน ChirpStack?\nจากนั้นรีสตาร์ตปุ่ม (กด RST) ให้ขอเข้าเครือข่ายใหม่`))return;
+      await api(`/devices/${d.id}/flush-nonces`,{method:"POST"});toast("ล้างแล้ว — รีสตาร์ตปุ่มเพื่อให้เข้าเครือข่ายใหม่");netCard(d)}}));
+}
 
 // ---------------- ChirpStack (network server) — admin only: status, compare with the dashboard, sync ----------------
 const csNote=r=>!r||r==="unchanged"||r==="not_configured"?"":r==="created"?" · ลงทะเบียนใน ChirpStack แล้ว":r==="exists"?" · มีใน ChirpStack อยู่แล้ว":r==="disabled"?" · ปิดใช้งานใน ChirpStack แล้ว":r==="enabled"?" · เปิดใช้งานใน ChirpStack แล้ว":r==="deleted"?" · ลบใน ChirpStack แล้ว":r==="absent"?"":" · ⚠️ ChirpStack: "+r;

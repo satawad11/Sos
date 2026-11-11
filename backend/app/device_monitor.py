@@ -33,7 +33,8 @@ BATT_HYSTERESIS = 10          # battery alert clears only when it is back at (th
 BATT_CRITICAL = 10            # one extra message when the battery falls below this
 FLAP = timedelta(minutes=30)  # power flicker window (see module doc)
 NIGHT = (21, 7)               # local hours [21:00, 07:00) — quiet for battery / mains
-CALM = ("battery", "mains")   # issues that can wait for the morning
+CALM = ("battery", "mains", "signal")   # issues that can wait for the morning
+SIG_MIN_N = 8                 # judge link quality only after this many uplinks (Device.sig, app/netmon.py)
 
 
 def _iso(dt: datetime) -> str:
@@ -121,6 +122,10 @@ class DeviceMonitor:
                 "battery": None if d.battery is None or d.battery == 255 else
                            (True if d.battery < low else (False if d.battery >= low + BATT_HYSTERESIS else None)),
                 "mains": None if d.mains_ok is None else d.mains_ok is False,
+                # radio link near its limit: the button still talks, but the next alarm may not get through.
+                # bad -> alert; back to fair/good -> clear; weak = keep state (hysteresis)
+                "signal": None if not cfg.get("signal_alert", True) or not d.sig or (d.sig.get("n") or 0) < SIG_MIN_N
+                          else (True if d.sig.get("q") == "bad" else (False if d.sig.get("q") in ("good", "fair") else None)),
             }
             for key, bad in conds.items():
                 st = w.get(key)
@@ -174,6 +179,12 @@ class DeviceMonitor:
             if d.battery < BATT_CRITICAL:
                 return f"🪫 อุปกรณ์ {nm} แบตเตอรี่วิกฤต ({d.battery}%) — ปุ่มอาจดับเร็ว ๆ นี้ โปรดเปลี่ยน/ชาร์จวันนี้"
             return f"🔋 อุปกรณ์ {nm} แบตเตอรี่ต่ำ ({d.battery}%) — โปรดเปลี่ยน/ชาร์จหรือตรวจไฟบ้าน"
+        if key == "signal":
+            s = d.sig or {}
+            why = f"margin {s.get('margin')} dB" + (f", ข้อความหาย {s['loss']}%" if s.get("loss") is not None else "")
+            return (f"อุปกรณ์ {nm} สัญญาณยังอ่อนมาก ({why})" if short else
+                    f"📶 อุปกรณ์ {nm} สัญญาณวิทยุอ่อนมาก ({why})\nปุ่มยังส่งได้ แต่เหตุฉุกเฉินครั้งหน้าอาจส่งไม่ถึง — "
+                    "โปรดตรวจตำแหน่งปุ่ม/เสา หรือพิจารณาเกตเวย์ใกล้บ้านนี้ (ดูแผนที่ความครอบคลุมในแดชบอร์ด)")
         return (f"⚡ อุปกรณ์ {nm} ไฟบ้านดับ นาน {_mins(now - since)}"
                 + (f" (ใช้แบตสำรอง {d.battery}%)" if d.battery not in (None, 255) else "") + " — โปรดตรวจไฟที่บ้านผู้ป่วย")
 
@@ -181,4 +192,5 @@ class DeviceMonitor:
         nm = self._name(db, d)
         return {"offline": f"✅ อุปกรณ์ {nm} กลับมาส่งสัญญาณแล้ว",
                 "battery": f"✅ อุปกรณ์ {nm} แบตเตอรี่กลับมาปกติ ({d.battery}%)",
-                "mains": f"✅ อุปกรณ์ {nm} ไฟบ้านกลับมาแล้ว"}[key]
+                "mains": f"✅ อุปกรณ์ {nm} ไฟบ้านกลับมาแล้ว",
+                "signal": f"✅ อุปกรณ์ {nm} สัญญาณกลับมาปกติ"}[key]

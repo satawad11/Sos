@@ -61,6 +61,8 @@ class Engine:
         self.gw = GatewayMonitor(notifier, self.publish)
         self.dev_watch = DeviceMonitor(self.gw)
         self.selftest = SelfTestScheduler()
+        from .netmon import NetMon
+        self.netmon = NetMon(self.publish)               # radio history, ChirpStack events, ping tests (app/netmon.py)
         self.mqtt_ok: Callable[[], bool] = lambda: True      # main.py plugs in the MQTT worker's connection state
         self.gw_cmd_publish: Callable[[str, dict], bool] | None = None   # (gateway_id, signed command) -> sent?  set by the MQTT worker
         self.flush_queue: Callable[[str], None] | None = None   # (dev_eui) -> drop ChirpStack's pending downlinks; set by main.py
@@ -454,4 +456,8 @@ class Engine:
             self.selftest.tick(db, now, self.notifier)
         except Exception:
             log.exception("self-test scheduler failed")
+        try:
+            self.netmon.tick(db, now, settings_store.get(db, "device_defaults")["heartbeat_min"])
+        except Exception:
+            log.exception("network monitor tick failed"); db.rollback()
         return n

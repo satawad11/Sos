@@ -125,6 +125,21 @@ class ChirpStackRest:
         Needed once after a device lost its saved DevNonce counter (firmware <= 0.2 bug, NVS erase, re-flash)."""
         self._call("DELETE", f"/api/devices/{dev_eui}/dev-nonces")
 
+    def enqueue(self, dev_eui: str, fport: int, data: bytes, confirmed: bool = False) -> str:
+        """Queue a downlink through the REST API (returns ChirpStack's queue item id, used to match txack/ack events)."""
+        import base64
+        res = self._call("POST", f"/api/devices/{dev_eui}/queue", json={"queueItem": {
+            "confirmed": confirmed, "fPort": fport, "data": base64.b64encode(data).decode()}})
+        return str(res.get("id", ""))
+
+    def device_known(self, dev_eui: str) -> bool | None:
+        """True/False = ChirpStack has / does not have it; None = could not ask."""
+        if not self.configured: return None
+        try:
+            self._call("GET", f"/api/devices/{dev_eui}"); return True
+        except ProvisionError as e:
+            return False if e.not_found else None
+
     def list_gateways(self) -> list[dict]:
         return self._pages("/api/gateways", {"tenantId": self.tenant_id()})
 

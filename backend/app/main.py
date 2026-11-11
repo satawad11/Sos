@@ -90,6 +90,8 @@ async def lifespan(app: FastAPI):
         cs = prov.get_cs()
         if cs.configured:
             cs.flush_queue(eui)
+        with SessionLocal() as db:          # a ping in the queue is gone now: say why instead of letting it expire
+            worker.engine.netmon.cancel_pings(db, eui, "ยกเลิก: มีเหตุฉุกเฉิน/ข้อความจริงต้องส่งก่อน")
     worker.engine.flush_queue = _flush
     worker.start()
     stop = threading.Event()
@@ -103,6 +105,8 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
     app.include_router(api.router)
     from . import csgate
     app.include_router(csgate.router)          # sign-in gate for the ChirpStack domain
+    from . import netapi
+    app.include_router(netapi.router)          # radio history, diagnosis, ping tests, live events (app/netmon.py)
 
     @app.get("/healthz")
     def healthz(): return {"ok": True}
