@@ -28,16 +28,23 @@ DEFAULTS: dict[str, dict] = {
 
 
 def get(db: Session, key: str) -> dict:
-    row = db.get(Setting, key)
+    # A saved setting stays in the session's identity map after the first read, so repeated calls cost nothing. A setting
+    # that was never saved has no row to cache, so remember "not there" for the life of this (short) session instead of
+    # asking the database again on every call — list endpoints call this once per device.
+    miss = db.info.setdefault("settings_miss", set())
+    row = None if key in miss else db.get(Setting, key)
     merged = dict(DEFAULTS[key])
     if row:
         merged.update(row.value)
+    else:
+        miss.add(key)
     return merged
 
 
 def put(db: Session, key: str, value: dict, actor: str) -> dict:
     if key not in DEFAULTS:
         raise KeyError(key)
+    db.info.get("settings_miss", set()).discard(key)
     row = db.get(Setting, key)
     if row:
         row.value, row.version, row.updated_at, row.updated_by = value, row.version + 1, utcnow(), actor
@@ -91,6 +98,7 @@ def device_link(db: Session, dev, now, cfg: dict | None = None, off_min: int | N
 
 
 def effective_device_cfg(db: Session, dev) -> dict:
-    cfg = {k: get(db, "device_defaults")[k] for k in CFG_FIELDS}
+    dflt = get(db, "device_defaults")
+    cfg = {k: dflt[k] for k in CFG_FIELDS}
     cfg.update(dev.config_override or {})
     return cfg

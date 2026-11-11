@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from . import api, privacy, settings_store
 from .auth import audit, hash_pw, user_from_token
 from .config import env
-from .db import Base, SessionLocal, engine as dbengine, ensure_columns
+from .db import SessionLocal, engine as dbengine, migrate
 from .engine import Engine
 from .line import LineNotifier
 from .models import User
@@ -73,8 +73,7 @@ def escalation_loop(eng: Engine, stop: threading.Event):
 async def lifespan(app: FastAPI):
     if env.jwt_secret in ("", "CHANGE_ME") or len(env.jwt_secret) < 32:
         raise RuntimeError("SOS_JWT_SECRET must be set to a random string of at least 32 characters")
-    Base.metadata.create_all(dbengine)
-    ensure_columns()
+    log.info("database schema: %s", migrate())
     bootstrap_admin()
     from . import linecfg
     with SessionLocal() as _db: linecfg.load(_db)

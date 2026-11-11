@@ -301,9 +301,14 @@ def last_cases(db: Session) -> dict[int, datetime]:
         Case.patient_id.isnot(None), Case.is_test.is_(False)).group_by(Case.patient_id).all()}
 
 
-def pat_dict(p: Patient, db: Session, role: str = "staff", stats: dict | None = None, last: dict | None = None, cfg: dict | None = None):
-    asg = db.query(Assignment).filter_by(patient_id=p.id).order_by(Assignment.priority).all()
-    dev = db.query(Device).filter_by(patient_id=p.id).first()
+def pat_dict(p: Patient, db: Session, role: str = "staff", stats: dict | None = None, last: dict | None = None, cfg: dict | None = None,
+             pre: dict | None = None):
+    """pre = {"asg": {patient_id: [Assignment]}, "dev": {patient_id: Device}} loaded once by the list endpoint (no query per row)."""
+    if pre is not None:
+        asg, dev = pre["asg"].get(p.id, []), pre["dev"].get(p.id)
+    else:
+        asg = db.query(Assignment).filter_by(patient_id=p.id).order_by(Assignment.priority).all()
+        dev = db.query(Device).filter_by(patient_id=p.id).order_by(Device.id).first()
     out = {"id": p.id, "full_name": p.full_name, "age": p.age, "address": p.address, "village": p.village,
             "lat": p.lat, "lon": p.lon, "phone": p.phone, "notes": p.notes, "active": p.active,
             "device": dev.dev_eui if dev else None,
@@ -325,7 +330,12 @@ def pat_dict(p: Patient, db: Session, role: str = "staff", stats: dict | None = 
 @router.get("/patients")
 def patients(db: Session = Depends(get_db), u=Depends(current_user)):
     stats, last, cfg = case_stats(db), last_cases(db), settings_store.get(db, "frequent")
-    return [pat_dict(p, db, u.role, stats, last, cfg) for p in db.query(Patient).order_by(Patient.id).all()]
+    pre = {"asg": {}, "dev": {}}
+    for a in db.query(Assignment).options(joinedload(Assignment.caregiver)).order_by(Assignment.patient_id, Assignment.priority).all():
+        pre["asg"].setdefault(a.patient_id, []).append(a)
+    for d in db.query(Device).filter(Device.patient_id.isnot(None)).order_by(Device.id.desc()).all():
+        pre["dev"][d.patient_id] = d                      # lowest id wins, like the per-row query
+    return [pat_dict(p, db, u.role, stats, last, cfg, pre) for p in db.query(Patient).order_by(Patient.id).all()]
 
 
 class PriorityIn(BaseModel):
@@ -554,7 +564,7 @@ def devices(db: Session = Depends(get_db), u=Depends(current_user)):
     off = settings_store.get(db, "offline")["device_offline_min"]
     gcfg = settings_store.get(db, "geo")
     now = utcnow(); out = []
-    for d in db.query(Device).order_by(Device.id).all():
+    for d in db.query(Device).options(joinedload(Device.patient)).order_by(Device.id).all():
         ls = aware(d.last_seen)
         offline = d.lifecycle == "active" and (ls is None or (now - ls).total_seconds() > off * 60)
         pending = (d.reported_config_ver is not None and d.reported_config_ver != (d.config_ver & 0xFF)) \
@@ -1364,7 +1374,8 @@ def get_logo(slot: str, db: Session = Depends(get_db), u=Depends(current_user)):
 @router.get("/stats")
 def stats(db: Session = Depends(get_db), u=Depends(current_user)):
     since = utcnow() - timedelta(days=30)
-    cs = db.query(Case).filter(Case.created_at >= since, Case.is_test.is_(False)).all()
+    cs = db.query(Case.state, Case.close_reason, Case.after_hours, Case.created_at, Case.accepted_at).filter(
+        Case.created_at >= since, Case.is_test.is_(False)).all()
     acc = [(aware(c.accepted_at) - aware(c.created_at)).total_seconds() for c in cs if c.accepted_at]
     return {"cases_30d": len(cs), "open": sum(c.state == "new" for c in cs),
             "false_alarm": sum(c.close_reason == "false_alarm" for c in cs),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-from sqlalchemy import (String, Integer, Boolean, DateTime, ForeignKey, Text, JSON, UniqueConstraint, Float, LargeBinary)
+from sqlalchemy import (String, Integer, Boolean, DateTime, ForeignKey, Text, JSON, UniqueConstraint, Float, LargeBinary, Index)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -70,7 +70,7 @@ class Device(Base):
     dev_eui: Mapped[str] = mapped_column(String(16), unique=True)  # lowercase hex
     label: Mapped[str] = mapped_column(String(64), default="")
     lifecycle: Mapped[str] = mapped_column(String(16), default="ready")  # ready|active|repair|retired|lost
-    patient_id: Mapped[int | None] = mapped_column(ForeignKey("sos_patients.id"), nullable=True)
+    patient_id: Mapped[int | None] = mapped_column(ForeignKey("sos_patients.id"), nullable=True, index=True)
     fw_version: Mapped[str] = mapped_column(String(16), default="")
     config_ver: Mapped[int] = mapped_column(Integer, default=1)  # desired config version (1..255)
     config_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # per-device overrides of device_defaults
@@ -117,14 +117,14 @@ class Assignment(Base):
 class Case(Base):
     __tablename__ = "sos_cases"
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("sos_devices.id"))
-    patient_id: Mapped[int | None] = mapped_column(ForeignKey("sos_patients.id"), nullable=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("sos_devices.id"), index=True)
+    patient_id: Mapped[int | None] = mapped_column(ForeignKey("sos_patients.id"), nullable=True, index=True)
     alert_id: Mapped[int] = mapped_column(Integer)
-    state: Mapped[str] = mapped_column(String(12), default="new")  # new|accepted|closed|cancelled
+    state: Mapped[str] = mapped_column(String(12), default="new", index=True)  # new|accepted|closed|cancelled
     overdue: Mapped[bool] = mapped_column(Boolean, default=False)
     after_hours: Mapped[bool] = mapped_column(Boolean, default=False)
     is_test: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = _dt(default=utcnow)
+    created_at: Mapped[datetime] = _dt(default=utcnow, index=True)
     accepted_at: Mapped[datetime | None] = _dt(nullable=True)
     accepted_by: Mapped[str] = mapped_column(String(128), default="")
     closed_at: Mapped[datetime | None] = _dt(nullable=True)
@@ -189,7 +189,7 @@ class Notification(Base):
     case_id: Mapped[int] = mapped_column(ForeignKey("sos_cases.id"), index=True)
     caregiver_id: Mapped[int | None] = mapped_column(ForeignKey("sos_caregivers.id"), nullable=True)
     channel: Mapped[str] = mapped_column(String(16), default="line")
-    status: Mapped[str] = mapped_column(String(16), default="sent")  # sent|failed|skipped
+    status: Mapped[str] = mapped_column(String(16), default="sent")  # queued|sent|failed|skipped
     detail: Mapped[str] = mapped_column(Text, default="")
     at: Mapped[datetime] = _dt(default=utcnow)
 
@@ -197,9 +197,9 @@ class Notification(Base):
 class AuditLog(Base):
     __tablename__ = "sos_audit_log"
     id: Mapped[int] = mapped_column(primary_key=True)
-    at: Mapped[datetime] = _dt(default=utcnow)
+    at: Mapped[datetime] = _dt(default=utcnow, index=True)
     actor: Mapped[str] = mapped_column(String(64))
-    action: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(64), index=True)
     target: Mapped[str] = mapped_column(String(128), default="")
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
 
@@ -340,3 +340,62 @@ class PingTest(Base):
     done_at: Mapped[datetime | None] = _dt(nullable=True)
     gateway_id: Mapped[str] = mapped_column(String(16), default="")
     note: Mapped[str] = mapped_column(String(200), default="")
+class Outbox(Base):
+    """A LINE message waiting to be sent (app/outbox.py). Rows are written in the caller's transaction and sent by a
+    separate worker, so a slow or failing LINE API never delays uplink handling, and a failed send is retried."""
+    __tablename__ = "sos_outbox"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(12))                       # case | system | location
+    case_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    caregiver_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)           # kind-specific arguments (reminder, text, lat/lon...)
+    status: Mapped[str] = mapped_column(String(10), default="pending", index=True)   # pending | sent | failed | dropped
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_try_at: Mapped[datetime] = _dt(default=utcnow)
+    last_error: Mapped[str] = mapped_column(String(240), default="")
+    created_at: Mapped[datetime] = _dt(default=utcnow)
+    done_at: Mapped[datetime | None] = _dt(nullable=True)
+
+
+class Telemetry(Base):
+    """One row per uplink: the history behind Device.battery / last_rssi (battery trend, signal quality over time)."""
+    __tablename__ = "sos_device_telemetry"
+    __table_args__ = (Index("ix_sos_device_telemetry_device_at", "device_id", "at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("sos_devices.id"))
+    at: Mapped[datetime] = _dt(default=utcnow, index=True)
+    battery: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mains_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    rssi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gateway_id: Mapped[str] = mapped_column(String(16), default="")
+    n_gateways: Mapped[int | None] = mapped_column(Integer, nullable=True)   # how many gateways heard this uplink
+    msg_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class StateLog(Base):
+    """Durable copy of the state changes the reports are built from (gateway offline/online, maintenance on/off).
+    The audit log is purged after audit_retention_days; these rows are not, so an old month's report keeps its numbers."""
+    __tablename__ = "sos_state_log"
+    __table_args__ = (Index("ix_sos_state_log_action_at", "action", "at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = _dt(default=utcnow)
+    action: Mapped[str] = mapped_column(String(64))
+    target: Mapped[str] = mapped_column(String(128), default="")
+
+
+STATE_ACTIONS = ("gateway_offline", "gateway_online", "gateway_maint_on", "gateway_maint_off")
+
+
+from sqlalchemy import event as _sa_event           # noqa: E402
+from sqlalchemy.orm import Session as _Session      # noqa: E402
+
+
+@_sa_event.listens_for(_Session, "before_flush")
+def _mirror_state_log(session, flush_context, instances):
+    """Every audit row the reports depend on is copied to sos_state_log in the same transaction, wherever it was written."""
+    for obj in list(session.new):
+        if isinstance(obj, AuditLog) and obj.action in STATE_ACTIONS:
+            if obj.at is None:
+                obj.at = utcnow()
+            session.add(StateLog(at=obj.at, action=obj.action, target=obj.target or ""))

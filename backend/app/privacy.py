@@ -107,8 +107,7 @@ def retention_cutoffs(db: Session, now: datetime) -> dict:
 
 
 def _old_cases(db: Session, cut: dict) -> list[Case]:
-    real = [c for c in db.query(Case).filter(Case.is_test.is_(False), Case.state.in_(CLOSED)).all()
-            if _aware(c.created_at) < cut["cases_before"]]
+    real = db.query(Case).filter(Case.is_test.is_(False), Case.state.in_(CLOSED), Case.created_at < cut["cases_before"]).all()
     tests = db.query(Case).filter(Case.is_test.is_(True), Case.created_at < cut["tests_before"]).all()
     return real + tests
 

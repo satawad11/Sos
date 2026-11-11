@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from . import settings_store
 from .config import env
 from .gateways import _aware
-from .models import AuditLog, Case, Device, Gateway, Notification, utcnow
+from .models import Case, Device, Gateway, Notification, StateLog, utcnow
 
 MAX_DAYS = 400
 WEEKDAYS = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
@@ -74,7 +74,7 @@ def _cases(db: Session, start: datetime, end: datetime, tests=False) -> list[Cas
 
 
 def _windows(db: Session, on: str, off: str, end: datetime) -> dict[str, list[tuple[datetime, datetime | None]]]:
-    rows = (db.query(AuditLog).filter(AuditLog.action.in_((on, off)), AuditLog.at < end).order_by(AuditLog.at, AuditLog.id).all())
+    rows = (db.query(StateLog).filter(StateLog.action.in_((on, off)), StateLog.at < end).order_by(StateLog.at, StateLog.id).all())
     open_: dict[str, datetime] = {}; out: dict[str, list] = {}
     for r in rows:
         at = _aware(r.at)
@@ -98,8 +98,8 @@ def _overlap(lo: datetime, hi: datetime, wins, now: datetime) -> float:
 def _gateway_outages(db: Session, start: datetime, end: datetime) -> list[dict]:
     """Pair gateway_offline / gateway_online audit rows into outage episodes, clipped to [start, end).
     Time spent in maintenance (gateway_maint_on/off) is reported apart (maint_min), not as downtime."""
-    rows = (db.query(AuditLog).filter(AuditLog.action.in_(("gateway_offline", "gateway_online")), AuditLog.at < end)
-            .order_by(AuditLog.at, AuditLog.id).all())
+    rows = (db.query(StateLog).filter(StateLog.action.in_(("gateway_offline", "gateway_online")), StateLog.at < end)
+            .order_by(StateLog.at, StateLog.id).all())
     labels = {g.gateway_id: g.label for g in db.query(Gateway).all()}
     open_: dict[str, datetime] = {}
     eps: list[tuple[str, datetime, datetime | None]] = []
