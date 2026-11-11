@@ -2,10 +2,10 @@ from __future__ import annotations
 import re, secrets
 import httpx
 from datetime import timedelta, datetime
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 from . import settings_store
 from .auth import (admin_only, audit, check_pw, current_user, hash_pw, make_token, password_problem, staff_or_admin,
@@ -206,14 +206,41 @@ def case_dict(c: Case, events=False, role: str = "staff"):
 
 
 @router.get("/cases")
-def list_cases(state: str | None = None, include_test: bool = False, limit: int = 100,
+def list_cases(response: Response, state: str | None = None, include_test: bool = False, limit: int = 100, offset: int = Query(default=0, ge=0),
+               frm: str | None = Query(default=None, alias="from"), to: str | None = None, patient_id: int | None = None,
+               village: str | None = None, reason: str | None = None, q: str | None = Query(default=None, max_length=80),
                db: Session = Depends(get_db), u=Depends(current_user)):
-    q = db.query(Case).options(joinedload(Case.device), joinedload(Case.patient))
+    """Newest first. Filters: state (comma list), from/to (YYYY-MM-DD, local days, inclusive), patient_id, village, reason
+    (resolved|false_alarm), q (patient name, device label / DevEUI, or a case number). The number of matching cases is in
+    the X-Total-Count header; page through them with limit + offset."""
+    qy = db.query(Case)
     if state:
-        q = q.filter(Case.state.in_(state.split(",")))
+        qy = qy.filter(Case.state.in_(state.split(",")))
     if not include_test:
-        q = q.filter(Case.is_test.is_(False))
-    return [case_dict(c, role=u.role) for c in q.order_by(Case.id.desc()).limit(min(limit, 500)).all()]
+        qy = qy.filter(Case.is_test.is_(False))
+    if frm or to:
+        try:
+            start, end, *_ = reports.parse_range(None, frm or "2000-01-01", to or "2999-12-31", max_days=None)
+        except reports.RangeError as e:
+            raise HTTPException(422, str(e))
+        qy = qy.filter(Case.created_at >= start, Case.created_at < end)
+    if patient_id is not None:
+        qy = qy.filter(Case.patient_id == patient_id)
+    if reason:
+        qy = qy.filter(Case.close_reason == reason)
+    if village or q:
+        qy = qy.outerjoin(Patient, Patient.id == Case.patient_id).outerjoin(Device, Device.id == Case.device_id)
+        if village:
+            qy = qy.filter(Patient.village == village)
+        if q and q.strip():
+            t = q.strip(); like = f"%{t}%"
+            conds = [Patient.full_name.ilike(like), Device.label.ilike(like), Device.dev_eui.ilike(like)]
+            if t.lstrip("#").isdigit(): conds.append(Case.id == int(t.lstrip("#")))
+            qy = qy.filter(or_(*conds))
+    response.headers["X-Total-Count"] = str(qy.count())
+    rows = (qy.options(joinedload(Case.device), joinedload(Case.patient)).order_by(Case.id.desc())
+            .offset(offset).limit(max(1, min(limit, 500))).all())
+    return [case_dict(c, role=u.role) for c in rows]
 
 
 @router.get("/cases/{cid}")
@@ -1084,6 +1111,18 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
         if d2 and d2 <= d1: raise HTTPException(422, "second_day must be after remind_day (or 0)")
         value = {"enabled": value["enabled"], "remind_day": d1, "second_day": d2, "remind_time": value["remind_time"],
                  "confirm_line": value["confirm_line"]}
+    if key == "monitoring":
+        url = str(value.get("heartbeat_url", "") or "").strip()
+        if url and not (url.startswith("https://") and len(url) <= 300 and " " not in url):
+            raise HTTPException(422, "heartbeat_url ต้องขึ้นต้นด้วย https:// (หรือเว้นว่างเพื่อปิด)")
+        iv, age = value.get("interval_min", 5), value.get("backup_max_age_h", 36)
+        if isinstance(iv, bool) or not isinstance(iv, int) or not 1 <= iv <= 60: raise HTTPException(422, "interval_min must be 1-60")
+        if isinstance(age, bool) or not isinstance(age, int) or not 12 <= age <= 240: raise HTTPException(422, "backup_max_age_h must be 12-240")
+        value = {"heartbeat_url": url, "interval_min": iv, "backup_max_age_h": age}
+    if key == "telemetry":
+        kd = value.get("keep_days")
+        if isinstance(kd, bool) or not isinstance(kd, int) or not 30 <= kd <= 1825: raise HTTPException(422, "keep_days must be 30-1825")
+        value = {"keep_days": kd}
     if key == "frequent":
         w, m, fa = value.get("week_threshold"), value.get("month_threshold"), value.get("count_false_alarm")
         if any(isinstance(x, bool) or not isinstance(x, int) for x in (w, m)) or not (0 <= w <= 50 and 0 <= m <= 200):

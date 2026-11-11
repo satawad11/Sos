@@ -3,7 +3,7 @@ import asyncio, logging, threading, time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from . import api, privacy, settings_store
+from . import api, health, privacy, settings_store
 from .auth import audit, hash_pw, user_from_token
 from .config import env
 from .db import SessionLocal, engine as dbengine, migrate
@@ -54,9 +54,25 @@ def escalation_loop(eng: Engine, stop: threading.Event):
         try:
             with SessionLocal() as db:
                 eng.tick(db)
+            health.beat()
         except Exception:
             log.exception("escalation tick failed")
         n += 1
+        if n % 720 == 0:                       # hourly: housekeeping that never touches personal data
+            try:
+                with SessionLocal() as db:
+                    from .outbox import NotifyWorker
+                    from . import telemetry
+                    NotifyWorker.purge(db); telemetry.purge(db); db.commit()
+                    from . import backupinfo
+                    import time as _t
+                    bk = backupinfo.state(int(settings_store.get(db, "monitoring").get("backup_max_age_h", 36)))
+                    if bk.get("known") and bk["problem"] and _t.time() - health.state.get("backup_alert_at", 0) > 86400:
+                        health.state["backup_alert_at"] = _t.time()      # once a day at most
+                        res = eng.gw.send_system(db, "⚠️ การสำรองข้อมูลระบบแจ้งเหตุฉุกเฉินมีปัญหา\n" + bk["problem"])
+                        audit(db, "system", "backup_alert", "", problem=bk["problem"], results=res); db.commit()
+            except Exception:
+                log.exception("housekeeping failed")
         if n % 720 == 0:                       # hourly (720 x 5 s): retention purge, only when the admin switched it on
             try:
                 with SessionLocal() as db:
@@ -81,8 +97,13 @@ async def lifespan(app: FastAPI):
     from .mqtt_worker import MqttWorker
     from .push import PushSender
     pusher = PushSender(SessionLocal); pusher.start(); api._engine["push"] = pusher
-    worker = MqttWorker(lambda dl: Engine(dl, LineNotifier(), lambda e: (hub.publish(e), pusher.on_event(e))))
-    api._engine["engine"] = worker.engine
+    from .outbox import NotifyWorker, QueuedNotifier
+    publish = lambda e: (hub.publish(e), pusher.on_event(e))
+    line = LineNotifier()
+    notify = NotifyWorker(SessionLocal, line, publish)          # LINE is sent off the MQTT thread, with retries (app/outbox.py)
+    worker = MqttWorker(lambda dl: Engine(dl, QueuedNotifier(line, notify.wake), publish))
+    api._engine["engine"] = worker.engine; api._engine["notify"] = notify
+    notify.start()
 
     def _flush(eui: str):
         from . import provision as prov
@@ -95,8 +116,10 @@ async def lifespan(app: FastAPI):
     worker.start()
     stop = threading.Event()
     threading.Thread(target=escalation_loop, args=(worker.engine, stop), daemon=True).start()
+    threading.Thread(target=health.heartbeat_loop, daemon=True,
+                     args=(SessionLocal, lambda: worker.engine, lambda: notify, stop)).start()
     yield
-    stop.set(); worker.stop()
+    stop.set(); worker.stop(); notify.stop()
 
 
 def create_app(with_lifespan: bool = True) -> FastAPI:
@@ -104,11 +127,20 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
     app.include_router(api.router)
     from . import csgate
     app.include_router(csgate.router)          # sign-in gate for the ChirpStack domain
+    from . import dataapi
+    app.include_router(dataapi.router)         # system health, device history, CSV import, data readiness
     from . import netapi
     app.include_router(netapi.router)          # radio history, diagnosis, ping tests, live events (app/netmon.py)
 
     @app.get("/healthz")
-    def healthz(): return {"ok": True}
+    def healthz(strict: bool = False):
+        """Public, booleans only. 503 when the database or the escalation loop is down — the updater and Docker rely on that.
+        ?strict=1 also fails when MQTT has been disconnected for 2 minutes or the LINE queue is stuck (for an uptime monitor)."""
+        from fastapi.responses import JSONResponse
+        s = health.snapshot(SessionLocal, api._engine.get("engine"), api._engine.get("notify"))
+        body = {k: s[k] for k in ("ok", "db", "loop", "mqtt", "line_queue")}
+        good = s["all_ok"] if strict else s["ok"]
+        return JSONResponse(body, status_code=200 if good else 503)
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket, token: str = ""):

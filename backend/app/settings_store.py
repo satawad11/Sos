@@ -23,6 +23,8 @@ DEFAULTS: dict[str, dict] = {
             "reporter_name": "", "reporter_title": "ผู้รายงาน", "approver_name": "", "approver_title": "ผู้อำนวยการ รพ.สต."},   # PDF report header/signers
     "frequent": {"week_threshold": 3, "month_threshold": 6, "count_false_alarm": True},   # "presses often": cases in the last 7 / 30 days (patients page)
     "security": {"mfa_enabled": False, "mfa_roles": ["admin"]},       # 2-step sign-in policy (off until an admin turns it on)
+    "monitoring": {"heartbeat_url": "", "interval_min": 5, "backup_max_age_h": 36},   # outgoing dead-man's-switch ping + backup age alarm (app/health.py)
+    "telemetry": {"keep_days": 400},                                    # device battery/signal history (sos_device_telemetry)
     "self_test": {"enabled": True, "remind_day": 1, "second_day": 15, "remind_time": "10:00", "confirm_line": True},   # monthly button test (app/selftest.py)
 }
 

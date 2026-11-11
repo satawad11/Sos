@@ -27,7 +27,7 @@ def tz() -> ZoneInfo:
     return ZoneInfo(env.tz)
 
 
-def parse_range(month: str | None, frm: str | None, to: str | None) -> tuple[datetime, datetime, date, date]:
+def parse_range(month: str | None, frm: str | None, to: str | None, max_days: int | None = -1) -> tuple[datetime, datetime, date, date]:
     """Return (start_utc, end_utc_exclusive, first_day, last_day) for ?month=YYYY-MM or ?from=&to= (inclusive)."""
     try:
         if month:
@@ -43,7 +43,8 @@ def parse_range(month: str | None, frm: str | None, to: str | None) -> tuple[dat
         if isinstance(e, RangeError): raise
         raise RangeError("รูปแบบวันที่ไม่ถูกต้อง")
     if d2 < d1: raise RangeError("วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่ม")
-    if (d2 - d1).days + 1 > MAX_DAYS: raise RangeError(f"ช่วงเวลายาวเกิน {MAX_DAYS} วัน")
+    if max_days == -1: max_days = MAX_DAYS
+    if max_days is not None and (d2 - d1).days + 1 > max_days: raise RangeError(f"ช่วงเวลายาวเกิน {MAX_DAYS} วัน")
     z = tz()
     start = datetime(d1.year, d1.month, d1.day, tzinfo=z).astimezone(timezone.utc)
     end = (datetime(d2.year, d2.month, d2.day, tzinfo=z) + timedelta(days=1)).astimezone(timezone.utc)
