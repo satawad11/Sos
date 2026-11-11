@@ -101,6 +101,8 @@ async def lifespan(app: FastAPI):
 def create_app(with_lifespan: bool = True) -> FastAPI:
     app = FastAPI(title="SOS LoRa", lifespan=lifespan if with_lifespan else None)
     app.include_router(api.router)
+    from . import csgate
+    app.include_router(csgate.router)          # sign-in gate for the ChirpStack domain
 
     @app.get("/healthz")
     def healthz(): return {"ok": True}
