@@ -1372,8 +1372,8 @@ async function loadChirpstack(){
   let s;try{s=await api("/chirpstack")}catch(e){if(page==="chirpstack")$("#main").innerHTML=`<div class="warn">${esc(e.message)}</div>`;return}
   if(page!=="chirpstack")return;
   const c=s.compare,li=(a,f)=>a.length?`<ul>${a.map(f).join("")}</ul>`:'<p class="mut">ไม่มี</p>';
-  const ui=s.ui_url?`<a class="btn p" href="${esc(s.ui_url)}" target="_blank" rel="noopener">เปิดหน้า ChirpStack ↗</a> <span class="mut">${esc(s.ui_url)} (เข้าได้เฉพาะเครือข่ายที่อนุญาต)</span>`
-    :'<span class="mut">ยังไม่ได้เปิดโดเมนสำหรับ ChirpStack — บนเซิร์ฟเวอร์รัน <code>sudo bash scripts/enable-chirpstack-domain.sh lns.โดเมน &lt;IP/ช่วงที่อนุญาต&gt;</code> หรือใช้ SSH tunnel</span>';
+  const ui=s.ui_url?`<button class="btn p" id="csopen">เปิดหน้า ChirpStack ↗</button> <span class="mut">${esc(s.ui_url)} · เข้าได้จากทุกเครือข่ายด้วยบัญชีผู้ดูแลระบบนี้ (ครั้งละ 8 ชั่วโมง)</span>`
+    :'<span class="mut">ยังไม่ได้เปิดโดเมนสำหรับ ChirpStack — บนเซิร์ฟเวอร์รัน <code>sudo bash scripts/enable-chirpstack-domain.sh lns.โดเมน</code> หรือใช้ SSH tunnel</span>';
   const need=c?c.gateways_missing_in_cs.length+c.disabled_mismatch.length:0;
   $("#main").innerHTML=`<div class="card"><h3>ChirpStack (LoRaWAN Network Server)</h3>
     <div class="row"><b>สถานะ:</b> ${!s.configured?'<span class="bad">ยังไม่ได้ตั้งค่า</span>':s.reachable?'<span class="ok">เชื่อมต่อได้</span>':'<span class="bad">เชื่อมต่อไม่ได้</span>'} ${s.error?`<span class="mut">${esc(s.error)}</span>`:""}</div>
@@ -1388,6 +1388,11 @@ async function loadChirpstack(){
     <h4>⚠️ มีใน ChirpStack แต่ไม่มีในแดชบอร์ด (${c.unknown_in_sos.length})</h4><p class="mut">กดปุ่มแล้วจะไม่มีใครได้รับแจ้ง — เพิ่มที่หน้า "อุปกรณ์" หรือลบออกจาก ChirpStack</p>${li(c.unknown_in_sos,d=>`<li><code>${esc(d.dev_eui)}</code> ${esc(d.name)} <span class="mut">เห็นล่าสุด ${fmt(d.last_seen)}</span></li>`)}
    </div>`:s.compare_error?`<div class="warn">${esc(s.compare_error)}</div>`:""}`;
   if($("#csre"))$("#csre").onclick=loadChirpstack;
+  // one-time sign-in link (60 s) -> ChirpStack domain sets its own 8 h session (backend app/csgate.py). The tab is opened
+  // before the request so popup blockers allow it.
+  if($("#csopen"))$("#csopen").onclick=async()=>{const w=window.open("about:blank","_blank");
+    try{const r=await api("/chirpstack/ui-ticket",{method:"POST"});if(w){w.opener=null;w.location.replace(r.url)}else location.href=r.url}
+    catch(e){if(w)w.close();toast(e.message)}};
   if($("#cssync"))$("#cssync").onclick=guard(async()=>{busyBtn($("#cssync"),true);const r=await api("/chirpstack/sync",{method:"POST"});
     toast(`ซิงก์แล้ว: เพิ่มเกตเวย์ ${r.gateways_added.length} · ปิด ${r.devices_disabled.length} · เปิด ${r.devices_enabled.length}${r.errors.length?" · ผิดพลาด "+r.errors.length:""}`);loadChirpstack()});
 }

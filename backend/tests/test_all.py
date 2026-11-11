@@ -1758,3 +1758,50 @@ def test_patient_priority_and_press_frequency(env_, monkeypatch):
     assert by(hv)[pid]["priority"] == "critical" and by(hv)[pid]["address"] == ""                      # viewer sees the level, still no address
     cs = client.get("/api/cases", headers=h).json()
     assert all(c["patient"]["priority"] == "critical" for c in cs if c["patient"] and c["patient"]["id"] == pid)
+
+
+# ---------- ChirpStack domain sign-in gate (app/csgate.py) ----------
+def test_chirpstack_ui_gate(env_, monkeypatch):
+    *_, client, ids = env_
+    from app.config import env as cfg
+    from app import csgate
+    from app.models import User
+    h = login(client)
+    monkeypatch.setattr(cfg, "cs_domain", "")
+    assert client.post("/api/chirpstack/ui-ticket", headers=h).status_code == 409
+    monkeypatch.setattr(cfg, "cs_domain", "lns.example.org")
+    assert client.post("/api/chirpstack/ui-ticket", headers=login(client, "viewer")).status_code == 403
+    assert client.post("/api/chirpstack/ui-ticket").status_code == 401
+    url = client.post("/api/chirpstack/ui-ticket", headers=h).json()["url"]
+    assert url.startswith("https://lns.example.org/__sos/login?t=")
+    t = url.split("t=", 1)[1]
+    # not signed in yet: browser gets a page pointing to the dashboard, API calls a plain 401
+    r = client.get("/api/cs-gate/check", headers={"Accept": "text/html"})
+    assert r.status_code == 401 and "แดชบอร์ด SOS" in r.text
+    assert client.get("/api/cs-gate/check").status_code == 401
+    # sign in with the one-time ticket
+    r = client.get(f"/api/cs-gate/login?t={t}", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    sc = r.headers["set-cookie"]
+    assert "sos_cs=" in sc and "HttpOnly" in sc and "Secure" in sc and "samesite=lax" in sc.lower() and "Domain" not in sc
+    cookie = sc.split(";")[0].split("=", 1)[1]
+    client.cookies.clear()
+    r = client.get("/api/cs-gate/check", cookies={"sos_cs": cookie})
+    assert r.status_code == 200 and r.headers["x-sos-user"] == "admin"
+    # one-time: the same link cannot be used again
+    assert client.get(f"/api/cs-gate/login?t={t}", follow_redirects=False).status_code == 403
+    # a dashboard session token is not a ChirpStack session, and vice versa
+    assert client.get("/api/cs-gate/check", cookies={"sos_cs": h["Authorization"][7:]}).status_code == 401
+    assert client.get("/api/me", headers={"Authorization": f"Bearer {cookie}"}).status_code == 401
+    assert client.get(f"/api/cs-gate/login?t={cookie}", follow_redirects=False).status_code == 403
+    # expired ticket
+    old = csgate._sign({"sub": "admin", "tv": 0, "purpose": "cs-ticket", "jti": "x"}, -5)
+    assert client.get(f"/api/cs-gate/login?t={old}", follow_redirects=False).status_code == 403
+    # password change / role change ends the ChirpStack session at once
+    with SessionLocal() as db:
+        u = db.query(User).filter_by(username="admin").one(); u.token_ver = (u.token_ver or 0) + 1; db.commit()
+    assert client.get("/api/cs-gate/check", cookies={"sos_cs": cookie}).status_code == 401
+    # sign-out clears the cookie and returns to the dashboard
+    r = client.get("/api/cs-gate/logout", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("/#chirpstack") and 'sos_cs=""' in r.headers["set-cookie"]
+    assert any(a["action"] == "chirpstack_ui_login" for a in client.get("/api/audit", headers=login(client)).json())
