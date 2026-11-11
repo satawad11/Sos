@@ -806,18 +806,21 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
             if fresh: lat, lon, src = d.loc_lat, d.loc_lon, "gps"
             elif d.patient and d.patient.lat is not None and d.patient.lon is not None: lat, lon, src = d.patient.lat, d.patient.lon, "home"
             elif d.loc_lat is not None: lat, lon, src = d.loc_lat, d.loc_lon, "gps_old"
-        q = _quality(d.last_rssi, d.last_snr)
+        sig = d.sig or {}
+        q = sig.get("q") if sig.get("q") in ("good", "fair", "weak", "bad", "unknown") else _quality(d.last_rssi, d.last_snr)
         cs = open_.get(d.patient_id) if d.patient_id else None
         dvs.append({"id": d.id, "dev_eui": d.dev_eui, "label": d.label, "lifecycle": d.lifecycle,
                     "patient": d.patient.full_name if d.patient else None, "patient_id": d.patient_id,
                     "phone": d.patient.phone if d.patient and not viewer else "", "address": (f"{d.patient.address} {d.patient.village}".strip() if d.patient and not viewer else ""),
                     "case": {"id": cs.id, "state": cs.state, "overdue": cs.overdue, "created_at": iso(cs.created_at)} if cs else None, "battery": d.battery, "mains_ok": d.mains_ok,
                     "offline": offline, "last_seen": iso(d.last_seen), "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
+                    "link_margin": sig.get("margin"), "loss": sig.get("loss"),
                     "gateway_id": d.last_gateway or None, "lat": lat, "lon": lon, "pos_src": src})
         if d.last_gateway:
             gp = gpos.get(d.last_gateway)
             dist = round(geo.distance_m(lat, lon, gp[0], gp[1])) if lat is not None and gp else None
             links.append({"device_id": d.id, "gateway_id": d.last_gateway, "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
+                          "link_margin": sig.get("margin"), "loss": sig.get("loss"),
                           "offline": offline, "distance_m": dist})
     # patients for the "pin a home" tool and homes that have no button yet (never for the read-only role)
     homes, no_loc = [], []

@@ -20,7 +20,7 @@ from typing import Callable
 
 from sqlalchemy.orm import Session
 
-from .models import Device, NetEvent, PingTest, UplinkLog, utcnow
+from .models import Device, NetEvent, PingTest, UplinkLog, UplinkReception, utcnow
 
 log = logging.getLogger("sos.netmon")
 
@@ -115,14 +115,31 @@ class NetMon:
     # ---------------- inbound from MQTT ----------------
     def on_uplink(self, db: Session, dev_eui: str, j: dict) -> None:
         u = _parse_up(j)
-        db.add(UplinkLog(dev_eui=dev_eui, at=utcnow(), f_cnt=u["f_cnt"], f_port=u["f_port"], rssi=u["rssi"], snr=u["snr"],
+        event_id = str(j.get("deduplicationId") or "")[:64]
+        if event_id and db.query(UplinkLog.id).filter_by(event_id=event_id).first():
+            return                         # MQTT QoS 1 may redeliver an event after reconnect
+        at = utcnow()
+        db.add(UplinkLog(dev_eui=dev_eui, at=at, f_cnt=u["f_cnt"], f_port=u["f_port"], rssi=u["rssi"], snr=u["snr"],
                          sf=u["sf"], freq=u["freq"], gateway_id=u["gateway_id"], gw_count=u["gw_count"],
-                         confirmed=u["confirmed"]))
+                         confirmed=u["confirmed"], event_id=event_id or None))
+        # ChirpStack supplies one rxInfo entry per gateway that actually received this frame.
+        # Keep those separately so gateway traffic/reliability does not get attributed only to the strongest one.
+        seen = set()
+        for rx in j.get("rxInfo") or []:
+            gid = str(rx.get("gatewayId") or "").lower()
+            if len(gid) != 16 or any(c not in "0123456789abcdef" for c in gid) or gid in seen:
+                continue
+            seen.add(gid)
+            db.add(UplinkReception(dev_eui=dev_eui, at=at, f_cnt=u["f_cnt"], gateway_id=gid,
+                                   rssi=rx.get("rssi"), snr=rx.get("snr")))
         db.flush()
         self._update_sig(db, dev_eui)
+        label = db.query(Device.label).filter_by(dev_eui=dev_eui).scalar() or ""
         db.commit()
         self.publish({"type": "net_event", "dev_eui": dev_eui, "kind": "up", "level": "info",
-                      "text": self._up_text(u), "at": utcnow().isoformat()})
+                      "text": self._up_text(u), "at": at.isoformat(),
+                      "label": label, "frame": {"f_cnt": u["f_cnt"], "f_port": u["f_port"], "rssi": u["rssi"], "snr": u["snr"],
+                                "sf": u["sf"], "freq": u["freq"], "gateway_id": u["gateway_id"], "gw_count": u["gw_count"]}})
 
     @staticmethod
     def _up_text(u: dict) -> str:
@@ -166,8 +183,9 @@ class NetMon:
                   detail: dict | None = None) -> NetEvent:
         e = NetEvent(dev_eui=dev_eui, at=utcnow(), kind=kind, level=level, code=code[:40], text=text[:300], detail=detail)
         db.add(e)
+        label = db.query(Device.label).filter_by(dev_eui=dev_eui).scalar() or ""
         self.publish({"type": "net_event", "dev_eui": dev_eui, "kind": kind, "level": level, "code": code,
-                      "text": text[:300], "at": e.at.isoformat()})
+                      "label": label, "text": text[:300], "at": e.at.isoformat()})
         return e
 
     def on_downlink(self, db: Session, dev_eui: str, fport: int, nbytes: int, why: str = "") -> None:
@@ -272,6 +290,7 @@ class NetMon:
             return
         self._last_prune = now
         db.query(UplinkLog).filter(UplinkLog.at < now - timedelta(days=KEEP_UPLINK_DAYS)).delete(synchronize_session=False)
+        db.query(UplinkReception).filter(UplinkReception.at < now - timedelta(days=KEEP_UPLINK_DAYS)).delete(synchronize_session=False)
         db.query(NetEvent).filter(NetEvent.at < now - timedelta(days=KEEP_EVENT_DAYS)).delete(synchronize_session=False)
         db.query(PingTest).filter(PingTest.created_at < now - timedelta(days=KEEP_UPLINK_DAYS)).delete(synchronize_session=False)
         db.commit()

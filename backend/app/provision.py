@@ -107,6 +107,93 @@ class ChirpStackRest:
     def list_devices(self) -> list[dict]:
         return self._pages("/api/devices", {"applicationId": self.app_id})
 
+    def export_network_backup(self) -> dict:
+        """Collect this SOS application's devices and keys plus tenant gateways for encrypted export."""
+        devices = []
+        for row in self.list_devices():
+            eui = str(row.get("devEui", "")).lower()
+            if not eui: continue
+            d = self._call("GET", f"/api/devices/{eui}").get("device") or {}
+            k = self._call("GET", f"/api/devices/{eui}/keys").get("deviceKeys") or {}
+            keys = {name: str(k[name]) for name in ("nwkKey", "appKey", "nwkSEncKey", "sNwkSIntKey", "fNwkSIntKey")
+                    if k.get(name)}
+            devices.append({"dev_eui": eui, "name": str(d.get("name", row.get("name", ""))),
+                            "description": str(d.get("description", "")), "is_disabled": bool(d.get("isDisabled", False)),
+                            "skip_fcnt_check": bool(d.get("skipFcntCheck", False)), "keys": keys})
+        gateways = []
+        for row in self.list_gateways():
+            gid = str(row.get("gatewayId", "")).lower()
+            if not gid: continue
+            g = self._call("GET", f"/api/gateways/{gid}").get("gateway") or {}
+            gateways.append({"gateway_id": gid, "name": str(g.get("name", row.get("name", ""))),
+                             "description": str(g.get("description", "")), "location": g.get("location") or {},
+                             "stats_interval": int(g.get("statsInterval") or 30), "tags": g.get("tags") or {}})
+        return {"format": "sos-chirpstack-backup", "version": 1, "application_name": self.application().get("name", ""),
+                "device_profile_name": (self._call("GET", f"/api/device-profiles/{self.profile_id}").get("deviceProfile") or {}).get("name", ""),
+                "devices": devices, "gateways": gateways}
+
+    def restore_network_backup(self, payload: dict) -> dict:
+        """Restore into the currently configured application/profile and tenant; existing entities are updated."""
+        app = self.application()
+        tenant_id = str(app.get("tenantId", ""))
+        devices_created = devices_updated = gateways_created = gateways_updated = 0
+        failed_devices, failed_gateways = [], []
+        for d in payload["devices"]:
+            eui = d["dev_eui"]
+            try:
+                body = {"devEui": eui, "name": d["name"], "description": d["description"], "applicationId": self.app_id,
+                        "deviceProfileId": self.profile_id, "isDisabled": d["is_disabled"], "skipFcntCheck": d["skip_fcnt_check"]}
+                try:
+                    self._call("GET", f"/api/devices/{eui}")
+                    self._call("PUT", f"/api/devices/{eui}", json={"device": body}); devices_updated += 1
+                except ProvisionError as e:
+                    if not e.not_found: raise
+                    self._call("POST", "/api/devices", json={"device": body}); devices_created += 1
+                try:
+                    self._call("GET", f"/api/devices/{eui}/keys")
+                    self._call("PUT", f"/api/devices/{eui}/keys", json={"deviceKeys": {"devEui": eui, **d["keys"]}})
+                except ProvisionError as e:
+                    if not e.not_found: raise
+                    self._call("POST", f"/api/devices/{eui}/keys", json={"deviceKeys": {"devEui": eui, **d["keys"]}})
+            except ProvisionError:
+                failed_devices.append(eui)
+        for g in payload["gateways"]:
+            gid = g["gateway_id"]
+            try:
+                body = {"gatewayId": gid, "tenantId": tenant_id, "name": g["name"], "description": g["description"],
+                        "location": g["location"], "statsInterval": g["stats_interval"], "tags": g["tags"]}
+                try:
+                    self._call("GET", f"/api/gateways/{gid}")
+                    self._call("PUT", f"/api/gateways/{gid}", json={"gateway": body}); gateways_updated += 1
+                except ProvisionError as e:
+                    if not e.not_found: raise
+                    self._call("POST", "/api/gateways", json={"gateway": body}); gateways_created += 1
+            except ProvisionError:
+                failed_gateways.append(gid)
+        return {"devices_created": devices_created, "devices_updated": devices_updated,
+                "gateways_created": gateways_created, "gateways_updated": gateways_updated,
+                "failed_devices": failed_devices, "failed_gateways": failed_gateways}
+
+    def profile_settings(self) -> dict:
+        """Return only safe Device Profile controls exposed by the dashboard."""
+        p = self._call("GET", f"/api/device-profiles/{self.profile_id}").get("deviceProfile") or {}
+        algorithms = self._call("GET", "/api/device-profiles/adr-algorithms").get("result") or []
+        return {"profile": p.get("name", ""), "adr_algorithm_id": p.get("adrAlgorithmId", ""),
+                "adr_algorithms": [{"id": str(a.get("id", "")), "name": str(a.get("name", ""))}
+                                   for a in algorithms if a.get("id")]}
+
+    def update_profile_adr(self, algorithm_id: str) -> None:
+        """Update only adrAlgorithmId; GET+PUT preserves every other profile field."""
+        algorithms = self._call("GET", "/api/device-profiles/adr-algorithms").get("result") or []
+        allowed = {str(a.get("id", "")) for a in algorithms}
+        if algorithm_id not in allowed:
+            raise ProvisionError("ADR algorithm นี้ไม่มีใน ChirpStack")
+        p = self._call("GET", f"/api/device-profiles/{self.profile_id}").get("deviceProfile") or {}
+        if not p:
+            raise ProvisionError("ไม่พบ Device Profile ที่ตั้งค่าไว้", 404)
+        p["adrAlgorithmId"] = algorithm_id
+        self._call("PUT", f"/api/device-profiles/{self.profile_id}", json={"deviceProfile": p})
+
     def set_disabled(self, dev_eui: str, disabled: bool) -> bool:
         """Returns True if ChirpStack was changed."""
         dev = self._call("GET", f"/api/devices/{dev_eui}").get("device") or {}

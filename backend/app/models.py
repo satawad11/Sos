@@ -298,6 +298,19 @@ class UplinkLog(Base):
     gateway_id: Mapped[str] = mapped_column(String(16), default="")
     gw_count: Mapped[int] = mapped_column(Integer, default=1)
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    event_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+
+class UplinkReception(Base):
+    """A gateway that received one uplink. Unlike UplinkLog (best gateway), this preserves every rxInfo entry."""
+    __tablename__ = "sos_uplink_receptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dev_eui: Mapped[str] = mapped_column(String(16), index=True)
+    at: Mapped[datetime] = _dt(default=utcnow, index=True)
+    f_cnt: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gateway_id: Mapped[str] = mapped_column(String(16), index=True)
+    rssi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class NetEvent(Base):

@@ -723,7 +723,7 @@ function liveEvent(m){if((m.type==="ping"||m.type==="net_event")&&netDev&&$("#ne
   if(m.type==="device_seen"){devSeen(m);return}onEvt(m).catch(()=>{});if(m.type==="gateway_cmd"&&page==="gateways"&&window._gwDraw)window._gwDraw().catch(()=>{});if(m.type==="gateway_state"){if("maint" in m)toast(m.maint?"เกตเวย์เข้าโหมดซ่อมบำรุง":"เกตเวย์ออกจากโหมดซ่อมบำรุง","info");else toast(m.state==="offline"?"เกตเวย์ขาดการเชื่อมต่อ":"เกตเวย์กลับมาออนไลน์",m.state==="offline"?"warn":"ok");if(page==="gateways"&&!devEdit)loadGateways()}if(m.type==="case_test"){toast("ได้รับสัญญาณทดสอบปุ่ม","info");if(page==="selftest")loadSelftest()}if(page==="cases"){if(caseOpen){if(m.case_id===caseOpen&&(m.type==="case_msg"||m.type==="case_update"||m.type==="case_repeat")&&!(document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))showCase(caseOpen)}else loadCases()}if(page==="map"&&(m.type==="case_new"||m.type==="case_update"))loadMap()}
 
 const LOGO=(s=36)=>`<svg width="${s}" height="${s}" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="16" fill="#e53935"/><path d="M27 17h10v10h10v10H37v10H27V37H17V27h10z" fill="#fff"/><path d="M47 9a14 14 0 0 1 8 8M50 4a20 20 0 0 1 10 10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" opacity=".85"/></svg>`;
-const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",integrations:"🔗",settings:"⚙️",audit:"📜",account:"👤"};
+const ICON={cases:"🚨",map:"🗺️",patients:"🧑‍🦳",caregivers:"🧑‍⚕️",devices:"📟",selftest:"🧪",gateways:"📡",netlive:"📶",reports:"📊",privacy:"🔒",install:"🔌",chirpstack:"🛰️",users:"👥",update:"⬆️",integrations:"🔗",settings:"⚙️",audit:"📜",account:"👤"};
 const LS={get:k=>{try{return localStorage.getItem(k)||""}catch{return""}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 function authShell(inner){setTimeout(thmInit);$("#app").innerHTML=`<div class="auth"><button class="thm" id="thm" type="button"></button><div class="auth-side">${LOGO(52)}<h2>ระบบแจ้งเหตุฉุกเฉิน</h2><p>ปุ่มแจ้งเหตุสำหรับผู้ป่วยติดบ้าน ส่งเรื่องถึงเจ้าหน้าที่ รพ.สต. และ อสม. ในพื้นที่ทันที</p></div>${inner}</div>`}
 function busyBtn(b,on,label){b.disabled=on;b.innerHTML=on?`<span class="spin"></span> กำลังดำเนินการ…`:label}
@@ -764,9 +764,9 @@ function render(){
       catch(x){const m=/bad credentials/.test(x.message)?"ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง":/locked/.test(x.message)?"บัญชีถูกล็อกชั่วคราว 15 นาที เพราะใส่รหัสผิดหลายครั้ง":/Failed to fetch|NetworkError/.test(x.message)?"ติดต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ต":x.message;
         err.textContent=m;err.hidden=false;busyBtn($("#go"),false,"เข้าสู่ระบบ");p.select()}};
     return}
-  const tabs=[["cases","เคสฉุกเฉิน"],["map","แผนที่"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["selftest","ทดสอบปุ่ม"],["gateways","เกตเวย์"],["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["chirpstack","ChirpStack"],["integrations","เชื่อมต่อ LINE/AI"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
+  const tabs=[["cases","เคสฉุกเฉิน"],["map","แผนที่"],["patients","ผู้ป่วย"],["caregivers","อสม./ผู้ดูแล"],["devices","อุปกรณ์"],["selftest","ทดสอบปุ่ม"],["gateways","เกตเวย์"],...(role!=="viewer"?[["netlive","เฟรม LoRaWAN สด"]]:[]),["reports","รายงาน"],...(role!=="viewer"?[["privacy","PDPA"]]:[]),...(role==="admin"?[["install","ติดตั้งอุปกรณ์"],["chirpstack","ChirpStack"],["integrations","เชื่อมต่อ LINE/AI"],["users","ผู้ใช้"],["update","อัปเดตระบบ"]]:[]),["settings","ตั้งค่า"],["audit","บันทึกการใช้งาน"]];
   const RN={admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"};
-  const NG=[["งานประจำวัน",["cases","map","selftest"]],["ข้อมูล",["patients","caregivers","devices","gateways","reports"]]],inG=k=>NG.some(g=>g[1].includes(k));
+  const NG=[["งานประจำวัน",["cases","map","selftest"]],["ข้อมูล",["patients","caregivers","devices","gateways","netlive","reports"]]],inG=k=>NG.some(g=>g[1].includes(k));
   const groups=[...NG.map(g=>[g[0],tabs.filter(t=>g[1].includes(t[0]))]),["ระบบ",tabs.filter(t=>!inG(t[0]))]].filter(g=>g[1].length);
   const navb=t=>`<button data-p="${t[0]}" class="${page===t[0]?"on":""}"${page===t[0]?' aria-current="page"':""}>${IC[t[0]]?ico(t[0]):""}<span>${t[1]}</span></button>`;
   const title=(tabs.find(t=>t[0]===page)||["","บัญชีของฉัน"])[1],curG=groups.find(g=>g[1].some(t=>t[0]===page));
@@ -793,8 +793,8 @@ function render(){
   ncInit();ncSeed();thmInit();fwLatest();
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>{page="account";render()};$("#snd").onclick=sndClick;sndUI();
-  clearInterval(timer);(({cases:loadCases,map:loadMap,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,selftest:loadSelftest,gateways:loadGateways,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,chirpstack:loadChirpstack,integrations:loadIntegrations,update:loadUpdate,account:loadAccount,settings:loadSettings,audit:loadAudit})[page])();
-  if(page==="cases"||page==="devices"||page==="gateways")timer=setInterval(()=>{if(page==="cases")loadCases();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},15000);
+  clearInterval(timer);(({cases:loadCases,map:loadMap,patients:loadPatients,caregivers:loadCaregivers,devices:loadDevices,selftest:loadSelftest,gateways:loadGateways,netlive:loadNetLive,reports:loadReports,privacy:loadPrivacy,users:loadUsers,install:loadInstall,chirpstack:loadChirpstack,integrations:loadIntegrations,update:loadUpdate,account:loadAccount,settings:loadSettings,audit:loadAudit})[page])();
+  if(page==="cases"||page==="devices"||page==="gateways"||page==="netlive")timer=setInterval(()=>{if(page==="cases")loadCases();else if(page==="netlive")loadNetLive();else if(!devEdit){if(page==="devices")loadDevices();else loadGateways()}},page==="netlive"?30000:15000);
   if(!ws||ws.readyState>1)connectWS()}
 
 // day / night theme: light by default, choice remembered per browser
@@ -1033,10 +1033,12 @@ document.addEventListener("click",e=>{if(e.target&&e.target.id==="gwgo"){e.preve
 const GWS={online:["🟢","ออนไลน์"],warning:["🟡","ออนไลน์ แต่มีข้อควรตรวจ"],offline:["🔴","ออฟไลน์"],unknown:["⚪","ยังไม่เคยเชื่อมต่อ"],disabled:["⛔","ปิดการเฝ้าระวัง"]};
 const ago=iso=>{if(!iso)return "-";const s=(Date.now()-new Date(iso))/1000;return s<90?Math.max(0,Math.round(s))+" วินาทีที่แล้ว":s<5400?Math.round(s/60)+" นาทีที่แล้ว":s<172800?Math.round(s/3600)+" ชม.ที่แล้ว":Math.round(s/86400)+" วันที่แล้ว"};
 const upt=s=>s==null?"-":s<3600?Math.round(s/60)+" นาที":s<172800?(s/3600).toFixed(1)+" ชม.":Math.round(s/86400)+" วัน";
+let gwStatsDays=7;
 const loadGateways=guard(async()=>{
-  const [gs,aiOk]=await Promise.all([api("/gateways"),aiReady()]);if(page!=="gateways")return;
+  const [gs,aiOk,ns]=await Promise.all([api("/gateways"),aiReady(),api(`/net/gateways?days=${gwStatsDays}`)]);if(page!=="gateways")return;
   const why=g=>g.status==="offline"?(g.reason==="radio"?(g.critical.join("; ")||"ตัวรับสัญญาณ LoRa ใช้ไม่ได้"):"ไม่ได้รับสัญญาณเกินเวลาที่กำหนด"):g.critical.concat(g.warnings).join("; ");
-  $("#main").innerHTML=`${aiOk&&canEdit()&&gs.length?`<div class="card"><div class="row">${aiBtn("gateways","","AI วิเคราะห์เกตเวย์ทั้งหมด")}<span class="mut">ให้ AI ช่วยอ่านค่าสถานะ (ส่งเฉพาะค่าทางเทคนิค ไม่มีชื่อ/ตำแหน่ง)</span></div><div data-aibox="gateways:"></div></div>`:""}${role==="admin"?`<div class="card"><h3>เพิ่มเกตเวย์</h3><div class="row"><input id="gi" placeholder="Gateway ID 16 หลัก" size="24" title="ได้จาก sudo ./install-gateway.sh --show-id"><input id="gl" placeholder="ป้าย เช่น รพ.สต. ม.3"><button class="btn p" id="ga">เพิ่ม</button></div><p class="mut">ไม่ต้องเพิ่มเองก็ได้ ระบบจะเพิ่มให้เองเมื่อเกตเวย์เชื่อมต่อครั้งแรก — เพิ่มล่วงหน้าเพื่อตั้งป้ายชื่อ</p></div>`:""}
+  const statsCard=`<div class="card"><div class="row"><h3 style="margin:0">สถิติการรับสัญญาณ</h3><label class="mut">ย้อนหลัง <select id="gwdays">${[7,30,90].map(d=>`<option value="${d}" ${d===gwStatsDays?"selected":""}>${d} วัน</option>`).join("")}</select></label><span class="mut">ระบบบันทึกได้ตั้งแต่เปิดฟีเจอร์นี้ เฟรมหนึ่งนับให้ทุกเกตเวย์ที่ ChirpStack ระบุว่าได้รับ</span></div>${ns.gateways.length?`<table><tr><th>เกตเวย์</th><th>ข้อความ/วัน</th><th>อุปกรณ์ที่ได้ยิน</th><th>สัดส่วนเฟรมเครือข่ายที่ได้ยิน</th><th>RSSI / SNR เฉลี่ย</th><th>ปริมาณรายวัน</th></tr>${ns.gateways.map(g=>{const vals=Object.values(g.daily),max=Math.max(1,...vals);return`<tr><td>${esc(g.label||"-")}<div class="mut"><code>${esc(g.gateway_id)}</code></div></td><td><b>${g.uplinks_per_day}</b></td><td>${g.devices}</td><td>${g.heard_pct==null?"-":g.heard_pct+"%"}</td><td>${g.rssi==null?"-":g.rssi+" dBm"} / ${g.snr==null?"-":g.snr+" dB"}</td><td title="${esc(vals.join(", "))}">${vals.length?vals.map(v=>`<span title="${v} เฟรม" style="display:inline-block;vertical-align:bottom;width:5px;height:${Math.max(3,Math.round(24*v/max))}px;margin-right:2px;background:var(--pri);border-radius:2px"></span>`).join(""):"-"}</td></tr>`}).join("")}</table>`:'<p class="mut">ยังไม่มีข้อมูลรับเฟรมจากเกตเวย์</p>'}<p class="mut">สัดส่วนเฟรม = จำนวนเฟรมที่เกตเวย์ได้รับเทียบกับข้อความขึ้นทั้งหมดในระบบ · ผู้พึ่งพาเกตเวย์ดูได้ในคอลัมน์ “อุปกรณ์” ด้านล่าง</p></div>`;
+  $("#main").innerHTML=`${statsCard}${aiOk&&canEdit()&&gs.length?`<div class="card"><div class="row">${aiBtn("gateways","","AI วิเคราะห์เกตเวย์ทั้งหมด")}<span class="mut">ให้ AI ช่วยอ่านค่าสถานะ (ส่งเฉพาะค่าทางเทคนิค ไม่มีชื่อ/ตำแหน่ง)</span></div><div data-aibox="gateways:"></div></div>`:""}${role==="admin"?`<div class="card"><h3>เพิ่มเกตเวย์</h3><div class="row"><input id="gi" placeholder="Gateway ID 16 หลัก" size="24" title="ได้จาก sudo ./install-gateway.sh --show-id"><input id="gl" placeholder="ป้าย เช่น รพ.สต. ม.3"><button class="btn p" id="ga">เพิ่ม</button></div><p class="mut">ไม่ต้องเพิ่มเองก็ได้ ระบบจะเพิ่มให้เองเมื่อเกตเวย์เชื่อมต่อครั้งแรก — เพิ่มล่วงหน้าเพื่อตั้งป้ายชื่อ</p></div>`:""}
   <div class="card">${gs.length?`<table><tr><th>สถานะ</th><th>ป้าย / ID</th><th>เห็นล่าสุด</th><th>รายงานล่าสุด</th><th title="active = เปิดใช้งานแล้ว · ได้ยิน = ทุกเครื่องที่ส่งสัญญาณผ่านเกตเวย์นี้ล่าสุด">อุปกรณ์ (active / ได้ยิน)</th><th>เฟรมสะสม</th><th>CPU / ทำงานมาแล้ว</th><th>ตำแหน่ง</th><th>ข้อสังเกต</th><th></th></tr>${gs.map(g=>{const r=g.report||{};return`<tr data-rid="${g.id}"><td style="white-space:nowrap">${GWS[g.status][0]} ${GWS[g.status][1]}${g.maint?`<div class="gm-tag" title="${esc(g.maint.reason||"ไม่ส่ง LINE เรื่องเกตเวย์นี้ระหว่างซ่อม")}">🔧 ซ่อมบำรุง · ถึง ${esc(g.maint.end==="time"&&g.maint.until?hhmm(g.maint.until):g.maint.end==="manual"?"กดสิ้นสุด":"กลับมาออนไลน์")}</div>`:""}</td><td>${esc(g.label||"-")}<div class="mut"><code>${esc(g.gateway_id)}</code></div></td><td>${ago(g.last_seen)}</td><td>${ago(g.last_report_at)}</td><td><b>${g.devices}</b><span class="mut"> / ${g.devices_heard??g.devices}</span>${(g.devices_heard??0)>g.devices?`<br><button type="button" class="lnk" data-gwdev>${g.devices_heard-g.devices} เครื่องยังไม่ active</button>`:""}</td><td>${g.uplinks_total}</td><td>${r.cpu_temp_c!=null?r.cpu_temp_c+" °C":"-"} / ${upt(r.uptime_s)}</td><td>${g.loc.registered?gmap(g.loc.registered.lat,g.loc.registered.lon,"📍 แผนที่"):'<span class="mut">ยังไม่ระบุ</span>'}${g.loc.moved_m!=null?` <b style="color:var(--amb)">ย้าย ${dist(g.loc.moved_m)}?</b>`:""}</td><td style="color:${g.status==="offline"?"var(--red)":"var(--amb)"}">${esc(why(g))}</td><td>${canEdit()?`<button class="btn" data-gw="${g.id}">แก้ไข</button>`:""}</td></tr>`}).join("")}</table>`:'<p class="mut">ยังไม่มีเกตเวย์ — ติดตั้งตาม INSTALL-2 แล้วเกตเวย์จะปรากฏที่นี่เอง</p>'}
   <p class="mut">เกตเวย์ส่งรายงานตัวเองทุก 1 นาที ถ้าเงียบเกินที่ตั้งไว้ (หน้าตั้งค่า → ออฟไลน์) หรือตัวรับสัญญาณ LoRa เสียเกิน 3 นาที ระบบจะส่ง LINE แจ้งผู้รับที่เลือกไว้ในหน้าตั้งค่า</p></div>`;
   const gById=i=>gs.find(x=>x.id==i);
@@ -1045,6 +1047,7 @@ const loadGateways=guard(async()=>{
     {label:"ปิดเฝ้าระวัง",only:i=>gById(i).enabled!==false,confirm:n=>`ปิดเฝ้าระวัง ${n} เครื่อง? ระบบจะไม่ส่ง LINE เมื่อเครื่องเหล่านี้ขาดการเชื่อมต่อ`,run:i=>api("/gateways/"+i,{method:"PUT",body:{enabled:false}})},
     {label:"ลบ",cls:"r",confirm:n=>`ลบเกตเวย์ ${n} เครื่อง (และลบใน ChirpStack ถ้าตั้งค่าไว้)?\nถ้าเครื่องยังเปิดอยู่ จะถูกเพิ่มกลับเองเมื่อส่งข้อมูล`,run:i=>api("/gateways/"+i,{method:"DELETE"})}]:[]});
   aiWire($("#main"));
+  if($("#gwdays"))$("#gwdays").onchange=e=>{gwStatsDays=+e.target.value;loadGateways()};
   if($("#ga"))$("#ga").onclick=guard(async()=>{const r=await api("/gateways",{method:"POST",body:{gateway_id:$("#gi").value,label:$("#gl").value}});toast("เพิ่มแล้ว"+csNote(r.chirpstack));loadGateways()});
   document.querySelectorAll("button[data-gw]").forEach(b=>b.onclick=guard(async()=>{const g=gs.find(x=>x.id==b.dataset.gw),r=g.report||{};devEdit=true;
     const cgs=role==="admin"?await api("/caregivers"):[];
@@ -1421,6 +1424,27 @@ async function netCard(d){
       await api(`/devices/${d.id}/flush-nonces`,{method:"POST"});toast("ล้างแล้ว — รีสตาร์ตปุ่มเพื่อให้เข้าเครือข่ายใหม่");netCard(d)}}));
 }
 
+// ---------------- LoRaWAN frame monitor: compact live uplinks without application payloads ----------------
+let netLiveRows=[];
+const netLiveKey=f=>[f.at,f.dev_eui,f.kind,f.f_cnt,f.text].join("|");
+function netLiveMerge(rows){const seen=new Set(),out=[];for(const r of rows){const k=netLiveKey(r);if(!seen.has(k)){seen.add(k);out.push(r)}}return out.sort((a,b)=>new Date(b.at)-new Date(a.at)).slice(0,100)}
+function renderNetLive(){
+  const box=$("#netlive-list");if(!box)return;
+  const kind={up:"Uplink",join:"Join",ack:"ACK",txack:"TX ACK",log:"Log",status:"Status",down:"Downlink"};
+  box.innerHTML=netLiveRows.length?`<div class="tw"><table><thead><tr><th>เวลา</th><th>ชนิด</th><th>ปุ่ม</th><th>เฟรม / เหตุการณ์</th></tr></thead><tbody>${netLiveRows.map(f=>`<tr><td style="white-space:nowrap">${fmt(f.at)}</td><td>${esc(kind[f.kind]||f.kind||"-")}</td><td>${esc(f.label||"")}<div class="mut"><code>${esc(f.dev_eui||"")}</code></div></td><td>${f.kind==="up"?`FCnt ${f.f_cnt??"-"} · FPort ${f.f_port??"-"} · RSSI ${f.rssi??"-"} dBm · SNR ${f.snr??"-"} dB · ${f.sf?"SF"+f.sf:"SF?"} · ${f.freq?((f.freq/1e6).toFixed(3)+" MHz"):"-"} · <code>${esc(f.gateway_id||"-")}</code>${f.gw_count>1?` +${f.gw_count-1} gateway`:""}`:esc(f.text||f.code||"-")}</td></tr>`).join("")}</tbody></table></div>`:'<p class="mut">ยังไม่มีเฟรม — เมื่อปุ่มส่งข้อความขึ้นมา ข้อมูลจะปรากฏที่นี่</p>';
+}
+const loadNetLive=guard(async()=>{
+  if(page!=="netlive")return;
+  if(!$("#netlive-list"))$("#main").innerHTML=`<div class="card"><div class="row"><div style="flex:1"><h3 style="margin:0">เฟรม LoRaWAN ล่าสุด</h3><p class="mut">แสดง metadata สำหรับติดตั้งและ debug โดยไม่แสดง payload ของผู้ป่วย · อัปเดตสดผ่านการเชื่อมต่อแดชบอร์ด</p></div><span class="hchip"><span class="sdot ${wsUp?"on":"off"}"></span>${wsUp?"สด":"กำลังเชื่อมต่อ"}</span></div><div id="netlive-list"><span class="spin"></span> กำลังโหลด…</div></div>`;
+  window._netLive=m=>{if(page!=="netlive"||m.type!=="net_event")return;
+    const row=m.kind==="up"&&m.frame?{...m.frame,kind:"up",at:m.at,dev_eui:m.dev_eui,label:m.label||""}:
+      {kind:m.kind,at:m.at,dev_eui:m.dev_eui,label:m.label||"",text:m.text||m.code||""};
+    netLiveRows=netLiveMerge([row,...netLiveRows]);renderNetLive()};
+  try{const [frames,events]=await Promise.all([api("/net/frames?limit=100"),api("/net/events?limit=100")]);
+    netLiveRows=netLiveMerge([...netLiveRows,...frames.map(f=>({...f,kind:"up"})),...events]);if(page==="netlive")renderNetLive()}
+  catch(e){if(page==="netlive")$("#netlive-list").innerHTML=`<div class="warn">${esc(e.message)}</div>`}
+});
+
 // ---------------- ChirpStack (network server) — admin only: status, compare with the dashboard, sync ----------------
 const csNote=r=>!r||r==="unchanged"||r==="not_configured"?"":r==="created"?" · ลงทะเบียนใน ChirpStack แล้ว":r==="exists"?" · มีใน ChirpStack อยู่แล้ว":r==="disabled"?" · ปิดใช้งานใน ChirpStack แล้ว":r==="enabled"?" · เปิดใช้งานใน ChirpStack แล้ว":r==="deleted"?" · ลบใน ChirpStack แล้ว":r==="absent"?"":" · ⚠️ ChirpStack: "+r;
 async function loadChirpstack(){
@@ -1435,7 +1459,11 @@ async function loadChirpstack(){
   $("#main").innerHTML=`<div class="card"><h3>ChirpStack (LoRaWAN Network Server)</h3>
     <div class="row"><b>สถานะ:</b> ${!s.configured?'<span class="bad">ยังไม่ได้ตั้งค่า</span>':s.reachable?'<span class="ok">เชื่อมต่อได้</span>':'<span class="bad">เชื่อมต่อไม่ได้</span>'} ${s.error?`<span class="mut">${esc(s.error)}</span>`:""}</div>
     ${s.reachable?`<div class="row"><b>Application:</b> ${esc(s.application)} · <b>Device profile:</b> ${esc(s.device_profile)} <span class="mut">${esc(s.region)} ${esc(s.mac_version)}</span></div>`:""}
-    <div class="row">${ui}</div></div>
+    <div class="row">${ui}</div></div>${s.reachable?`<div class="card" id="csprofile"><h3>ตั้งค่า Device Profile</h3><span class="mut">กำลังโหลดรายการ ADR…</span></div>
+    <div class="card" id="csbackup"><h3>สำรองและย้ายข้อมูล ChirpStack</h3><p class="mut">ส่งออกอุปกรณ์ เกตเวย์ และ keys เป็นไฟล์เข้ารหัสด้วยรหัสผ่าน (AES-256-GCM) · การนำเข้าจะเขียนข้อมูลลง Application/Device Profile ที่ตั้งค่าในเซิร์ฟเวอร์นี้ และอัปเดต keys ของ DevEUI ที่มีอยู่</p>
+      <div class="row"><label>รหัสผ่านไฟล์ (อย่างน้อย 16 ตัวอักษร) <input id="csbpass" type="password" minlength="16" maxlength="128" autocomplete="new-password"></label><button class="btn p" id="csbexport">ดาวน์โหลดไฟล์เข้ารหัส</button></div>
+      <div class="row"><label>ไฟล์สำรอง <input id="csbfile" type="file" accept="application/json,.json"></label><button class="btn" id="csbimport">นำเข้า / กู้คืน</button></div>
+      <div id="csbresult"></div><p class="hint">เก็บไฟล์และรหัสผ่านแยกจากกัน ผู้ที่มีทั้งสองอย่างจะอ่าน keys และย้ายอุปกรณ์ได้</p></div>`:""}
    ${c?`<div class="card"><h3>เทียบข้อมูลกับแดชบอร์ด</h3>
     <div class="row">อุปกรณ์: ในแดชบอร์ด <b>${c.devices_sos}</b> · ใน ChirpStack <b>${c.devices_cs}</b> · เกตเวย์ใน ChirpStack <b>${c.gateways_cs}</b></div>
     <h4>เกตเวย์ที่ยังไม่ได้ลงทะเบียนใน ChirpStack (${c.gateways_missing_in_cs.length})</h4>${li(c.gateways_missing_in_cs,g=>`<li><code>${esc(g.gateway_id)}</code> ${esc(g.label)}</li>`)}
@@ -1444,6 +1472,26 @@ async function loadChirpstack(){
     <h4>⚠️ มีในแดชบอร์ดแต่ไม่มีใน ChirpStack (${c.missing_in_cs.length})</h4><p class="mut">ปุ่มเหล่านี้ join เครือข่ายไม่ได้ — ต้องลงทะเบียนใหม่ที่หน้า "ติดตั้งอุปกรณ์" (ระบบไม่สร้างให้อัตโนมัติ เพราะ AppKey อยู่บนตัวปุ่มเท่านั้น)</p>${li(c.missing_in_cs,d=>`<li><code>${esc(d.dev_eui)}</code> ${esc(d.label)} <span class="mut">${esc(d.lifecycle)}</span></li>`)}
     <h4>⚠️ มีใน ChirpStack แต่ไม่มีในแดชบอร์ด (${c.unknown_in_sos.length})</h4><p class="mut">กดปุ่มแล้วจะไม่มีใครได้รับแจ้ง — เพิ่มที่หน้า "อุปกรณ์" หรือลบออกจาก ChirpStack</p>${li(c.unknown_in_sos,d=>`<li><code>${esc(d.dev_eui)}</code> ${esc(d.name)} <span class="mut">เห็นล่าสุด ${fmt(d.last_seen)}</span></li>`)}
    </div>`:s.compare_error?`<div class="warn">${esc(s.compare_error)}</div>`:""}`;
+  if(s.reachable){try{const p=await api("/chirpstack/profile-settings");if(page!=="chirpstack")return;
+    const el=$("#csprofile"),opts=(p.adr_algorithms||[]).map(a=>`<option value="${esc(a.id)}" ${a.id===p.adr_algorithm_id?"selected":""}>${esc(a.name)}</option>`).join("");
+    el.innerHTML=`<h3>ตั้งค่า Device Profile: ${esc(p.profile||"")}</h3><div class="row"><label>อัลกอริทึม ADR <select id="csadr">${opts}</select></label><button class="btn p" id="csadrsave" ${opts?"":"disabled"}>บันทึกค่า ADR</button></div><p class="mut">เปลี่ยนเฉพาะ ADR algorithm · อุปกรณ์ต้องส่ง uplink โดยเปิด ADR flag จึงจะใช้ค่านี้ได้ · ช่วงเวลาถือว่าปุ่มออฟไลน์ตั้งได้ใน “ตั้งค่า → ออฟไลน์”</p>${opts?"":'<div class="warn">ChirpStack ไม่ส่งรายการ ADR algorithms กลับมา จึงยังเปลี่ยนค่าจากหน้านี้ไม่ได้</div>'}`;
+    if($("#csadrsave"))$("#csadrsave").onclick=guard(async()=>{await api("/chirpstack/profile-settings",{method:"PUT",body:{adr_algorithm_id:$("#csadr").value}});toast("บันทึกค่า ADR แล้ว");loadChirpstack()})
+  }catch(e){const el=$("#csprofile");if(el)el.innerHTML=`<h3>ตั้งค่า Device Profile</h3><div class="warn">${esc(e.message)}</div>`}}
+  if($("#csbexport"))$("#csbexport").onclick=guard(async()=>{
+    const pass=$("#csbpass").value;if(pass.length<16){toast("รหัสผ่านไฟล์ต้องยาวอย่างน้อย 16 ตัวอักษร","warn");return}
+    const file=await api("/chirpstack/backup/export",{method:"POST",body:{passphrase:pass}});
+    const blob=new Blob([JSON.stringify(file,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");
+    a.href=url;a.download=`sos-chirpstack-${new Date().toISOString().slice(0,10)}.sosbackup.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$("#csbpass").value="";toast("ดาวน์โหลดไฟล์สำรองที่เข้ารหัสแล้ว","ok");
+  });
+  if($("#csbimport"))$("#csbimport").onclick=guard(async()=>{
+    const f=$("#csbfile").files[0],pass=$("#csbpass").value;if(!f){toast("เลือกไฟล์สำรองก่อน","warn");return}if(f.size>17*1024*1024){toast("ไฟล์สำรองใหญ่เกิน 17 MB","warn");return}if(pass.length<16){toast("รหัสผ่านไฟล์ต้องยาวอย่างน้อย 16 ตัวอักษร","warn");return}
+    if(!await ask(`นำเข้า ${f.name} หรือไม่?\nรายการที่มี DevEUI/Gateway ID ซ้ำจะถูกอัปเดต รวมถึง keys ซึ่งอาจทำให้อุปกรณ์ที่ใช้ key ชุดเดิมเชื่อมต่อไม่ได้`))return;
+    const envelope=JSON.parse(await f.text()),r=await api("/chirpstack/backup/import",{method:"POST",body:{passphrase:pass,envelope}});
+    const failed=[...(r.failed_devices||[]).map(x=>"อุปกรณ์ "+x),...(r.failed_gateways||[]).map(x=>"เกตเวย์ "+x)];
+    toast(`กู้คืนแล้ว: อุปกรณ์เพิ่ม ${r.devices_created} · แก้ ${r.devices_updated} · เกตเวย์เพิ่ม ${r.gateways_created} · แก้ ${r.gateways_updated}${failed.length?` · ไม่สำเร็จ ${failed.length}`:""}`,failed.length?"warn":"ok");
+    if(failed.length)$("#csbresult").innerHTML=`<div class="warn">รายการที่กู้คืนไม่สำเร็จ: ${failed.map(esc).join(", ")}</div>`;
+    $("#csbpass").value="";$("#csbfile").value="";
+  });
   if($("#csre"))$("#csre").onclick=loadChirpstack;
   // one-time sign-in link (60 s) -> ChirpStack domain sets its own 8 h session (backend app/csgate.py). The tab is opened
   // before the request so popup blockers allow it.
@@ -1823,7 +1871,7 @@ function loadLeaflet(){
   _lf=new Promise((ok,no)=>{const c=document.createElement("link");c.rel="stylesheet";c.href="/vendor/leaflet/leaflet.css";document.head.appendChild(c);
     const s=document.createElement("script");s.src="/vendor/leaflet/leaflet.js";s.onload=ok;s.onerror=()=>{_lf=null;no(new Error("โหลดไลบรารีแผนที่ไม่สำเร็จ"))};document.head.appendChild(s)});
   return _lf}
-const QCOL={good:"#16a34a",fair:"#d97706",weak:"#dc2626"},QTH={good:"ดี",fair:"พอใช้",weak:"อ่อน"};
+const QCOL={good:"#16a34a",fair:"#d97706",weak:"#ea580c",bad:"#dc2626",unknown:"#94a3b8"},QTH={good:"ดีมาก",fair:"พอใช้",weak:"อ่อน",bad:"แย่มาก",unknown:"ไม่ทราบ"};
 const PSRC={gps:"GPS (ล่าสุด)",home:"ที่อยู่ที่ลงทะเบียน",gps_old:"GPS (เก่ากว่ากำหนด)"};
 const kmTxt=m=>m==null?"-":m>=1000?(m/1000).toFixed(2)+" กม.":m+" ม.";
 const mapOpt={links:true,names:true,onlyOn:false,cov:true};let mapObj=null,mapFitted=false;
@@ -1835,7 +1883,7 @@ const loadMap=guard(async()=>{
   if(!$("#mapc")){mapFitted=false;
     $("#main").innerHTML=`${d.restricted?'<div class="warn">บัญชี "ดูอย่างเดียว" ไม่แสดงตำแหน่งบ้านผู้ป่วย/อุปกรณ์ตามนโยบาย PDPA — เห็นเฉพาะเกตเวย์และตารางการเชื่อมต่อ</div>':""}
     <div class="card"><div class="row"><label class="chip"><input type="checkbox" id="mo1" ${mapOpt.links?"checked":""}><span>เส้นเชื่อมต่อ</span></label><label class="chip"><input type="checkbox" id="mo2" ${mapOpt.names?"checked":""}><span>ชื่อบนแผนที่</span></label><label class="chip"><input type="checkbox" id="mo3" ${mapOpt.onlyOn?"checked":""}><span>เฉพาะที่ออนไลน์</span></label><label class="chip"><input type="checkbox" id="mo4" ${mapOpt.cov?"checked":""}><span>รัศมีเกตเวย์ <b id="mcovkm" style="font-weight:inherit"></b></span></label><span id="mpin" style="margin-left:auto"></span><button class="btn" id="mfit">จัดให้พอดี</button><span class="mut" id="mupd"></span></div>
-    <div class="row mut" style="font-size:13px"><b>เส้น:</b> <span style="color:${QCOL.good}">━ สัญญาณดี</span> <span style="color:${QCOL.fair}">━ พอใช้</span> <span style="color:${QCOL.weak}">━ อ่อน</span> <span>┅ อุปกรณ์ออฟไลน์/ไม่ทราบสัญญาณ</span> · <b>จุด:</b> 📡 เกตเวย์ · ● อุปกรณ์ (ขอบแดง = ออฟไลน์) · <i class="pin sm red"></i> เคสเปิด · <i class="pin sm blu"></i> บ้านที่ยังไม่มีปุ่ม</div>
+    <div class="row mut" style="font-size:13px"><b>เส้น:</b> <span style="color:${QCOL.good}">━ ดี</span> <span style="color:${QCOL.fair}">━ พอใช้</span> <span style="color:${QCOL.weak}">━ อ่อน</span> <span style="color:${QCOL.bad}">━ แย่/ใกล้หลุด</span> <span>┅ อุปกรณ์ออฟไลน์/ไม่ทราบสัญญาณ</span> · <b>จุด:</b> 📡 เกตเวย์ · ● อุปกรณ์ (ขอบแดง = ออฟไลน์) · <i class="pin sm red"></i> เคสเปิด · <i class="pin sm blu"></i> บ้านที่ยังไม่มีปุ่ม</div>
     <div id="mapc" style="height:62vh;min-height:380px;border-radius:12px;margin-top:8px;overflow:hidden;background:var(--bg)"></div><div class="hint" id="mapnote"></div></div><div id="maptb"></div>`;
     if(mapObj){try{mapObj.remove()}catch{}}
     mapObj=L.map("mapc",{zoomControl:true,attributionControl:true}).setView([13.9,100.6],11);
@@ -1853,7 +1901,7 @@ const loadMap=guard(async()=>{
   $("#maptb").innerHTML=`<div class="card"><h3>การเชื่อมต่ออุปกรณ์ → เกตเวย์</h3>${d.devices.length?`<table><tr><th>อุปกรณ์</th><th>ผู้ป่วย</th><th>เกตเวย์ที่ได้ยินล่าสุด</th><th>สัญญาณ</th><th>RSSI/SNR</th><th>ระยะ</th><th>ที่มาของพิกัด</th><th>สถานะ</th></tr>${d.devices.map(row).join("")}</table>`:'<p class="mut">ยังไม่มีอุปกรณ์</p>'}
    ${noPosGw.length?`<p class="warn" style="margin-top:10px">เกตเวย์ที่ยังไม่มีตำแหน่ง (ไม่แสดงบนแผนที่): ${noPosGw.map(g=>esc(g.label||g.gateway_id)).join(", ")} — ตั้งพิกัดที่เมนูเกตเวย์</p>`:""}
    ${!d.restricted&&noPosDev.length?`<p class="warn" style="margin-top:10px">อุปกรณ์ที่ไม่มีพิกัด (ไม่แสดงบนแผนที่): ${noPosDev.map(x=>esc(x.label||x.dev_eui)).join(", ")} — ใส่ละติจูด/ลองจิจูดที่หน้าผู้ป่วย หรือใช้ชุด GPS</p>`:""}
-   <p class="mut" style="font-size:13px">สีของเส้นคิดจาก RSSI/SNR ของข้อมูลล่าสุดที่เกตเวย์ได้ยิน (ดี ≥ −105 dBm, พอใช้ ≥ −115 dBm) · พิกัดอุปกรณ์ใช้ GPS ล่าสุดถ้ามี ไม่งั้นใช้ที่อยู่ที่ลงทะเบียน · ระยะเป็นเส้นตรง</p></div>`;
+    <p class="mut" style="font-size:13px">สีเส้นคำนวณจาก link margin และอัตราข้อความหายย้อนหลัง 20 ข้อความต่อปุ่ม; ถ้ายังไม่มีประวัติจะใช้ RSSI/SNR ล่าสุด · พิกัดอุปกรณ์ใช้ GPS ล่าสุดถ้ามี ไม่งั้นใช้ที่อยู่ที่ลงทะเบียน · ระยะเป็นเส้นตรง</p></div>`;
   if(!mapObj||mapObj._container!==$("#mapc"))return;
   clearInterval(timer);timer=setInterval(()=>{if(page==="map")loadMap();else clearInterval(timer)},30000)});
 function mapPts(){const d=window._mapData;return [...d.gateways,...d.devices,...(d.homes||[])].filter(x=>x.lat!=null).map(x=>[x.lat,x.lon])}
@@ -1873,8 +1921,8 @@ function mapRedraw(){
   const devs=d.devices.filter(x=>x.lat!=null&&(!mapOpt.onlyOn||!x.offline));
   if(mapOpt.links)d.links.forEach(l=>{const x=d.devices.find(v=>v.id===l.device_id),g=gw[l.gateway_id];if(!x||!g||x.lat==null||g.lat==null)return;if(mapOpt.onlyOn&&x.offline)return;
     const col=QCOL[l.quality]||"#94a3b8";
-    L.polyline([[x.lat,x.lon],[g.lat,g.lon]],{color:col,weight:l.quality?3:2,opacity:l.offline?.5:.85,dashArray:l.offline||!l.quality?"6 8":null})
-     .bindTooltip(`${esc(x.label||x.dev_eui)} → ${esc(g.label||g.gateway_id)}<br>RSSI ${l.rssi??"-"} dBm · SNR ${l.snr??"-"} dB${l.quality?" · "+QTH[l.quality]:""}<br>ระยะ ${kmTxt(l.distance_m)}`,{sticky:true}).addTo(lg)});
+    L.polyline([[x.lat,x.lon],[g.lat,g.lon]],{color:col,weight:l.quality&&l.quality!=="unknown"?3:2,opacity:l.offline?.5:.85,dashArray:l.offline||!l.quality||l.quality==="unknown"?"6 8":null})
+     .bindTooltip(`${esc(x.label||x.dev_eui)} → ${esc(g.label||g.gateway_id)}<br>RSSI ${l.rssi??"-"} dBm · SNR ${l.snr??"-"} dB${l.link_margin!=null?` · margin ${l.link_margin} dB`:""}${l.loss!=null?` · หาย ${l.loss}%`:""}${l.quality?" · "+QTH[l.quality]:""}<br>ระยะ ${kmTxt(l.distance_m)}`,{sticky:true}).addTo(lg)});
   d.gateways.filter(g=>g.lat!=null).forEach(g=>{
     const ic=L.divIcon({className:"",iconSize:[34,34],iconAnchor:[17,17],html:`<div class="mk mk-gw ${g.offline?"off":""}">📡</div>`});
     const m=L.marker([g.lat,g.lon],{icon:ic,zIndexOffset:500}).addTo(lg);

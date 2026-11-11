@@ -5,14 +5,16 @@ from __future__ import annotations
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import func, distinct
 from sqlalchemy.orm import Session
 
-from . import netmon, settings_store
+from . import netmon, netbackup, settings_store
 from . import provision as prov
 from .api import get_engine, iso
-from .auth import audit, current_user, staff_or_admin
+from .auth import admin_only, audit, current_user, staff_or_admin
 from .db import get_db
-from .models import Case, Device, NetEvent, PingTest, utcnow
+from .models import Case, Device, Gateway, NetEvent, PingTest, UplinkLog, UplinkReception, utcnow
 
 router = APIRouter(prefix="/api")
 PING_ST = {"queued": "รอปุ่มส่งสัญญาณขึ้นมา", "sent": "เกตเวย์ส่งถึงปุ่มแล้ว รอปุ่มยืนยัน", "acked": "สำเร็จ — ปุ่มยืนยันรับแล้ว",
@@ -84,3 +86,115 @@ def net_events(limit: int = Query(200, ge=1, le=1000), dev_eui: str = "", kind: 
     labels = {d.dev_eui: d.label for d in db.query(Device).all()}
     return [{**_ev_dict(e), "label": labels.get(e.dev_eui, "")}
             for e in q.order_by(NetEvent.at.desc(), NetEvent.id.desc()).limit(limit).all()]
+
+
+@router.get("/net/frames")
+def net_frames(limit: int = Query(100, ge=1, le=300), db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    """Compact, recent uplink frames for field debugging. Excludes payloads and patient information."""
+    labels = {d.dev_eui: d.label for d in db.query(Device).all()}
+    rows = (db.query(UplinkLog).order_by(UplinkLog.at.desc(), UplinkLog.id.desc()).limit(limit).all())
+    return [{"at": iso(r.at), "dev_eui": r.dev_eui, "label": labels.get(r.dev_eui, ""), "f_cnt": r.f_cnt,
+             "f_port": r.f_port, "rssi": r.rssi, "snr": r.snr, "sf": r.sf, "freq": r.freq,
+             "gateway_id": r.gateway_id, "gw_count": r.gw_count, "confirmed": r.confirmed} for r in rows]
+
+
+@router.get("/net/gateways")
+def net_gateway_stats(days: int = Query(7, ge=1, le=90), db: Session = Depends(get_db), u=Depends(current_user)):
+    """Gateway reception history. A frame counts for every gateway in ChirpStack rxInfo."""
+    since = utcnow() - timedelta(days=days)
+    totals = dict(db.query(UplinkReception.gateway_id, func.count(UplinkReception.id))
+                  .filter(UplinkReception.at >= since).group_by(UplinkReception.gateway_id).all())
+    devices = dict(db.query(UplinkReception.gateway_id, func.count(distinct(UplinkReception.dev_eui)))
+                   .filter(UplinkReception.at >= since).group_by(UplinkReception.gateway_id).all())
+    signal = {gid: (rssi, snr) for gid, rssi, snr in db.query(
+        UplinkReception.gateway_id, func.avg(UplinkReception.rssi), func.avg(UplinkReception.snr))
+        .filter(UplinkReception.at >= since).group_by(UplinkReception.gateway_id).all()}
+    daily = db.query(func.date(UplinkReception.at), UplinkReception.gateway_id, func.count(UplinkReception.id))\
+        .filter(UplinkReception.at >= since).group_by(func.date(UplinkReception.at), UplinkReception.gateway_id)\
+        .order_by(func.date(UplinkReception.at), UplinkReception.gateway_id).all()
+    daily_by: dict[str, dict[str, int]] = {}
+    for day, gid, count in daily:
+        daily_by.setdefault(gid, {})[str(day)] = int(count)
+    total_frames = db.query(func.count(UplinkLog.id)).filter(UplinkLog.at >= since).scalar() or 0
+    gw_rows = db.query(Gateway).order_by(Gateway.label, Gateway.gateway_id).all()
+    ids = set(totals) | {g.gateway_id for g in gw_rows}
+    by_id = {g.gateway_id: g for g in gw_rows}
+    output = []
+    for gid in sorted(ids, key=lambda x: (by_id.get(x).label if by_id.get(x) else "", x)):
+        g = by_id.get(gid)
+        rssi, snr = signal.get(gid, (None, None))
+        n = int(totals.get(gid, 0))
+        output.append({"gateway_id": gid, "label": g.label if g else "", "enabled": g.enabled if g else None,
+                       "uplinks": n, "devices": int(devices.get(gid, 0)), "uplinks_per_day": round(n / days, 1),
+                       "heard_pct": round(min(100.0, n * 100 / total_frames), 1) if total_frames else None,
+                       "rssi": round(rssi, 1) if rssi is not None else None,
+                       "snr": round(snr, 1) if snr is not None else None, "daily": daily_by.get(gid, {})})
+    return {"days": days, "network_uplinks": int(total_frames), "gateways": output}
+
+
+@router.get("/chirpstack/profile-settings")
+def chirpstack_profile_settings(u=Depends(admin_only)):
+    cs = prov.get_cs()
+    if not cs.configured: raise HTTPException(409, "ChirpStack API ยังไม่ได้ตั้งค่า")
+    try: return cs.profile_settings()
+    except prov.ProvisionError as e: raise HTTPException(502, str(e))
+
+
+class AdrAlgorithmIn(BaseModel):
+    adr_algorithm_id: str = Field(min_length=1, max_length=128)
+
+
+@router.put("/chirpstack/profile-settings")
+def chirpstack_profile_settings_update(b: AdrAlgorithmIn, u=Depends(admin_only), db: Session = Depends(get_db)):
+    cs = prov.get_cs()
+    if not cs.configured: raise HTTPException(409, "ChirpStack API ยังไม่ได้ตั้งค่า")
+    try: cs.update_profile_adr(b.adr_algorithm_id)
+    except prov.ProvisionError as e: raise HTTPException(502 if not e.status else e.status, str(e))
+    audit(db, u.username, "chirpstack_profile_adr", "device-profile", adr_algorithm_id=b.adr_algorithm_id)
+    db.commit()
+    return {"ok": True}
+
+
+class BackupExportIn(BaseModel):
+    passphrase: str = Field(min_length=16, max_length=128)
+
+
+class BackupImportIn(BaseModel):
+    passphrase: str = Field(min_length=16, max_length=128)
+    envelope: dict
+
+
+@router.post("/chirpstack/backup/export")
+def chirpstack_backup_export(b: BackupExportIn, u=Depends(admin_only), db: Session = Depends(get_db)):
+    cs = prov.get_cs()
+    if not cs.configured: raise HTTPException(409, "ChirpStack API ยังไม่ได้ตั้งค่า")
+    try:
+        payload = netbackup.validate_payload(cs.export_network_backup())
+        envelope = netbackup.encrypt(payload, b.passphrase)
+    except (prov.ProvisionError, ValueError) as e:
+        raise HTTPException(502, str(e))
+    audit(db, u.username, "chirpstack_backup_export", "network", devices=len(payload["devices"]), gateways=len(payload["gateways"]))
+    db.commit()
+    return envelope
+
+
+@router.post("/chirpstack/backup/import")
+def chirpstack_backup_import(b: BackupImportIn, u=Depends(admin_only), db: Session = Depends(get_db)):
+    import json
+    if len(json.dumps(b.envelope, separators=(",", ":"))) > 17 * 1024 * 1024:
+        raise HTTPException(413, "ไฟล์สำรองมีขนาดใหญ่เกินไป")
+    try:
+        payload = netbackup.validate_payload(netbackup.decrypt(b.envelope, b.passphrase))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    cs = prov.get_cs()
+    if not cs.configured: raise HTTPException(409, "ChirpStack API ยังไม่ได้ตั้งค่า")
+    try: result = cs.restore_network_backup(payload)
+    except prov.ProvisionError:
+        raise HTTPException(502, "ติดต่อ ChirpStack เพื่อกู้คืนไม่ได้ ตรวจการตั้งค่าแล้วลองใหม่")
+    audit(db, u.username, "chirpstack_backup_restore", "network",
+          devices_created=result["devices_created"], devices_updated=result["devices_updated"],
+          gateways_created=result["gateways_created"], gateways_updated=result["gateways_updated"],
+          failed_devices=len(result["failed_devices"]), failed_gateways=len(result["failed_gateways"]))
+    db.commit()
+    return result
