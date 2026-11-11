@@ -90,6 +90,7 @@ class Device(Base):
     loc_sats: Mapped[int | None] = mapped_column(Integer, nullable=True)
     loc_hdop: Mapped[float | None] = mapped_column(Float, nullable=True)
     watch: Mapped[dict | None] = mapped_column(JSON, nullable=True)       # DeviceMonitor state (offline/battery/mains alerts)
+    sig: Mapped[dict | None] = mapped_column(JSON, nullable=True)         # rolling link quality (app/netmon.py): margin/rssi/snr/loss
     patient = relationship(Patient)
 
 
@@ -279,3 +280,63 @@ class Asset(Base):
     data: Mapped[bytes] = mapped_column(LargeBinary)
     updated_at: Mapped[datetime] = _dt(default=utcnow)
     updated_by: Mapped[str] = mapped_column(String(64), default="")
+
+
+# ---------------- network monitoring (app/netmon.py) ----------------
+class UplinkLog(Base):
+    """One row per uplink seen by ChirpStack for our devices: radio quality history (kept netmon.KEEP_UPLINK_DAYS)."""
+    __tablename__ = "sos_uplinks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dev_eui: Mapped[str] = mapped_column(String(16), index=True)
+    at: Mapped[datetime] = _dt(default=utcnow, index=True)
+    f_cnt: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    f_port: Mapped[int] = mapped_column(Integer, default=0)
+    rssi: Mapped[int | None] = mapped_column(Integer, nullable=True)       # best gateway
+    snr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sf: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    freq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gateway_id: Mapped[str] = mapped_column(String(16), default="")
+    gw_count: Mapped[int] = mapped_column(Integer, default=1)
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    event_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+
+class UplinkReception(Base):
+    """A gateway that received one uplink. Unlike UplinkLog (best gateway), this preserves every rxInfo entry."""
+    __tablename__ = "sos_uplink_receptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dev_eui: Mapped[str] = mapped_column(String(16), index=True)
+    at: Mapped[datetime] = _dt(default=utcnow, index=True)
+    f_cnt: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gateway_id: Mapped[str] = mapped_column(String(16), index=True)
+    rssi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snr: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class NetEvent(Base):
+    """ChirpStack device events other than plain uplinks (join, ack, txack, log, status) + our own downlinks:
+    the live event view and the join diagnosis read these (kept netmon.KEEP_EVENT_DAYS)."""
+    __tablename__ = "sos_net_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dev_eui: Mapped[str] = mapped_column(String(16), index=True)
+    at: Mapped[datetime] = _dt(default=utcnow, index=True)
+    kind: Mapped[str] = mapped_column(String(12))          # up|join|ack|txack|log|status|down
+    level: Mapped[str] = mapped_column(String(8), default="info")   # info|warning|error
+    code: Mapped[str] = mapped_column(String(40), default="")
+    text: Mapped[str] = mapped_column(String(300), default="")
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class PingTest(Base):
+    """A confirmed test downlink sent from the dashboard: proves the server -> gateway -> button path works."""
+    __tablename__ = "sos_ping_tests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dev_eui: Mapped[str] = mapped_column(String(16), index=True)
+    created_at: Mapped[datetime] = _dt(default=utcnow)
+    actor: Mapped[str] = mapped_column(String(64), default="")
+    queue_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    status: Mapped[str] = mapped_column(String(12), default="queued")   # queued|sent|acked|nack|expired|cancelled|failed
+    sent_at: Mapped[datetime | None] = _dt(nullable=True)      # gateway transmitted it (txack)
+    done_at: Mapped[datetime | None] = _dt(nullable=True)
+    gateway_id: Mapped[str] = mapped_column(String(16), default="")
+    note: Mapped[str] = mapped_column(String(200), default="")
