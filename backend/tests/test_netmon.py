@@ -163,3 +163,79 @@ def test_prune(env_):
         db.add(UplinkLog(dev_eui=EUI, at=utcnow())); db.commit()
         eng.netmon.prune(db, force=True)
         assert db.query(UplinkLog).count() == 1 and db.query(NetEvent).count() == 0
+
+
+# ---------------- coverage map (measured links + range) and gateway GPS -> ChirpStack ----------------
+GW_A, GW_B = "0016c001ff10aaaa", "0016c001ff10bbbb"
+
+
+def _setup_geo(db):
+    from app.models import Gateway, Patient
+    db.add(Gateway(gateway_id=GW_A, label="GW-A", enabled=True, state="online", uplinks_total=0, lat=13.90, lon=100.60))
+    db.add(Gateway(gateway_id=GW_B, label="GW-B", enabled=True, state="online", uplinks_total=0, lat=13.95, lon=100.60,
+                   gps_lat=13.9501, gps_lon=100.6002, gps_at=utcnow(), gps_sats=9))
+    p = db.query(Patient).first(); p.lat, p.lon = 13.91, 100.60            # ~1.1 km from A, ~4.4 km from B
+    d = db.query(Device).filter_by(dev_eui=EUI).one(); d.last_gateway = GW_A; d.last_seen = utcnow()
+    db.commit()
+
+
+def test_map_measured_links_and_range(env_):
+    eng, downs, notifier, client, ids = env_
+    with SessionLocal() as db:
+        _setup_geo(db)
+        for i in range(5):     # each uplink heard by A (margin 14.5 = good) and B (margin 1.5 = bad)
+            j = up(i + 1, snr=2.0, sf=9, gw=GW_A)
+            j["rxInfo"].append({"gatewayId": GW_B, "rssi": -118, "snr": -11.0})
+            eng.netmon.on_uplink(db, EUI, j)
+    m = client.get("/api/map", headers=login(client)).json()
+    lk = {l["gateway_id"]: l for l in m["links"]}
+    assert set(lk) == {GW_A, GW_B}
+    assert lk[GW_A]["primary"] and lk[GW_A]["quality"] == "good" and lk[GW_A]["n"] == 5 and lk[GW_A]["distance_m"] > 1000
+    assert not lk[GW_B]["primary"] and lk[GW_B]["quality"] == "bad" and lk[GW_B]["link_margin"] == 1.5
+    g = {x["gateway_id"]: x for x in m["gateways"]}
+    assert g[GW_A]["range_m"] == lk[GW_A]["distance_m"] and g[GW_B]["range_m"] is None     # a bad link is not "range"
+    v = client.get("/api/map", headers=login(client, "viewer")).json()
+    assert all(l["distance_m"] is None for l in v["links"])                 # PDPA: no home-derived distance
+    assert {x["gateway_id"]: x for x in v["gateways"]}[GW_A]["range_m"]      # the aggregate range is fine
+
+
+class FakeCSGw(FakeCS):
+    def __init__(self):
+        super().__init__(); self.loc = {"latitude": 13.0, "longitude": 100.0}
+    def set_gateway_location(self, gid, lat, lon, alt=0.0):
+        if abs(self.loc["latitude"] - lat) < 1e-5: return False
+        self.loc = {"latitude": lat, "longitude": lon}; return True
+
+
+def test_gateway_gps_to_chirpstack(env_, monkeypatch):
+    eng, downs, notifier, client, ids = env_
+    cs = FakeCSGw(); monkeypatch.setattr("app.provision.get_cs", lambda: cs)
+    from app.models import Gateway
+    with SessionLocal() as db:
+        _setup_geo(db)
+        ga = db.query(Gateway).filter_by(gateway_id=GW_A).one().id
+        gb = db.query(Gateway).filter_by(gateway_id=GW_B).one().id
+    h = login(client)
+    assert client.post(f"/api/gateways/{ga}/push-location", headers=h).status_code == 409        # A has no GPS
+    r = client.post(f"/api/gateways/{gb}/push-location", headers=h).json()
+    assert r["changed"] is True and cs.loc["latitude"] == 13.9501
+    assert client.post(f"/api/gateways/{gb}/push-location", headers=h).json()["changed"] is False
+    assert client.post(f"/api/gateways/{gb}/push-location", headers=login(client, "viewer")).status_code == 403
+    with SessionLocal() as db:                    # a stale fix (> 30 min) is not pushed
+        db.query(Gateway).filter_by(id=gb).update({"gps_at": utcnow() - timedelta(hours=2)}); db.commit()
+    assert client.post(f"/api/gateways/{gb}/push-location", headers=h).status_code == 409
+
+
+def test_provision_set_gateway_location():
+    import httpx, json as _j
+    from app.provision import ChirpStackRest
+    calls = []
+    def handler(req):
+        calls.append((req.method, _j.loads(req.content) if req.content else None))
+        if req.method == "GET": return httpx.Response(200, json={"gateway": {"gatewayId": "aa", "name": "x", "location": {"latitude": 1.0, "longitude": 2.0, "altitude": 15}}})
+        return httpx.Response(200, json={})
+    c = ChirpStackRest("http://cs", "k", "app", "prof", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert c.set_gateway_location("aa", 1.0, 2.0) is False and calls[-1][0] == "GET"
+    assert c.set_gateway_location("aa", 13.95, 100.6) is True
+    loc = calls[-1][1]["gateway"]["location"]
+    assert loc["latitude"] == 13.95 and loc["altitude"] == 15 and loc["source"] == "GPS" and calls[-1][1]["gateway"]["name"] == "x"

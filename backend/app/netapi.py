@@ -198,3 +198,21 @@ def chirpstack_backup_import(b: BackupImportIn, u=Depends(admin_only), db: Sessi
           failed_devices=len(result["failed_devices"]), failed_gateways=len(result["failed_gateways"]))
     db.commit()
     return result
+
+
+# ---------------- gateway GPS -> ChirpStack ----------------
+@router.post("/gateways/{gid}/push-location")
+def gateway_push_location(gid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    """Copy the gateway's own GPS fix into ChirpStack (its map, and anything that uses the gateway position there)."""
+    from .models import Gateway
+    from . import gateways as gwmod
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    if g.gps_lat is None or not g.gps_at or (utcnow() - gwmod._aware(g.gps_at)).total_seconds() > gwmod.GPS_FRESH_S:
+        raise HTTPException(409, "ยังไม่มีพิกัด GPS ล่าสุดจากเกตเวย์นี้")
+    cs = prov.get_cs()
+    if not cs.configured: raise HTTPException(409, "ChirpStack API ยังไม่ได้ตั้งค่า")
+    try: changed = cs.set_gateway_location(g.gateway_id, g.gps_lat, g.gps_lon)
+    except prov.ProvisionError as e: raise HTTPException(502, str(e))
+    if changed: audit(db, u.username, "gateway_location_to_chirpstack", g.gateway_id, lat=g.gps_lat, lon=g.gps_lon); db.commit()
+    return {"changed": changed, "lat": g.gps_lat, "lon": g.gps_lon}

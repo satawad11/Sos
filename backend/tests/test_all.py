@@ -1441,7 +1441,7 @@ def test_chirpstack_page_compare_and_sync(env_, monkeypatch):
     assert c["disabled_mismatch"] == ["70b3d57ed0000001"]
     assert [g["gateway_id"] for g in c["gateways_missing_in_cs"]] == ["0016c001ff10aaaa"]
     r = client.post("/api/chirpstack/sync", headers=h).json()
-    assert r == {"gateways_added": ["0016c001ff10aaaa"], "devices_disabled": ["70b3d57ed0000001"], "devices_enabled": [], "errors": []}
+    assert r == {"gateways_added": ["0016c001ff10aaaa"], "devices_disabled": ["70b3d57ed0000001"], "devices_enabled": [], "errors": [], "gateway_locations": []}
     assert cs.cs_devices["70b3d57ed0000001"]["isDisabled"] is True
     c2 = client.get("/api/chirpstack", headers=h).json()["compare"]
     assert c2["disabled_mismatch"] == [] and c2["gateways_missing_in_cs"] == []

@@ -219,6 +219,20 @@ class ChirpStackRest:
             "confirmed": confirmed, "fPort": fport, "data": base64.b64encode(data).decode()}})
         return str(res.get("id", ""))
 
+    def gateway(self, gateway_id: str) -> dict:
+        """{gateway: {...location...}, lastSeenAt, createdAt, ...}"""
+        return self._call("GET", f"/api/gateways/{gateway_id}")
+
+    def set_gateway_location(self, gateway_id: str, lat: float, lon: float, alt: float = 0.0) -> bool:
+        """Copy a position (the gateway's own GPS fix) into ChirpStack. Returns True if it changed."""
+        gw = self.gateway(gateway_id).get("gateway") or {}
+        loc = gw.get("location") or {}
+        if loc and abs((loc.get("latitude") or 0) - lat) < 1e-5 and abs((loc.get("longitude") or 0) - lon) < 1e-5:
+            return False
+        gw["location"] = {**loc, "latitude": lat, "longitude": lon, "altitude": alt or loc.get("altitude", 0), "source": "GPS"}
+        self._call("PUT", f"/api/gateways/{gateway_id}", json={"gateway": gw})
+        return True
+
     def device_known(self, dev_eui: str) -> bool | None:
         """True/False = ChirpStack has / does not have it; None = could not ask."""
         if not self.configured: return None
