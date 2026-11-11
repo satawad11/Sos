@@ -523,6 +523,25 @@ tr.pri-critical>td{background:color-mix(in srgb,var(--p-critical) 8%,transparent
 .plg{display:inline-flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--mut);align-items:center}.plg i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px}
 .pfilter{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.pfilter .chipb{border:1px solid var(--bd);background:var(--card);color:var(--ink);border-radius:999px;padding:5px 13px;font:inherit;cursor:pointer}
 .pfilter .chipb.on{background:var(--pri);border-color:var(--pri);color:#fff}.pfilter select{font:inherit;padding:5px 8px}
+/* per-patient statistics + caregiver workload */
+.lnk{border:0;background:none;padding:0;font:inherit;font-weight:600;color:var(--pri);cursor:pointer;text-align:left}.lnk:hover{text-decoration:underline}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
+.tile{border:1px solid var(--bd);border-radius:10px;padding:12px 14px;background:var(--card)}
+.tile .tl{font-size:13px;color:var(--mut)}.tile .tv{font-size:28px;font-weight:700;line-height:1.25;font-variant-numeric:tabular-nums}.tile .tv small{font-size:14px;font-weight:500;color:var(--mut);margin-left:3px}
+.tile .tv.txt{font-size:19px;line-height:1.5}.tile .ts{font-size:12.5px;color:var(--mut)}.tile.red{border-color:var(--red)}.tile.red .tv{color:var(--red)}.tile.amb .tv{color:var(--amb)}.tile.grn .tv{color:var(--grn)}
+.sum{font-size:16px;line-height:1.7;margin:6px 0 2px}.sum b{font-variant-numeric:tabular-nums}
+.flags{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px}.flags li{padding:8px 12px;border-radius:8px;border:1px solid var(--bd);border-left:4px solid var(--amb)}.flags li.red{border-left-color:var(--red)}.flags li.grn{border-left-color:var(--grn)}
+.bch{display:flex;align-items:flex-end;gap:6px;height:170px;padding-top:18px;overflow-x:auto}
+.bch .bc1{flex:1 0 34px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:34px}
+.bch .bn{font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}.bch .bn.z{color:var(--mut);font-weight:400}
+.bch .bb{width:70%;max-width:38px;border-radius:5px 5px 0 0;background:var(--pri);display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;min-height:2px}
+.bch .bb i{display:block;background:var(--amb)}.bch .bx{font-size:12px;color:var(--mut);margin-top:5px;white-space:nowrap}.bch .cur .bx{color:var(--ink);font-weight:600}
+.hb{display:grid;grid-template-columns:minmax(110px,auto) 1fr 44px;gap:8px 10px;align-items:center}.hb .ht{height:14px;border-radius:7px;background:var(--bd);overflow:hidden}.hb .ht i{display:block;height:100%;border-radius:7px;background:var(--pri)}.hb .hn{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.lg{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--mut);margin-top:8px}.lg i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.cols2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.cols2>.card{margin:0}
+.wl{min-width:170px}.wl .wn{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}.wl .wn small{font-size:13px;font-weight:500;color:var(--mut);margin-left:3px}
+.wl .wt{height:8px;border-radius:4px;background:var(--bd);overflow:hidden;margin:4px 0;max-width:180px}.wl .wt i{display:block;height:100%;background:var(--pri);border-radius:4px}
+.wl .ws{font-size:12.5px;color:var(--mut)}.wl details{margin-top:4px;font-size:13.5px}.wl summary{cursor:pointer;color:var(--pri)}.wl ol{margin:4px 0 0;padding-left:20px}
 </style></head>
 <body>
 <div id="app"></div><div id="toast" aria-live="polite"></div>
@@ -965,8 +984,8 @@ const loadPatients=guard(async()=>{
     ${role==="admin"?`<details style="margin-top:10px"><summary class="mut" style="cursor:pointer">เกณฑ์ "กดบ่อย" (ตอนนี้: ตั้งแต่ ${fq.week_threshold||"ปิด"} ครั้งใน 7 วัน · ตั้งแต่ ${fq.month_threshold||"ปิด"} ครั้งใน 30 วัน)</summary>
       <div class="row" style="margin-top:8px">ใน 7 วัน ≥ <input id="fqw" type="number" min="0" max="50" style="width:70px" value="${fq.week_threshold}"> ครั้ง · ใน 30 วัน ≥ <input id="fqm" type="number" min="0" max="200" style="width:70px" value="${fq.month_threshold}"> ครั้ง
       <label><input type="checkbox" id="fqf" ${fq.count_false_alarm?"checked":""}> นับเคสที่แจ้งผิดพลาดด้วย</label><button class="btn p" id="fqs">บันทึกเกณฑ์</button></div><p class="hint">ใส่ 0 = ปิดเกณฑ์นั้น · นับเฉพาะเคสจริงจากปุ่ม (ไม่รวมการทดสอบรายเดือน) · ผู้ป่วยที่ถึงเกณฑ์จะมีป้าย 🔥 กดบ่อย</p></details>`:""}</div>
-  <div class="card"><table><tr><th>ชื่อ / ระดับ</th><th title="จำนวนเคสใน 7 วันล่าสุด">7 วัน</th><th title="จำนวนเคสใน 30 วันล่าสุด">30 วัน</th><th>ที่อยู่/โทร</th><th>อุปกรณ์</th><th>ผู้ดูแล (ลำดับแจ้ง)</th><th>PDPA</th><th></th></tr>${view.map(p=>`<tr data-rid="${p.id}" class="pri-${p.priority}"><td>${esc(p.full_name)}<div style="margin-top:3px">${canEdit()&&!p.anonymized_at?`<select data-prio="${p.id}" title="ระดับความสำคัญ">${Object.entries(PRI).map(([k,v])=>`<option value="${k}" ${p.priority===k?"selected":""}>${v[0]}</option>`).join("")}</select>`:priBadge(p.priority)}${p.frequent_week||p.frequent_month?` <span class="fq" title="ถึงเกณฑ์กดบ่อย">🔥 กดบ่อย</span>`:""}</div></td>
-    <td><b ${p.frequent_week?'class="bad"':""}>${p.cases_7d}</b></td><td><b ${p.frequent_month?'class="bad"':""}>${p.cases_30d}</b>${p.last_case_at?`<div class="mut" style="font-size:12px">ล่าสุด ${fmt(p.last_case_at)}</div>`:""}</td><td>${esc(p.address)}<br>${esc(p.phone)}</td><td>${esc(p.device||"-")}</td><td>${p.assignments.map(a=>a.priority+". "+esc(a.name)).join("<br>")||'<span class="mut">ยังไม่กำหนด</span>'}</td><td>${p.anonymized_at?'<span class="bad">ลบแล้ว</span>':p.consent_ok?'<span class="ok">✔ ยินยอม</span>':'<span class="bad">ไม่มีบันทึก</span>'}</td><td style="white-space:nowrap">${canEdit()&&!p.anonymized_at?`<button class="btn" data-id="${p.id}">กำหนดผู้ดูแล</button> `:""}${canEdit()&&!p.anonymized_at?`<button class="btn" data-pe="${p.id}">แก้ไข</button> `:""}${canEdit()?`<button class="btn" data-pv="${p.id}">ข้อมูล/PDPA</button>`:""}${role==="admin"?` <button class="btn r" data-pd="${p.id}">ลบ</button>`:""}</td></tr>`).join("")}</table></div>`;
+  <div class="card"><table><tr><th>ชื่อ / ระดับ</th><th title="จำนวนเคสใน 7 วันล่าสุด">7 วัน</th><th title="จำนวนเคสใน 30 วันล่าสุด">30 วัน</th><th>ที่อยู่/โทร</th><th>อุปกรณ์</th><th>ผู้ดูแล (ลำดับแจ้ง)</th><th>PDPA</th><th></th></tr>${view.map(p=>`<tr data-rid="${p.id}" class="pri-${p.priority}"><td><button type="button" class="lnk" data-ps="${p.id}" title="ดูสถิติรายบุคคล">${esc(p.full_name)}</button><div style="margin-top:3px">${canEdit()&&!p.anonymized_at?`<select data-prio="${p.id}" title="ระดับความสำคัญ">${Object.entries(PRI).map(([k,v])=>`<option value="${k}" ${p.priority===k?"selected":""}>${v[0]}</option>`).join("")}</select>`:priBadge(p.priority)}${p.frequent_week||p.frequent_month?` <span class="fq" title="ถึงเกณฑ์กดบ่อย">🔥 กดบ่อย</span>`:""}</div></td>
+    <td><b ${p.frequent_week?'class="bad"':""}>${p.cases_7d}</b></td><td><b ${p.frequent_month?'class="bad"':""}>${p.cases_30d}</b>${p.last_case_at?`<div class="mut" style="font-size:12px">ล่าสุด ${fmt(p.last_case_at)}</div>`:""}</td><td>${esc(p.address)}<br>${esc(p.phone)}</td><td>${esc(p.device||"-")}</td><td>${p.assignments.map(a=>a.priority+". "+esc(a.name)).join("<br>")||'<span class="mut">ยังไม่กำหนด</span>'}</td><td>${p.anonymized_at?'<span class="bad">ลบแล้ว</span>':p.consent_ok?'<span class="ok">✔ ยินยอม</span>':'<span class="bad">ไม่มีบันทึก</span>'}</td><td style="white-space:nowrap"><button class="btn" data-ps="${p.id}">📊 สถิติ</button> ${canEdit()&&!p.anonymized_at?`<button class="btn" data-id="${p.id}">กำหนดผู้ดูแล</button> `:""}${canEdit()&&!p.anonymized_at?`<button class="btn" data-pe="${p.id}">แก้ไข</button> `:""}${canEdit()?`<button class="btn" data-pv="${p.id}">ข้อมูล/PDPA</button>`:""}${role==="admin"?` <button class="btn r" data-pd="${p.id}">ลบ</button>`:""}</td></tr>`).join("")}</table></div>`;
   if($("#add"))$("#add").onclick=guard(async()=>{const num=v=>v===""?null:Number(v);await api("/patients",{method:"POST",body:{full_name:$("#n").value,address:$("#a").value,village:$("#v").value,phone:$("#ph").value,lat:num($("#la").value),lon:num($("#lo").value)}});loadPatients()});
   document.querySelectorAll("[data-pf]").forEach(b=>b.onclick=()=>{patFilter=b.dataset.pf;if(LST.patients)LST.patients.page=0;loadPatients()});
   $("#psort").onchange=e=>{patSort=e.target.value;lsSet("pat_sort",patSort);if(LST.patients)LST.patients.page=0;loadPatients()};
@@ -984,6 +1003,7 @@ const loadPatients=guard(async()=>{
     ...(role==="admin"?[{label:"ลบ",cls:"r",confirm:n=>`ลบผู้ป่วย ${n} ราย?\nลบได้เฉพาะรายที่ไม่มีอุปกรณ์/ประวัติเคส (รายอื่นจะถูกข้ามและแจ้งผล)`,run:i=>api("/patients/"+i,{method:"DELETE"})}]:[])]});
   document.querySelectorAll("button[data-pv]").forEach(b=>b.onclick=()=>patientPrivacy(ps.find(x=>x.id==b.dataset.pv)));
   document.querySelectorAll("button[data-pd]").forEach(b=>b.onclick=guard(async()=>{const p=ps.find(x=>x.id==b.dataset.pd);if(!await ask(`ลบผู้ป่วย "${p.full_name}" ?\nลบได้เฉพาะรายที่ไม่มีอุปกรณ์/ประวัติเคส — ถ้ามีประวัติ ให้ใช้ ข้อมูล/PDPA → ลบข้อมูลที่ระบุตัวตน`))return;await api("/patients/"+p.id,{method:"DELETE"});toast("ลบแล้ว");loadPatients()}));
+  document.querySelectorAll("[data-ps]").forEach(b=>b.onclick=()=>patientStats(+b.dataset.ps));
   document.querySelectorAll("button[data-pe]").forEach(b=>b.onclick=()=>{const p=ps.find(x=>x.id==b.dataset.pe);devEdit=true;
     $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button><div class="card"><h3>แก้ไขผู้ป่วย #${p.id}</h3>
      <div class="row">ชื่อ-สกุล <input id="en" value="${esc(p.full_name)}" maxlength="128"> อายุ <input id="eg" size="3" value="${p.age??""}"></div>
@@ -1001,10 +1021,71 @@ const loadPatients=guard(async()=>{
     p.assignments.forEach(a=>{$("#s"+a.priority).value=a.caregiver_id});
     $("#back").onclick=()=>render();$("#sv").onclick=guard(async()=>{const ids=[1,2,3].map(i=>$("#s"+i).value).filter(Boolean).map(Number);await api(`/patients/${p.id}/assignments`,{method:"PUT",body:{caregiver_ids:ids}});toast("บันทึกแล้ว");render()})})});
 
+// ---------------------------------------------------------------- per-patient statistics
+const MTHS=["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."],WDAY=["จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"];
+const durTxt=s=>s==null?"-":s<60?`${Math.round(s)} วินาที`:s<3600?`${Math.floor(s/60)} นาที${Math.round(s%60)?` ${Math.round(s%60)} วินาที`:""}`:`${Math.floor(s/3600)} ชม. ${Math.round(s%3600/60)} นาที`;
+const tile=(label,val,unit,sub,cls)=>`<div class="tile ${cls||""}"><div class="tl">${label}</div><div class="tv${/[ก-๙]/.test(String(val))?" txt":""}">${val}${unit?`<small>${unit}</small>`:""}</div>${sub?`<div class="ts">${sub}</div>`:""}</div>`;
+const hbars=rows=>{const mx=Math.max(1,...rows.map(r=>r[1]));return `<div class="hb">${rows.map(r=>`<span>${esc(r[0])}</span><span class="ht"><i style="width:${r[1]/mx*100}%"></i></span><span class="hn">${r[1]}</span>`).join("")}</div>`};
+function patFlags(r){const f=[],t=r.totals,p=r.patient,d=r.device,c=r.caregivers;
+  if(p.anonymized_at)return [["","ข้อมูลผู้ป่วยรายนี้ถูกลบ/ทำให้ไม่ระบุตัวตนแล้ว"]];
+  if(t.open)f.push(["red",`มีเคสที่ยังไม่ปิด ${t.open} เคส`]);
+  if(!c.length)f.push(["red","ยังไม่ได้กำหนด อสม./ผู้ดูแล — ถ้ากดปุ่มจะไม่มีใครได้รับแจ้งทาง LINE"]);
+  else if(!c[0].line_bound||!c[0].active)f.push(["red",`ผู้ดูแลลำดับ 1 (${esc(c[0].name)}) ${c[0].active?"ยังไม่ได้ผูก LINE":"ถูกปิดใช้งาน"} — จะไม่ได้รับแจ้งเหตุ`]);
+  if(!d)f.push(["red","ยังไม่มีปุ่มแจ้งเหตุที่ผูกกับผู้ป่วยรายนี้"]);
+  else{if(d.link==="offline"||d.link==="never")f.push(["red",d.link==="never"?"ปุ่มยังไม่เคยส่งสัญญาณเข้าระบบ":"ปุ่มขาดการติดต่อ — อาจแจ้งเหตุไม่ได้ ควรโทรตรวจสอบ"]);
+    else if(d.link==="late")f.push(["","ปุ่มส่งสัญญาณช้ากว่ากำหนด"]);
+    if(d.battery!=null&&d.battery<=20)f.push(["",`แบตเตอรี่ปุ่มเหลือ ${d.battery}%`]);
+    if(d.mains_ok===false)f.push(["","ปุ่มใช้ไฟจากแบตสำรองอยู่ (ไฟบ้านดับหรือถอดปลั๊ก)"])}
+  if(!p.consent_ok)f.push(["","ยังไม่มีบันทึกความยินยอม (PDPA)"]);
+  if(role!=="viewer"&&p.lat==null)f.push(["","ยังไม่ได้ปักหมุดตำแหน่งบ้าน"]);
+  if(t.all>=4&&t.false_alarm/t.all>=.5)f.push(["",`แจ้งผิดพลาด ${t.false_alarm} จาก ${t.all} ครั้ง — ควรทบทวนวิธีใช้ปุ่มกับผู้ป่วย/ญาติ`]);
+  const night=(r.dayparts.find(x=>x.key==="night")||{}).n||0;if(t.all>=4&&night/t.all>=.5)f.push(["",`กดปุ่มช่วงกลางคืนบ่อย (${night} จาก ${t.all} ครั้ง)`]);
+  if(t.after_hours&&t.all>=3&&t.after_hours/t.all>=.6)f.push(["",`ส่วนใหญ่เกิดนอกเวลาราชการ (${t.after_hours} จาก ${t.all} ครั้ง)`]);
+  if(d&&!r.tests)f.push(["","ยังไม่เคยทดสอบปุ่ม"]);
+  if(!f.length)f.push(["grn","ข้อมูลครบและอุปกรณ์ทำงานปกติ"]);
+  return f}
+const patientStats=guard(async pid=>{
+  const r=await api(`/patients/${pid}/stats`),p=r.patient,t=r.totals,rs=r.response,d=r.device,ms=r.months;devEdit=true;
+  const cur=ms[ms.length-1].n,prev=ms[ms.length-2].n,mx=Math.max(1,...ms.map(m=>m.n));
+  const trend=cur>prev?`<span class="bad">เพิ่มขึ้น</span>`:cur<prev?`<span class="ok">ลดลง</span>`:"เท่าเดิม";
+  const sum=!t.all?`ยังไม่เคยกดปุ่มแจ้งเหตุ${r.tests?` (ทดสอบปุ่มแล้ว ${r.tests} ครั้ง)`:""}`
+    :`กดปุ่มแจ้งเหตุมาแล้ว <b>${t.all}</b> ครั้ง · ครั้งล่าสุด <b>${fmt(r.last_case_at)}</b><br>เดือนนี้ <b>${cur}</b> ครั้ง เดือนก่อน <b>${prev}</b> ครั้ง (${trend})${rs.n_accepted?` · มีผู้รับเรื่องเฉลี่ยภายใน <b>${durTxt(rs.avg_accept_s)}</b>`:""}`;
+  const link={ok:["ปกติ","ok"],late:["ส่งสัญญาณช้า",""],offline:["ขาดการติดต่อ","bad"],never:["ยังไม่เคยส่งสัญญาณ","bad"]};
+  const out=[["แก้ไขแล้ว/ช่วยเหลือแล้ว",t.resolved],["แจ้งผิดพลาด",t.false_alarm],["ผู้ป่วยยกเลิกเอง",t.cancelled],["ยังไม่ปิด",t.open]];
+  $("#main").innerHTML=`<button class="btn" id="back">← กลับ</button>
+  <div class="card"><h3>${esc(p.full_name)} ${priBadge(p.priority)}${p.active?"":' <span class="mut">(ปิดใช้งาน)</span>'}</h3>
+    <div class="mut">${[p.age!=null?`อายุ ${p.age} ปี`:"",p.village?`หมู่บ้าน ${esc(p.village)}`:"",p.phone?`โทร ${esc(p.phone)}`:""].filter(Boolean).join(" · ")}</div>
+    <p class="sum">${sum}</p>
+    <ul class="flags">${patFlags(r).map(x=>`<li class="${x[0]}">${x[1]}</li>`).join("")}</ul></div>
+  <div class="tiles">${tile("7 วันล่าสุด",t.d7,"ครั้ง")}${tile("30 วันล่าสุด",t.d30,"ครั้ง")}${tile("12 เดือนล่าสุด",t.d365,"ครั้ง")}${tile("ทั้งหมด",t.all,"ครั้ง",r.first_case_at?`ตั้งแต่ ${fmt(r.first_case_at).split(" ")[0]}`:"")}
+    ${tile("รับเรื่องเฉลี่ย",rs.n_accepted?durTxt(rs.avg_accept_s):"-","",rs.n_accepted?`ช้าสุด ${durTxt(rs.max_accept_s)}`:"ยังไม่มีข้อมูล")}${tile("เกินเวลารับเรื่อง",t.overdue,"ครั้ง","ไม่มีผู้รับภายในเวลาที่ตั้งไว้",t.overdue?"amb":"")}${tile("นอกเวลาราชการ",t.after_hours,"ครั้ง")}${tile("แจ้งผิดพลาด",t.false_alarm,"ครั้ง",t.all?`คิดเป็น ${Math.round(t.false_alarm/t.all*100)}%`:"")}</div>
+  <div class="card"><h3>จำนวนครั้งที่กดปุ่ม รายเดือน (12 เดือนล่าสุด)</h3>
+    <div class="bch" role="img" aria-label="กราฟจำนวนเคสรายเดือน">${ms.map((m,i)=>{const [y,mo]=m.month.split("-").map(Number);return `<div class="bc1 ${i===ms.length-1?"cur":""}" title="${MTHS[mo-1]} ${y+543}: ${m.n} ครั้ง${m.false_alarm?` (ผิดพลาด ${m.false_alarm})`:""}"><span class="bn ${m.n?"":"z"}">${m.n}</span><span class="bb" style="height:${m.n/mx*100}%">${m.false_alarm?`<i style="height:${m.false_alarm/m.n*100}%"></i>`:""}</span><span class="bx">${MTHS[mo-1]}${mo===1||i===0?" "+String(y+543).slice(2):""}</span></div>`}).join("")}</div>
+    <div class="lg"><span><i style="background:var(--pri)"></i>เหตุจริง</span><span><i style="background:var(--amb)"></i>แจ้งผิดพลาด</span><span>ไม่นับการทดสอบปุ่มประจำเดือน</span></div></div>
+  <div class="cols2">
+    <div class="card"><h3>กดปุ่มช่วงเวลาใด</h3>${t.all?hbars(r.dayparts.map(x=>[x.label,x.n])):'<p class="mut">ยังไม่มีข้อมูล</p>'}</div>
+    <div class="card"><h3>กดปุ่มวันใด</h3>${t.all?hbars(r.weekdays.map((n,i)=>[WDAY[i],n])):'<p class="mut">ยังไม่มีข้อมูล</p>'}</div>
+    <div class="card"><h3>ผลของแต่ละครั้ง</h3>${t.all?hbars(out):'<p class="mut">ยังไม่มีข้อมูล</p>'}</div>
+    <div class="card"><h3>ผู้ดูแลและอุปกรณ์</h3>
+      <p><b>ผู้ดูแล (ลำดับแจ้ง)</b><br>${r.caregivers.map(c=>`${c.priority}. ${esc(c.name)} ${c.active?(c.line_bound?'<span class="ok">ผูก LINE แล้ว</span>':'<span class="bad">ยังไม่ผูก LINE</span>'):'<span class="bad">ปิดใช้งาน</span>'}`).join("<br>")||'<span class="bad">ยังไม่กำหนด</span>'}</p>
+      <p><b>ปุ่มแจ้งเหตุ</b><br>${d?`${esc(d.label||d.dev_eui)} · สถานะ <span class="${link[d.link][1]}">${link[d.link][0]}</span>${d.battery!=null?` · แบต ${d.battery}%`:""}<br><span class="mut">ส่งสัญญาณล่าสุด ${fmt(d.last_seen)}</span>`:'<span class="bad">ยังไม่มี</span>'}</p>
+      <p><b>ทดสอบปุ่ม</b><br>${r.tests?`${r.tests} ครั้ง · ล่าสุด ${fmt(r.last_test_at)}`:'<span class="mut">ยังไม่เคยทดสอบ</span>'}</p></div></div>
+  <div class="card"><h3>10 ครั้งล่าสุด</h3>${r.recent.length?`<table><tr><th>เคส</th><th>วันเวลา</th><th>ผล</th><th>รับเรื่องภายใน</th><th>ผู้รับเรื่อง</th></tr>${r.recent.map(c=>`<tr><td><button type="button" class="lnk" data-oc="${c.id}">#${c.id}</button></td><td>${fmt(c.created_at)}${c.after_hours?' <span class="mut">(นอกเวลา)</span>':""}</td><td>${c.close_reason==="false_alarm"?"แจ้งผิดพลาด":esc(ST[c.state]||c.state)}</td><td>${c.accept_s!=null?durTxt(c.accept_s):'<span class="mut">-</span>'}${c.overdue?' <span class="bad">เกินเวลา</span>':""}</td><td>${esc(c.accepted_by||"-")}</td></tr>`).join("")}</table>`:'<p class="mut">ยังไม่มีเคส</p>'}</div>`;
+  crumb(`สถิติ: ${p.full_name}`);scrollTo(0,0);
+  $("#back").onclick=()=>{devEdit=false;render()};
+  document.querySelectorAll("[data-oc]").forEach(b=>b.onclick=()=>{devEdit=false;openCaseAfter=+b.dataset.oc;page="cases";render();scrollTo(0,0)})});
+
 const loadCaregivers=guard(async()=>{
-  const cs=await api("/caregivers");
-  $("#main").innerHTML=`${canEdit()?`<div class="card"><h3>เพิ่ม อสม./ผู้ดูแล</h3><div class="row"><input id="n" placeholder="ชื่อ-สกุล"><input id="r" value="อสม."><input id="ph" placeholder="โทร"><button class="btn p" id="add">เพิ่ม</button></div></div>`:""}
-  <div class="card"><table><tr><th>ชื่อ</th><th>บทบาท</th><th>โทร</th><th>LINE</th><th></th></tr>${cs.map(c=>`<tr data-rid="${c.id}"><td>${esc(c.full_name)}${c.active?"":" (ปิดใช้งาน)"}</td><td>${esc(c.role)}</td><td>${esc(c.phone)}</td><td>${c.line_bound?"✅ ผูกแล้ว":"❌ ยังไม่ผูก"}</td><td style="white-space:nowrap">${canEdit()?`<button class="btn" data-bind="${c.id}">สร้างรหัสผูก LINE</button>${c.line_bound?` <button class="btn" data-un="${c.id}">ยกเลิกผูก</button>`:""} <button class="btn" data-ce="${c.id}">แก้ไข</button> <button class="btn" data-ct="${c.id}">${c.active?"ปิดใช้งาน":"เปิดใช้งาน"}</button>`:""}${role==="admin"?` <button class="btn r" data-cd="${c.id}">ลบ</button>`:""}</td></tr>`).join("")}</table><p class="mut">วิธีผูก: กดสร้างรหัส → ให้ อสม. เพิ่มเพื่อนบัญชี LINE ของ รพ.สต. แล้วพิมพ์รหัสนั้นส่งไป (รหัสใช้ได้ 30 นาที ครั้งเดียว)</p></div>`;
+  const [cs,sm]=await Promise.all([api("/caregivers"),api("/caregivers/summary")]);
+  const mxw=Math.max(1,...cs.map(c=>c.n_patients||0)),noLine=cs.filter(c=>c.active&&c.n_patients&&!c.line_bound);
+  const wl=c=>!c.n_patients?`<span class="mut">ยังไม่มีผู้ป่วยในความดูแล</span>`:`<div class="wl"><div class="wn">${c.n_patients}<small>ราย</small></div><div class="wt"><i style="width:${c.n_patients/mxw*100}%"></i></div>
+    <div class="ws">ผู้ดูแลหลัก ${c.n_primary} · สำรอง ${c.n_backup}${c.n_critical?` · <span class="bad">วิกฤต ${c.n_critical}</span>`:""}${c.n_watch?` · เฝ้าระวัง ${c.n_watch}`:""}${c.cases_notified_30d?`<br>ได้รับแจ้งเหตุ 30 วัน: ${c.cases_notified_30d} เคส`:""}</div>
+    <details><summary>ดูรายชื่อ</summary><ol>${c.patients.map(x=>`<li><button type="button" class="lnk" data-ps="${x.id}">${esc(x.full_name)}</button> <span class="mut">${x.order===1?"หลัก":"สำรองลำดับ "+x.order}${x.village?" · "+esc(x.village):""}</span> ${priBadge(x.priority)}</li>`).join("")}</ol></details></div>`;
+  $("#main").innerHTML=`<div class="tiles">${tile("อสม./ผู้ดูแลที่เปิดใช้งาน",sm.active,"คน",`ผูก LINE แล้ว ${sm.line_bound} คน`,sm.line_bound<sm.active?"amb":"")}${tile("ผู้ป่วยที่มีผู้ดูแลแล้ว",`${sm.patients_covered}/${sm.patients}`,"ราย",sm.patients_uncovered?`ยังไม่มีผู้ดูแล ${sm.patients_uncovered} ราย`:"ครบทุกราย",sm.patients_uncovered?"red":"grn")}${tile("เฉลี่ยต่อ อสม.",sm.avg_per_caregiver,"ราย/คน",`มากที่สุด ${sm.max_per_caregiver} ราย`)}${tile("อสม. ที่ยังไม่มีผู้ป่วย",sm.without_patients,"คน")}</div>
+  ${sm.uncovered.length||noLine.length?`<div class="card"><h3>ต้องดำเนินการ</h3><ul class="flags">${sm.uncovered.length?`<li class="red">ผู้ป่วยที่ยังไม่มี อสม./ผู้ดูแล (กดปุ่มแล้วจะไม่มีใครได้รับ LINE): ${sm.uncovered.map(x=>`<button type="button" class="lnk" data-ps="${x.id}">${esc(x.full_name)}</button>`).join(", ")}</li>`:""}${noLine.map(c=>`<li class="red">${esc(c.full_name)} ดูแลผู้ป่วย ${c.n_patients} ราย แต่ยังไม่ได้ผูก LINE — จะไม่ได้รับแจ้งเหตุ</li>`).join("")}</ul></div>`:""}
+  ${canEdit()?`<div class="card"><h3>เพิ่ม อสม./ผู้ดูแล</h3><div class="row"><input id="n" placeholder="ชื่อ-สกุล"><input id="r" value="อสม."><input id="ph" placeholder="โทร"><button class="btn p" id="add">เพิ่ม</button></div></div>`:""}
+  <div class="card"><table><tr><th>ชื่อ</th><th>บทบาท</th><th>โทร</th><th>LINE</th><th>ผู้ป่วยที่ดูแล</th><th></th></tr>${cs.map(c=>`<tr data-rid="${c.id}"><td>${esc(c.full_name)}${c.active?"":" (ปิดใช้งาน)"}</td><td>${esc(c.role)}</td><td>${esc(c.phone)}</td><td style="white-space:nowrap">${c.line_bound?"✅ ผูกแล้ว":"❌ ยังไม่ผูก"}</td><td>${wl(c)}</td><td style="white-space:nowrap">${canEdit()?`<button class="btn" data-bind="${c.id}">สร้างรหัสผูก LINE</button>${c.line_bound?` <button class="btn" data-un="${c.id}">ยกเลิกผูก</button>`:""} <button class="btn" data-ce="${c.id}">แก้ไข</button> <button class="btn" data-ct="${c.id}">${c.active?"ปิดใช้งาน":"เปิดใช้งาน"}</button>`:""}${role==="admin"?` <button class="btn r" data-cd="${c.id}">ลบ</button>`:""}</td></tr>`).join("")}</table><p class="mut">วิธีผูก: กดสร้างรหัส → ให้ อสม. เพิ่มเพื่อนบัญชี LINE ของ รพ.สต. แล้วพิมพ์รหัสนั้นส่งไป (รหัสใช้ได้ 30 นาที ครั้งเดียว)</p></div>`;
+  document.querySelectorAll("[data-ps]").forEach(b=>b.onclick=()=>patientStats(+b.dataset.ps));
   if($("#add"))$("#add").onclick=guard(async()=>{await api("/caregivers",{method:"POST",body:{full_name:$("#n").value,role:$("#r").value,phone:$("#ph").value}});loadCaregivers()});
   document.querySelectorAll("[data-bind]").forEach(b=>b.onclick=guard(async()=>{const r=await api(`/caregivers/${b.dataset.bind}/bind-code`,{method:"POST"});dlg({icon:"integrations",title:`ผูก LINE: ${r.name||""}`,html:bindHTML(r),ok:"ปิด",cancel:false}).then(()=>loadCaregivers?.())}));
   document.querySelectorAll("[data-un]").forEach(b=>b.onclick=guard(async()=>{if(await ask("ยกเลิกการผูก LINE?")){await api(`/caregivers/${b.dataset.un}/unbind`,{method:"POST"});loadCaregivers()}}));

@@ -485,7 +485,24 @@ def cg_dict(c: Caregiver):
 
 @router.get("/caregivers")
 def caregivers(db: Session = Depends(get_db), u=Depends(current_user)):
-    return [cg_dict(c) for c in db.query(Caregiver).order_by(Caregiver.id).all()]
+    from . import stats as st
+    load = st.caregiver_load(db, u.role)["by_id"]
+    return [{**cg_dict(c), **load.get(c.id, {})} for c in db.query(Caregiver).order_by(Caregiver.id).all()]
+
+
+@router.get("/caregivers/summary")
+def caregivers_summary(db: Session = Depends(get_db), u=Depends(current_user)):
+    """Workload overview: how many patients each caregiver looks after, and which patients have nobody yet."""
+    from . import stats as st
+    return st.caregiver_load(db, u.role)["summary"]
+
+
+@router.get("/patients/{pid}/stats")
+def patient_statistics(pid: int, db: Session = Depends(get_db), u=Depends(current_user)):
+    from . import stats as st
+    p = db.get(Patient, pid)
+    if not p: raise HTTPException(404)
+    return st.patient_stats(db, p, u.role)
 
 
 @router.post("/caregivers")
