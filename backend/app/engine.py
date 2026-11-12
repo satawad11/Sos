@@ -101,6 +101,9 @@ class Engine:
             dev.last_gateway = meta["gateway_id"]
             self.gw.on_uplink(db, meta["gateway_id"], now)
         _heard(dev, meta, now)
+        from . import telemetry
+        if up.msg_type != codec.T_POLL:                    # polls come every few seconds during a case: no history value
+            telemetry.record(db, dev, up, meta, now)      # history row for the battery / signal charts
         result = "ok"
         if dev.lifecycle not in ("active", "ready"):
             result = "inactive_device"          # repair/retired/lost: record health only
@@ -185,7 +188,7 @@ class Engine:
                 ok, detail = fn(db, case, cg, loc.lat, loc.lon, loc.sats, home_m)
             except Exception as e:
                 log.exception("location push failed"); ok, detail = False, f"error: {e}"
-            status = "skipped" if detail.startswith("skipped") else ("sent" if ok else "failed")
+            status = "skipped" if detail.startswith("skipped") else ("queued" if ok and detail == "queued" else "sent" if ok else "failed")
             db.add(Notification(case_id=case.id, caregiver_id=cg.id, channel="line_loc", status=status, detail=detail))
 
     def _open_case(self, db: Session, dev: Device) -> Case | None:
@@ -420,7 +423,9 @@ class Engine:
         ok, detail = (False, "no notifier") if self.notifier is None else self.notifier.notify_case(db, case, cg, reminder)
         if not cg.line_user_id:
             ok, detail = False, "caregiver has no LINE binding"
-        db.add(Notification(case_id=case.id, caregiver_id=cg.id, status="sent" if ok else "failed", detail=detail))
+        # "queued" = handed to the outbox worker (app/outbox.py), which sets sent/failed when LINE has answered
+        db.add(Notification(case_id=case.id, caregiver_id=cg.id, status=detail if ok and detail == "queued" else "sent" if ok else "failed",
+                            detail=detail))
         self._event(db, case, "notified", caregiver=cg.full_name, step=step, ok=ok, detail=detail)
         return True
 

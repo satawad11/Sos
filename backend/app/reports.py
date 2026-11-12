@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from . import settings_store
 from .config import env
 from .gateways import _aware
-from .models import AuditLog, Case, Device, Gateway, Notification, utcnow
+from .models import Case, Device, Gateway, Notification, StateLog, utcnow
 
 MAX_DAYS = 400
 WEEKDAYS = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
@@ -27,7 +27,7 @@ def tz() -> ZoneInfo:
     return ZoneInfo(env.tz)
 
 
-def parse_range(month: str | None, frm: str | None, to: str | None) -> tuple[datetime, datetime, date, date]:
+def parse_range(month: str | None, frm: str | None, to: str | None, max_days: int | None = -1) -> tuple[datetime, datetime, date, date]:
     """Return (start_utc, end_utc_exclusive, first_day, last_day) for ?month=YYYY-MM or ?from=&to= (inclusive)."""
     try:
         if month:
@@ -43,7 +43,8 @@ def parse_range(month: str | None, frm: str | None, to: str | None) -> tuple[dat
         if isinstance(e, RangeError): raise
         raise RangeError("รูปแบบวันที่ไม่ถูกต้อง")
     if d2 < d1: raise RangeError("วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่ม")
-    if (d2 - d1).days + 1 > MAX_DAYS: raise RangeError(f"ช่วงเวลายาวเกิน {MAX_DAYS} วัน")
+    if max_days == -1: max_days = MAX_DAYS
+    if max_days is not None and (d2 - d1).days + 1 > max_days: raise RangeError(f"ช่วงเวลายาวเกิน {MAX_DAYS} วัน")
     z = tz()
     start = datetime(d1.year, d1.month, d1.day, tzinfo=z).astimezone(timezone.utc)
     end = (datetime(d2.year, d2.month, d2.day, tzinfo=z) + timedelta(days=1)).astimezone(timezone.utc)
@@ -74,7 +75,7 @@ def _cases(db: Session, start: datetime, end: datetime, tests=False) -> list[Cas
 
 
 def _windows(db: Session, on: str, off: str, end: datetime) -> dict[str, list[tuple[datetime, datetime | None]]]:
-    rows = (db.query(AuditLog).filter(AuditLog.action.in_((on, off)), AuditLog.at < end).order_by(AuditLog.at, AuditLog.id).all())
+    rows = (db.query(StateLog).filter(StateLog.action.in_((on, off)), StateLog.at < end).order_by(StateLog.at, StateLog.id).all())
     open_: dict[str, datetime] = {}; out: dict[str, list] = {}
     for r in rows:
         at = _aware(r.at)
@@ -98,8 +99,8 @@ def _overlap(lo: datetime, hi: datetime, wins, now: datetime) -> float:
 def _gateway_outages(db: Session, start: datetime, end: datetime) -> list[dict]:
     """Pair gateway_offline / gateway_online audit rows into outage episodes, clipped to [start, end).
     Time spent in maintenance (gateway_maint_on/off) is reported apart (maint_min), not as downtime."""
-    rows = (db.query(AuditLog).filter(AuditLog.action.in_(("gateway_offline", "gateway_online")), AuditLog.at < end)
-            .order_by(AuditLog.at, AuditLog.id).all())
+    rows = (db.query(StateLog).filter(StateLog.action.in_(("gateway_offline", "gateway_online")), StateLog.at < end)
+            .order_by(StateLog.at, StateLog.id).all())
     labels = {g.gateway_id: g.label for g in db.query(Gateway).all()}
     open_: dict[str, datetime] = {}
     eps: list[tuple[str, datetime, datetime | None]] = []

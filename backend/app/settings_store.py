@@ -23,21 +23,30 @@ DEFAULTS: dict[str, dict] = {
             "reporter_name": "", "reporter_title": "ผู้รายงาน", "approver_name": "", "approver_title": "ผู้อำนวยการ รพ.สต."},   # PDF report header/signers
     "frequent": {"week_threshold": 3, "month_threshold": 6, "count_false_alarm": True},   # "presses often": cases in the last 7 / 30 days (patients page)
     "security": {"mfa_enabled": False, "mfa_roles": ["admin"]},       # 2-step sign-in policy (off until an admin turns it on)
+    "monitoring": {"heartbeat_url": "", "interval_min": 5, "backup_max_age_h": 36},   # outgoing dead-man's-switch ping + backup age alarm (app/health.py)
+    "telemetry": {"keep_days": 400},                                    # device battery/signal history (sos_device_telemetry)
     "self_test": {"enabled": True, "remind_day": 1, "second_day": 15, "remind_time": "10:00", "confirm_line": True},   # monthly button test (app/selftest.py)
 }
 
 
 def get(db: Session, key: str) -> dict:
-    row = db.get(Setting, key)
+    # A saved setting stays in the session's identity map after the first read, so repeated calls cost nothing. A setting
+    # that was never saved has no row to cache, so remember "not there" for the life of this (short) session instead of
+    # asking the database again on every call — list endpoints call this once per device.
+    miss = db.info.setdefault("settings_miss", set())
+    row = None if key in miss else db.get(Setting, key)
     merged = dict(DEFAULTS[key])
     if row:
         merged.update(row.value)
+    else:
+        miss.add(key)
     return merged
 
 
 def put(db: Session, key: str, value: dict, actor: str) -> dict:
     if key not in DEFAULTS:
         raise KeyError(key)
+    db.info.get("settings_miss", set()).discard(key)
     row = db.get(Setting, key)
     if row:
         row.value, row.version, row.updated_at, row.updated_by = value, row.version + 1, utcnow(), actor
@@ -91,6 +100,7 @@ def device_link(db: Session, dev, now, cfg: dict | None = None, off_min: int | N
 
 
 def effective_device_cfg(db: Session, dev) -> dict:
-    cfg = {k: get(db, "device_defaults")[k] for k in CFG_FIELDS}
+    dflt = get(db, "device_defaults")
+    cfg = {k: dflt[k] for k in CFG_FIELDS}
     cfg.update(dev.config_override or {})
     return cfg

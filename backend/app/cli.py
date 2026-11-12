@@ -10,7 +10,7 @@ Every use is written to the audit log with actor "cli".
 """
 from __future__ import annotations
 import sys
-from .api import temp_password
+from .api_admin import temp_password
 from .auth import audit, hash_pw
 from .db import Base, SessionLocal, engine, ensure_columns
 from .models import User, utcnow
