@@ -37,6 +37,19 @@ class Hub:
 hub = Hub()
 
 
+class DashboardFiles(StaticFiles):
+    """The dashboard is index.html + app.css + js/*.js. They must always be the same release, so the browser is told to
+    check with the server every time (a cheap 304 when nothing changed). Fonts, icons and vendored libraries never change
+    under the same name and stay cacheable (the service worker keeps them too)."""
+    LONG = ("fonts/", "icons/", "vendor/")
+
+    async def get_response(self, path: str, scope):
+        resp = await super().get_response(path, scope)
+        if not path.replace("\\", "/").startswith(self.LONG):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 def bootstrap_admin():
     with SessionLocal() as db:
         if db.query(User).count() == 0:
@@ -125,6 +138,9 @@ async def lifespan(app: FastAPI):
 def create_app(with_lifespan: bool = True) -> FastAPI:
     app = FastAPI(title="SOS LoRa", lifespan=lifespan if with_lifespan else None)
     app.include_router(api.router)
+    from . import api_auth, api_devices, api_admin, api_line, api_ai, api_setup, api_app
+    for part in (api_auth, api_devices, api_admin, api_line, api_ai, api_setup, api_app):
+        app.include_router(part.router)        # the rest of /api, one router per area (see api.py)
     from . import csgate
     app.include_router(csgate.router)          # sign-in gate for the ChirpStack domain
     from . import dataapi
@@ -161,7 +177,7 @@ def create_app(with_lifespan: bool = True) -> FastAPI:
     import os
     static = os.environ.get("SOS_STATIC_DIR", "/app/static")
     if os.path.isdir(static):
-        app.mount("/", StaticFiles(directory=static, html=True), name="static")
+        app.mount("/", DashboardFiles(directory=static, html=True), name="static")
     return app
 
 

@@ -120,7 +120,7 @@ def test_timed_maintenance_survives_reboots_then_reports_overdue(env_, monkeypat
     eng, downs, notif, client, ids = env_
     _start(eng, ids)
     H = login(client)
-    import app.api as api_mod
+    import app.api_devices as api_mod      # the gateway endpoints read the clock from this module
     monkeypatch.setattr(api_mod, "utcnow", lambda: T0 + timedelta(minutes=2))
     with SessionLocal() as db:
         gid = _gw(db).id

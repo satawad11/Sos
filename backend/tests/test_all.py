@@ -1642,7 +1642,7 @@ def test_ai_gemini_config_and_anonymised_summary(env_, monkeypatch):
         def fake_post(url, headers=None, json=None, timeout=None):
             sent.update(url=url, headers=headers, body=json); return R()
         monkeypatch.setattr("app.ai.httpx.post", fake_post)
-        monkeypatch.setattr("app.api._ai_last", {"t": 0.0})
+        monkeypatch.setattr("app.api_ai._ai_last", {"t": 0.0})
         out = client.post("/api/reports/ai-summary?month=" + NOON_TUE.strftime("%Y-%m"), headers=hs)
         assert out.status_code == 200 and out.json()["text"].startswith("สรุป")
         prompt = sent["body"]["contents"][0]["parts"][0]["text"]
@@ -1653,10 +1653,10 @@ def test_ai_gemini_config_and_anonymised_summary(env_, monkeypatch):
         class R429:
             status_code = 429
             def json(s): return {"error": {"message": "quota"}}
-        monkeypatch.setattr("app.ai.httpx.post", lambda *a, **k: R429()); monkeypatch.setattr("app.api._ai_last", {"t": 0.0})
+        monkeypatch.setattr("app.ai.httpx.post", lambda *a, **k: R429()); monkeypatch.setattr("app.api_ai._ai_last", {"t": 0.0})
         assert client.post("/api/integrations/ai/test", headers=h).json()["ok"] is False
         # switched off by the admin
-        client.put("/api/integrations/ai", json={"enabled": False}, headers=h); monkeypatch.setattr("app.api._ai_last", {"t": 0.0})
+        client.put("/api/integrations/ai", json={"enabled": False}, headers=h); monkeypatch.setattr("app.api_ai._ai_last", {"t": 0.0})
         assert client.post("/api/reports/ai-summary?month=2026-11", headers=hs).status_code == 409
     finally:
         with SessionLocal() as db:
@@ -1699,7 +1699,7 @@ def test_ai_diagnose_gateways_and_devices_anonymous(env_, monkeypatch):
         assert client.get("/api/ai/status", headers=hv).json()["ready"] is True
         monkeypatch.setattr("app.ai.httpx.post", lambda url, headers=None, json=None, timeout=None: (sent.append(json), R())[1])
         def go(body):
-            monkeypatch.setattr("app.api._ai_last", {"t": 0.0}); return client.post("/api/ai/diagnose", json=body, headers=h)
+            monkeypatch.setattr("app.api_ai._ai_last", {"t": 0.0}); return client.post("/api/ai/diagnose", json=body, headers=h)
         r = go({"scope": "gateways"}); assert r.status_code == 200 and r.json()["text"].startswith("ภาพรวม") and r.json()["count"] >= 1
         r = go({"scope": "devices"}); assert r.status_code == 200
         for body in sent:
@@ -1711,7 +1711,7 @@ def test_ai_diagnose_gateways_and_devices_anonymous(env_, monkeypatch):
         assert go({"scope": "devices", "id": did}).json()["count"] == 1
         assert go({"scope": "gateways", "id": 99999}).status_code == 404
         assert go({"scope": "patients"}).status_code == 422
-        monkeypatch.setattr("app.api._ai_last", {"t": 0.0})
+        monkeypatch.setattr("app.api_ai._ai_last", {"t": 0.0})
         assert client.post("/api/ai/diagnose", json={"scope": "gateways"}, headers=hv).status_code == 403          # viewers cannot
     finally:
         with SessionLocal() as db: linecfg.save(db, "gemini", "")

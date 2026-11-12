@@ -158,3 +158,22 @@ def test_readiness(env_):
     chk = {c["key"]: c for c in r["checks"]}
     assert chk["caregiver"]["ok"] == 1 and chk["caregiver"]["total"] == 2 and chk["caregiver"]["critical"] is True
     assert r["caregivers_no_line"] == [{"id": ids["c"], "full_name": "ผอ.รพ.สต.", "in_use": False}]
+
+
+def test_dashboard_files_are_revalidated_and_complete(tmp_path, monkeypatch):
+    """index.html, app.css and js/*.js must come from the same release: no-cache on them, and every script the page names exists."""
+    import os, re
+    from fastapi.testclient import TestClient
+    dash = os.path.join(os.path.dirname(__file__), "..", "..", "dashboard")
+    monkeypatch.setenv("SOS_STATIC_DIR", dash)
+    from app.main import create_app
+    c = TestClient(create_app(with_lifespan=False))
+    r = c.get("/")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+    refs = re.findall(r'<script src="([^"]+)"', r.text) + re.findall(r'<link rel="stylesheet" href="([^"]+)"', r.text)
+    assert "js/core.js" in refs and "app.css" in refs
+    for ref in refs:
+        x = c.get("/" + ref)
+        assert x.status_code == 200 and x.headers["cache-control"] == "no-cache", ref
+    assert "no-cache" not in c.get("/icons/favicon.svg").headers.get("cache-control", "")
+    assert c.get("/healthz").status_code in (200, 503) and c.get("/api/me").status_code == 401     # the mount does not shadow the API
