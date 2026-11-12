@@ -232,6 +232,7 @@ class Engine:
         db.commit()
         self._pub(case, "case_new")
         self._notify_step(db, case, 0)
+        self._notify_central(db, case)
         return "created"
 
     REPEAT_QUIET_S = 60
@@ -241,6 +242,7 @@ class Engine:
         chain = self._chain(db, case)[: case.esc_step + 1]
         for i, _ in enumerate(chain):
             self._notify_step(db, case, i, reminder=True)
+        self._notify_central(db, case, reminder=True, skip=chain)
 
     def _test(self, db, dev, up, now) -> str:
         case = Case(device_id=dev.id, patient_id=dev.patient_id, alert_id=up.alert_id,
@@ -370,12 +372,13 @@ class Engine:
                       codec.encode_config(dev.config_ver, d["heartbeat_min"], d["poll_s"], d["buzzer"], d["hold_ms"]))
 
     # ---------- human actions ----------
-    def accept(self, db: Session, case_id: int, actor: str) -> Case:
+    def accept(self, db: Session, case_id: int, actor: str, cg_id: int | None = None) -> Case:
         case = db.get(Case, case_id)
         if case is None: raise LookupError("case not found")
         if case.state != "new":
             return case                      # idempotent: first acceptance wins
         case.state, case.accepted_at, case.accepted_by = "accepted", utcnow(), actor
+        case.accepted_cg_id = cg_id
         case.next_escalation_at = None
         self._event(db, case, "accepted", actor=actor)
         self._fresh_queue(case)
@@ -428,6 +431,31 @@ class Engine:
                             detail=detail))
         self._event(db, case, "notified", caregiver=cg.full_name, step=step, ok=ok, detail=detail)
         return True
+
+    def central(self, db: Session) -> list[Caregiver]:
+        return db.query(Caregiver).filter(Caregiver.is_central.is_(True), Caregiver.active.is_(True)).order_by(Caregiver.id).all()
+
+    def _notify_central(self, db: Session, case: Case, reminder: bool = False, skip: list | None = None) -> int:
+        """Central staff get every real alert at once, next to the patient's own caregiver (who is told by _notify_step).
+        Not for self-tests. Whoever the chain already told at this moment is not told twice."""
+        if case.is_test or self.notifier is None:
+            return 0
+        if skip is None:
+            skip = self._chain(db, case)[:1]
+        n = 0
+        for cg in self.central(db):
+            if cg in skip:
+                continue
+            ok, detail = self.notifier.notify_case(db, case, cg, reminder)
+            if not cg.line_user_id:
+                ok, detail = False, "caregiver has no LINE binding"
+            db.add(Notification(case_id=case.id, caregiver_id=cg.id, detail=detail,
+                                status=detail if ok and detail == "queued" else "sent" if ok else "failed"))
+            self._event(db, case, "notified", caregiver=cg.full_name, step="central", ok=ok, detail=detail)
+            n += 1
+        if n:
+            db.commit()
+        return n
 
     def tick(self, db: Session, now: datetime | None = None) -> int:
         """Run periodically (every ~5 s). Returns number of cases touched."""

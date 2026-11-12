@@ -541,3 +541,6 @@ tr.pri-critical>td{background:color-mix(in srgb,var(--p-critical) 8%,transparent
 .kvl{display:grid;grid-template-columns:minmax(150px,auto) 1fr;gap:6px 14px}.kvl dt{color:var(--mut)}.kvl dd{margin:0}
 #impt{width:100%;min-height:110px;font:13px/1.5 ui-monospace,monospace}
 .acts{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:270px;margin-left:auto}.acts .btn{margin:0}
+.rtb td,.rtb th{vertical-align:top}.rtb td:first-child{white-space:nowrap;width:1%}
+.optl{display:grid;gap:10px;margin:8px 0}.optl label{display:flex;gap:10px;align-items:flex-start}.optl input{margin-top:4px}.optl small{display:block;color:var(--mut);font-size:13px}
+.flags li.amb{border-left-color:var(--amb)}

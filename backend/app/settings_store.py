@@ -13,7 +13,7 @@ DEFAULTS: dict[str, dict] = {
     "device_defaults": {"heartbeat_min": 30, "poll_s": 10, "buzzer": 2, "hold_ms": 1500},
     "offline": {"device_offline_min": 90, "gateway_offline_min": 5},
     "system_alert": {"caregiver_ids": [], "repeat_min": 60, "gateway_line": True},   # who gets "gateway offline" LINE alerts; 0 = no reminders
-    "device_alert": {"enabled": True, "battery_low_pct": 20, "mains_grace_min": 10,   # LINE alert when a button goes quiet / low battery / mains lost
+    "device_alert": {"enabled": True, "to_caregiver": True, "battery_low_pct": 20, "mains_grace_min": 10,   # LINE alert when a button goes quiet / low battery / mains lost
                      "issue_repeat_h": 0, "quiet_night": True, "signal_alert": True},   # signal: weak radio link (app/netmon.py)       # battery/mains: 0 = no reminders; hold LINE 21:00–07:00
     "privacy": {"require_consent": True, "case_retention_days": 730, "audit_retention_days": 365,
                 "auto_purge": False, "line_detail": "full"},          # line_detail: full | minimal (name + village only)

@@ -21,6 +21,7 @@ class FakeNotifier:
         self.loc.append((case.id, cg.full_name, lat, lon, sats, home_m))
         return (False, "skipped: minimal privacy mode") if self.loc_skip else (True, "ok")
     def reply_text(self, tok, text): self.replies.append(text)
+    def reply_messages(self, tok, msgs): self.cards = getattr(self, 'cards', []) + msgs; self.replies.append(msgs[0]['altText'])
 
 
 @pytest.fixture()

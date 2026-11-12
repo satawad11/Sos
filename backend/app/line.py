@@ -47,6 +47,27 @@ def flex_for_case(case: Case, reminder: bool = False, detail: str = "full") -> d
     return {"type": "flex", "altText": f"{title}: {name}", "contents": contents}
 
 
+CLOSE_LABEL = {"resolved": "ช่วยเหลือแล้ว", "false_alarm": "แจ้งผิดพลาด"}
+
+
+def close_card(case: Case, head: str) -> dict:
+    """Shown after "รับเรื่อง": two buttons that close the case from LINE (postback close:<id>:<reason>)."""
+    name = case.patient.full_name if case.patient else f"เคส #{case.id}"
+    return {"type": "flex", "altText": f"{head} — ปิดเคส #{case.id} ได้จากข้อความนี้", "contents": {
+        "type": "bubble",
+        "body": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": [
+            {"type": "text", "text": head, "weight": "bold", "size": "md", "color": "#2E7D32", "wrap": True},
+            {"type": "text", "text": f"เคส #{case.id} · {name}", "size": "sm", "wrap": True},
+            {"type": "text", "text": "เมื่อดูแลผู้ป่วยเรียบร้อยแล้ว กดปุ่มด้านล่างเพื่อปิดเคส", "size": "sm", "color": "#666666", "wrap": True}]},
+        "footer": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": [
+            {"type": "button", "style": "primary", "color": "#1565C0",
+             "action": {"type": "postback", "label": "✅ ช่วยเหลือแล้ว ปิดเคส", "data": f"close:{case.id}:resolved",
+                        "displayText": f"ปิดเคส #{case.id}: ช่วยเหลือแล้ว"}},
+            {"type": "button", "style": "secondary",
+             "action": {"type": "postback", "label": "แจ้งผิดพลาด / กดโดยไม่ตั้งใจ", "data": f"close:{case.id}:false_alarm",
+                        "displayText": f"ปิดเคส #{case.id}: แจ้งผิดพลาด"}}]}}}
+
+
 class LineNotifier:
     def __init__(self, token: str | None = None, client: httpx.Client | None = None):
         self._token = token
@@ -121,6 +142,10 @@ class LineNotifier:
         except httpx.HTTPError:
             return None
         return True if r.status_code == 200 else False if r.status_code == 404 else None
+
+    def reply_messages(self, reply_token: str, messages: list[dict]):
+        """Reply with ready-made message objects (replies are free of charge and need the token from the webhook event)."""
+        self._post(REPLY_URL, {"replyToken": reply_token, "messages": messages[:5]})
 
     def reply_text(self, reply_token: str, text: str):
         self._post(REPLY_URL, {"replyToken": reply_token, "messages": [{"type": "text", "text": text}]})

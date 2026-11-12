@@ -160,9 +160,21 @@ class NotifyWorker:
             cg = db.get(Caregiver, row.caregiver_id)
             db.add(CaseEvent(case_id=case.id, kind="notify_failed", actor="system",
                              detail={"caregiver": cg.full_name if cg else "", "attempts": row.attempts, "detail": detail[:200]}))
-            if case.state == "new" and not (row.payload or {}).get("reminder"):
+            if case.state == "new" and not (row.payload or {}).get("reminder") and self._in_chain(db, case, cg):
                 case.next_escalation_at = now          # nobody was reached: move on to the next person at the next tick
             log.error("LINE alert for case %s could not be delivered to caregiver %s: %s", case.id, row.caregiver_id, detail)
+
+    @staticmethod
+    def _in_chain(db: Session, case: Case, cg: Caregiver | None) -> bool:
+        """Central staff are told next to the chain, not as a step of it: failing to reach one of them must not skip the
+        patient's own caregiver's waiting time. (Someone who is central AND in this patient's chain still counts.)"""
+        if cg is None or not cg.is_central:
+            return True
+        from . import settings_store
+        from .models import Assignment
+        if cg.id == settings_store.get(db, "escalation").get("final_caregiver_id"):
+            return True
+        return bool(case.patient_id) and db.query(Assignment).filter_by(patient_id=case.patient_id, caregiver_id=cg.id).first() is not None
 
     # ---- status / housekeeping ----
     def stats(self, db: Session, now: datetime | None = None) -> dict:

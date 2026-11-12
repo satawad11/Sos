@@ -198,7 +198,7 @@ const loadSettings=guard(async()=>{
     ${fld("ผู้รับสุดท้าย","คนที่จะถูกแจ้งเป็นคนสุดท้ายถ้าทุกคนไม่ตอบ (แนะนำให้เลือกเสมอ)",`<select id="fin" ${dis}><option value="">- ไม่ระบุ -</option>${cgs.map(c=>`<option value="${c.id}" ${c.id===es.final_caregiver_id?"selected":""}>${esc(c.full_name)}</option>`).join("")}</select>`)}</div>
   </div>
   <div class="sec" data-sec="notify" ${setSec==="notify"?"":"hidden"}>
-   <div class="card">${head("alert","ผู้รับแจ้งเตือนระบบ","คนที่ได้รับ LINE เมื่อเกตเวย์ขาดการเชื่อมต่อ และเมื่อปุ่มผู้ป่วยเงียบหาย/แบตต่ำ/ไฟดับ")}
+   <div class="card">${head("alert","ผู้รับแจ้งเตือนระบบ (ผู้ดูแลระบบ)","คนที่ได้รับ LINE เรื่องเกตเวย์ เซิร์ฟเวอร์ และการสำรองข้อมูล · ปุ่มผู้ป่วยเงียบหาย/แบตต่ำ/ไฟดับ จะแจ้งคนกลุ่มนี้และ อสม. ลำดับ 1 ของผู้ป่วยรายนั้น · ตั้งได้ที่หน้า อสม./ผู้ดูแล เช่นกัน")}
     ${fld("เลือกผู้รับ","ต้องผูก LINE แล้วจึงจะได้รับ · ถ้าไม่เลือกใครเลย ระบบจะแจ้ง “ผู้รับสุดท้าย” แทน",`<div class="row">${active.map(c=>`<label class="chip" title="${c.line_bound?"":"ยังไม่ผูก LINE"}"><input type="checkbox" class="sa" value="${c.id}" ${sa.caregiver_ids.includes(c.id)?"checked":""} ${dis}><span>${esc(c.full_name)}${c.line_bound?"":" ⚠"}</span></label>`).join("")||'<span class="mut">ยังไม่มี อสม./ผู้ดูแล — เพิ่มได้ที่เมนู อสม./ผู้ดูแล</span>'}</div>`)}
     ${fld("แจ้งเตือนเกตเวย์ทาง LINE","ปิด = ไม่ส่ง LINE เรื่องเกตเวย์ขาด/กลับมาเลย (ยังแสดงบนแดชบอร์ด) · ถ้าเสียแค่บางเครื่อง ให้ปิดที่หน้าเกตเวย์เครื่องนั้นแทน",`<label class="sw"><input type="checkbox" id="sgl" ${sa.gateway_line!==false?"checked":""} ${dis}><i></i><span id="sglt">${sa.gateway_line!==false?"เปิด":"ปิด"}</span></label>`)}
     ${fld("เตือนซ้ำทุก","ถ้าปัญหายังไม่หาย · ใส่ 0 = ไม่เตือนซ้ำ (ช่วงที่ใช้ได้ 10–1440 นาที)",`${num("sar",sa.repeat_min,0,1440,"นาที")}<div class="hint" id="sarh"></div>${chips("sar",[[0,"ไม่เตือนซ้ำ"],[30,"30 นาที"],[60,"1 ชม."],[120,"2 ชม."]])}`)}
@@ -209,6 +209,7 @@ const loadSettings=guard(async()=>{
     ${fld("เตือนเมื่อไฟบ้านดับนานกว่า","ไฟกระพริบสั้น ๆ จะไม่เตือน และถ้าไฟติด ๆ ดับ ๆ ภายใน 30 นาทีนับเป็นครั้งเดียว (ช่วง 1–240 นาที)",num("dam",da.mains_grace_min,1,240,"นาที"))}
     ${fld("เตือนซ้ำเรื่องแบต/ไฟดับ","ปกติแจ้งครั้งเดียวต่อเหตุการณ์ (แบตแจ้งอีกครั้งเมื่อต่ำกว่า 10%) · ปุ่มเงียบหายยังเตือนซ้ำตาม 'เตือนซ้ำทุก' ด้านบน",`${num("dar",da.issue_repeat_h??0,0,72,"ชม.")}${chips("dar",[[0,"ไม่เตือนซ้ำ"],[6,"6 ชม."],[12,"12 ชม."],[24,"วันละครั้ง"]])}`)}
     ${fld("งดส่งตอนกลางคืน","เรื่องแบต/ไฟดับช่วง 21:00–07:00 รอส่งตอนเช้า ถ้าหายก่อนเช้าจะไม่ส่งเลย · ปุ่มเงียบหายยังส่งทันที",`<label class="sw"><input type="checkbox" id="daq" ${da.quiet_night??true?"checked":""} ${dis}><i></i><span id="daqt">${da.quiet_night??true?"เปิด":"ปิด"}</span></label>`)}</div>
+    ${fld("แจ้ง อสม. ของผู้ป่วยด้วย","เปิด = ปัญหาของปุ่ม (เงียบหาย แบตต่ำ ไฟบ้านดับ) ส่งถึง อสม. ลำดับ 1 ของผู้ป่วยรายนั้นด้วย เพราะอยู่ใกล้และไปดูได้เร็ว · ปิด = ส่งถึงผู้รับแจ้งเตือนระบบ (ผู้ดูแลระบบ) เท่านั้น",`<label class="sw"><input type="checkbox" id="dac" ${da.to_caregiver??true?"checked":""} ${dis}><i></i><span>${da.to_caregiver??true?"เปิด":"ปิด"}</span></label>`)}
     ${fld("เตือนเมื่อสัญญาณวิทยุอ่อนมาก","ปุ่มยังส่งได้แต่ใกล้หลุด (margin ต่ำกว่า 3 dB หรือข้อความหาย ≥30%) — แจ้งครั้งเดียวต่อเหตุการณ์ ตัดสินหลังได้รับอย่างน้อย 8 ข้อความ",`<label class="sw"><input type="checkbox" id="das" ${da.signal_alert??true?"checked":""} ${dis}><i></i><span>${da.signal_alert??true?"เปิด":"ปิด"}</span></label>`)}
   </div>
   <div class="sec" data-sec="device" ${setSec==="device"?"":"hidden"}>
@@ -253,7 +254,7 @@ const loadSettings=guard(async()=>{
     office_hours:{days:[...document.querySelectorAll(".dy:checked")].map(x=>+x.value),start:$v("st"),end:$v("en")},
     escalation:{escalate_after_s:N("ea"),overdue_after_s:N("ov"),final_caregiver_id:$v("fin")?+$v("fin"):null,max_rounds:1},
     system_alert:{caregiver_ids:[...document.querySelectorAll(".sa:checked")].map(x=>+x.value),repeat_min:N("sar"),gateway_line:$("#sgl").checked},
-    device_alert:{enabled:$("#dae").checked,battery_low_pct:N("dab"),mains_grace_min:N("dam"),issue_repeat_h:N("dar"),quiet_night:$("#daq").checked,signal_alert:$("#das").checked},
+    device_alert:{enabled:$("#dae").checked,battery_low_pct:N("dab"),mains_grace_min:N("dam"),issue_repeat_h:N("dar"),quiet_night:$("#daq").checked,signal_alert:$("#das").checked,to_caregiver:$("#dac").checked},
     device_defaults:{heartbeat_min:N("hb"),poll_s:N("po"),buzzer:N("bz"),hold_ms:Math.round(N("ho")*1000)},
     offline:{device_offline_min:N("do"),gateway_offline_min:N("go")}});
   const NAMES={office_hours:"เวลาทำการ",escalation:"การแจ้งต่อ",system_alert:"ผู้รับแจ้งเตือน",device_alert:"แจ้งเตือนปุ่มผู้ป่วย",device_defaults:"ค่าเริ่มต้นปุ่ม",offline:"ตรวจจับออฟไลน์"};

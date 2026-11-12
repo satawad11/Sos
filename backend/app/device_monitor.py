@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import settings_store
 from .gateways import GatewayMonitor, _aware, _mins, _hhmm, classify
 from .config import env
-from .models import AuditLog, Device, Gateway, utcnow
+from .models import Assignment, AuditLog, Device, Gateway, utcnow
 
 log = logging.getLogger("sos.devwatch")
 BATT_HYSTERESIS = 10          # battery alert clears only when it is back at (threshold + 10)%
@@ -80,8 +80,16 @@ class DeviceMonitor:
         h = now.astimezone(ZoneInfo(env.tz)).hour
         return h >= NIGHT[0] or h < NIGHT[1]
 
+    @staticmethod
+    def _own_caregiver(db: Session, d: Device) -> list:
+        """The patient's first caregiver: lives nearby and can look at the plug or the battery long before an admin can."""
+        if not d.patient_id or not settings_store.get(db, "device_alert").get("to_caregiver", True):
+            return []                                  # switched off = button problems go to the system-alert recipients only
+        a = db.query(Assignment).filter_by(patient_id=d.patient_id).order_by(Assignment.priority).first()
+        return [a.caregiver] if a and a.caregiver else []
+
     def _send(self, db: Session, d: Device, action: str, text: str, line: bool = True):
-        results = self.gw.send_system(db, text) if line else []
+        results = self.gw.send_system(db, text, extra=self._own_caregiver(db, d)) if line else []
         if line and not results:
             log.warning("%s for %s but nobody is configured to receive system alerts", action, d.dev_eui)
         db.add(AuditLog(actor="system", action=action, target=d.dev_eui,

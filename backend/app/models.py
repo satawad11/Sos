@@ -102,6 +102,9 @@ class Caregiver(Base):
     phone: Mapped[str] = mapped_column(String(32), default="")
     line_user_id: Mapped[str] = mapped_column(String(64), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # central staff (เจ้าหน้าที่ส่วนกลาง): gets every patient alert on LINE together with the patient's own caregiver, and may
+    # close any case from LINE. Who gets SYSTEM alerts (the admins) is the system_alert.caregiver_ids setting, not this flag.
+    is_central: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
 
 
 class Assignment(Base):
@@ -127,6 +130,7 @@ class Case(Base):
     created_at: Mapped[datetime] = _dt(default=utcnow, index=True)
     accepted_at: Mapped[datetime | None] = _dt(nullable=True)
     accepted_by: Mapped[str] = mapped_column(String(128), default="")
+    accepted_cg_id: Mapped[int | None] = mapped_column(Integer, nullable=True)   # the caregiver who accepted from LINE (may close it there)
     closed_at: Mapped[datetime | None] = _dt(nullable=True)
     close_reason: Mapped[str] = mapped_column(String(32), default="")  # resolved|false_alarm
     note: Mapped[str] = mapped_column(Text, default="")
