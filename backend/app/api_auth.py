@@ -3,6 +3,7 @@ Split out of api.py; shared helpers and the engine handle still live there."""
 from __future__ import annotations
 from fastapi import APIRouter
 from . import mfa
+from . import routing
 from .auth import audit, check_pw, current_user, hash_pw, make_mfa_ticket, make_token, password_problem, user_from_mfa_ticket
 from .db import get_db
 from .engine import aware
@@ -11,7 +12,7 @@ from datetime import timedelta
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from .api import iso
+from .api import get_engine, iso
 
 router = APIRouter(prefix="/api")
 
@@ -152,3 +153,41 @@ def change_my_password(b: PasswordChangeIn, db: Session = Depends(get_db), u: Us
     u.token_ver = (u.token_ver or 0) + 1                 # every other session of this user is logged out
     audit(db, u.username, "password_change"); db.commit()
     return {"ok": True, "token": make_token(u)}
+
+
+# ---------------- my own LINE alerts (app/routing.py) ----------------
+class MyLineIn(BaseModel):
+    system: bool | None = None
+    device: bool | None = None
+    cases: str | None = None          # off | overdue | all
+
+
+@router.get("/me/line")
+def my_line(db: Session = Depends(get_db), u: User = Depends(current_user)):
+    return routing.state(db, u)
+
+
+@router.put("/me/line")
+def my_line_put(b: MyLineIn, db: Session = Depends(get_db), u: User = Depends(current_user)):
+    try:
+        routing.set_prefs(db, u, b.model_dump(), u.username)
+    except routing.RoutingError as e:
+        raise HTTPException(403 if "สิทธิ์" in str(e) else 422, str(e))
+    audit(db, u.username, "line_alerts_set", u.username, **{k: v for k, v in b.model_dump().items() if v is not None}); db.commit()
+    return routing.state(db, u)
+
+
+@router.post("/me/line/bind-code")
+def my_line_bind(db: Session = Depends(get_db), u: User = Depends(current_user), eng=Depends(get_engine)):
+    if not routing.ROLE_ALLOW.get(u.role):
+        raise HTTPException(403, "บทบาทนี้ไม่รับการแจ้งเตือนทาง LINE")
+    from .api import make_bind_code
+    return make_bind_code(db, eng, routing.contact(db, u, create=True), u.username)
+
+
+@router.post("/me/line/unbind")
+def my_line_unbind(db: Session = Depends(get_db), u: User = Depends(current_user)):
+    cg = routing.contact(db, u)
+    if cg is not None:
+        cg.line_user_id = ""; audit(db, u.username, "line_unbind", str(cg.id)); db.commit()
+    return routing.state(db, u)

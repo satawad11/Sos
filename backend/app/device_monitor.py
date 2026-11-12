@@ -23,7 +23,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
-from . import settings_store
+from . import routing, settings_store
 from .gateways import GatewayMonitor, _aware, _mins, _hhmm, classify
 from .config import env
 from .models import Assignment, AuditLog, Device, Gateway, utcnow
@@ -89,7 +89,8 @@ class DeviceMonitor:
         return [a.caregiver] if a and a.caregiver else []
 
     def _send(self, db: Session, d: Device, action: str, text: str, line: bool = True):
-        results = self.gw.send_system(db, text, extra=self._own_caregiver(db, d)) if line else []
+        results = (self.gw.send_system(db, text, to=routing.device_recipients(db, self.gw.recipients),
+                                       extra=self._own_caregiver(db, d)) if line else [])
         if line and not results:
             log.warning("%s for %s but nobody is configured to receive system alerts", action, d.dev_eui)
         db.add(AuditLog(actor="system", action=action, target=d.dev_eui,

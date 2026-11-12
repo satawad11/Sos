@@ -365,6 +365,7 @@ class CaregiverIn(BaseModel):
     active: bool = True
     is_central: bool | None = None       # เจ้าหน้าที่ส่วนกลาง: every patient alert + may close any case from LINE
     system_alert: bool | None = None     # ผู้ดูแลระบบ: gets the system alerts (stored in the system_alert setting)
+    alert_device: bool | None = None     # gets every button problem (silent / battery / mains)
     # None = leave as it is. Both decide who is told what, so only an admin may change them.
 
 
@@ -376,7 +377,8 @@ def cg_dict(c: Caregiver, sys_ids: list[int] | None = None, db: Session | None =
     if sys_ids is None:
         sys_ids = system_alert_ids(db) if db is not None else []
     return {"id": c.id, "full_name": c.full_name, "role": c.role, "phone": c.phone, "active": c.active,
-            "line_bound": bool(c.line_user_id), "is_central": bool(c.is_central), "system_alert": c.id in sys_ids}
+            "line_bound": bool(c.line_user_id), "is_central": bool(c.is_central), "system_alert": c.id in sys_ids,
+            "alert_device": bool(c.alert_device), "alert_overdue": bool(c.alert_overdue), "user_id": c.user_id}
 
 
 def _cg_routing(db: Session, u, c: Caregiver, b: CaregiverIn) -> None:
@@ -384,13 +386,19 @@ def _cg_routing(db: Session, u, c: Caregiver, b: CaregiverIn) -> None:
     sys_ids = system_alert_ids(db)
     want_c = bool(c.is_central) if b.is_central is None else b.is_central
     want_s = (c.id in sys_ids) if b.system_alert is None else b.system_alert
-    if want_c == bool(c.is_central) and want_s == (c.id in sys_ids):
+    want_d = bool(c.alert_device) if b.alert_device is None else b.alert_device
+    if want_c == bool(c.is_central) and want_s == (c.id in sys_ids) and want_d == bool(c.alert_device):
         return
     if u.role != "admin":
         raise HTTPException(403, "เฉพาะผู้ดูแลระบบที่กำหนดผู้รับแจ้งเตือนระบบ/เจ้าหน้าที่ส่วนกลางได้")
     if want_c != bool(c.is_central):
         c.is_central = want_c
         audit(db, u.username, "caregiver_central_on" if want_c else "caregiver_central_off", str(c.id))
+    if want_d != bool(c.alert_device):
+        c.alert_device = want_d
+        audit(db, u.username, "caregiver_device_alert_on" if want_d else "caregiver_device_alert_off", str(c.id))
+    if want_c:
+        c.alert_overdue = False                           # "every alert" already includes the overdue ones
     if want_s != (c.id in sys_ids):
         cur = settings_store.get(db, "system_alert")
         ids = sorted(set(sys_ids) | {c.id}) if want_s else [i for i in sys_ids if i != c.id]
@@ -423,7 +431,7 @@ def patient_statistics(pid: int, db: Session = Depends(get_db), u=Depends(curren
 
 @router.post("/caregivers")
 def add_cg(b: CaregiverIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
-    c = Caregiver(**b.model_dump(exclude={"is_central", "system_alert"})); db.add(c); db.flush()
+    c = Caregiver(**b.model_dump(exclude={"is_central", "system_alert", "alert_device"})); db.add(c); db.flush()
     _cg_routing(db, u, c, b)
     audit(db, u.username, "caregiver_create", str(c.id)); db.commit()
     return cg_dict(c, db=db)
@@ -434,7 +442,7 @@ def edit_cg(cid: int, b: CaregiverIn, db: Session = Depends(get_db), u=Depends(s
     c = db.get(Caregiver, cid)
     if not c: raise HTTPException(404)
     _cg_routing(db, u, c, b)
-    for k, v in b.model_dump(exclude={"is_central", "system_alert"}).items(): setattr(c, k, v)
+    for k, v in b.model_dump(exclude={"is_central", "system_alert", "alert_device"}).items(): setattr(c, k, v)
     audit(db, u.username, "caregiver_update", str(cid)); db.commit()
     return cg_dict(c, db=db)
 
@@ -464,9 +472,15 @@ BIND_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 def bind_code(cid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin), eng=Depends(get_engine)):
     cg = db.get(Caregiver, cid)
     if not cg: raise HTTPException(404)
+    return make_bind_code(db, eng, cg, u.username)
+
+
+def make_bind_code(db: Session, eng, cg: Caregiver, actor: str) -> dict:
+    """A one-time code (30 min) that ties a LINE account to this recipient. Also used for a user's own contact (/me/line)."""
+    cid = cg.id
     code = "".join(secrets.choice(BIND_ALPHABET) for _ in range(8))
     db.add(BindCode(code=code, caregiver_id=cid, expires_at=utcnow() + timedelta(minutes=30)))
-    audit(db, u.username, "bindcode_create", str(cid)); db.commit()
+    audit(db, actor, "bindcode_create", str(cid)); db.commit()
     # One QR for the caregiver's phone: LINE opens a chat with our Official Account with the code already typed
     # (https://line.me/R/oaMessage/<basic id>/?<text>), so binding is "scan, then tap send".
     info = getattr(getattr(eng, "notifier", None), "bot_info", lambda: None)()

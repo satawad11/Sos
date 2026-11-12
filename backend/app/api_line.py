@@ -132,6 +132,10 @@ async def line_webhook(request: Request, db: Session = Depends(get_db), eng=Depe
                 cg.line_user_id, bc.used = uid, True
                 audit(db, "line", "line_bind", str(cg.id)); db.commit()
                 friend = getattr(notifier, "is_friend", lambda _u: None)(uid)
+                if cg.user_id:
+                    reply(f"ผูกบัญชีสำเร็จ: {cg.full_name}\nคุณจะได้รับการแจ้งเตือนตามที่เลือกไว้ในหน้า \"บัญชีของฉัน\" ของแดชบอร์ด"
+                          + ("\n\n⚠️ กรุณากด \"เพิ่มเพื่อน\" บัญชีนี้ด้วย ไม่เช่นนั้นจะไม่ได้รับข้อความ" if friend is False else ""))
+                    continue
                 reply(f"ผูกบัญชีสำเร็จ: {cg.full_name}\nเมื่อผู้ป่วยกดปุ่มแจ้งเหตุ ระบบจะส่งข้อความมาที่แชทนี้ พร้อมปุ่ม \"รับเรื่อง\""
                       + ("\n\n⚠️ กรุณากด \"เพิ่มเพื่อน\" บัญชีนี้ด้วย ไม่เช่นนั้นจะไม่ได้รับแจ้งเหตุ" if friend is False else ""))
             elif looks_like_code:

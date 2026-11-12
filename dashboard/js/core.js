@@ -107,14 +107,14 @@ function sosPopup(id,c){sosQ.set(+id,c);let d=$("#sos");
   $("#sosgo").onclick=()=>{sosClose();openCaseAfter=fid;page="cases";render();scrollTo(0,0)};$("#sosx").onclick=()=>{sosClose();if(SND.timer)alarmMute(2)};
   if(!d.open){d.showModal();$("#sosgo").focus()}}
 // LINE bind dialog: one QR that opens the OA chat with the code typed (scan → tap send), the code for typing by hand
-function bindHTML(r){const oa=r.oa;
+function bindHTML(r,self){const oa=r.oa,w=self?"":"ให้ อสม. ";
   return `${oa?`<div class="bindq"><div class="qr">${oa.qr_svg}</div><ol>
-      <li>ให้ อสม. เปิดกล้องมือถือหรือ LINE แล้ว<b>สแกน QR นี้</b></li>
+      <li>${w}เปิดกล้องมือถือหรือ LINE แล้ว<b>สแกน QR นี้</b></li>
       <li>LINE จะเปิดแชทกับ <b>${esc(oa.name||oa.basic_id)}</b> พร้อมรหัสที่พิมพ์ไว้แล้ว → กด <b>ส่ง</b></li>
-      <li>กด <b>เพิ่มเพื่อน</b> ด้วย (ถ้ายังไม่ได้เพิ่ม) ไม่เช่นนั้นจะไม่ได้รับแจ้งเหตุ</li></ol></div>
+      <li>กด <b>เพิ่มเพื่อน</b> ด้วย (ถ้ายังไม่ได้เพิ่ม) ไม่เช่นนั้นจะไม่ได้รับข้อความ</li></ol></div>
     <p class="mut">ถ้าสแกนไม่ได้: เพิ่มเพื่อน <a href="${esc(oa.add_url)}" target="_blank" rel="noopener">${esc(oa.basic_id)}</a> แล้วพิมพ์รหัสนี้ส่งในแชท</p>`
-   :`<p>ให้ อสม. เพิ่มเพื่อนบัญชี LINE OA ของ รพ.สต. แล้วพิมพ์รหัสนี้ส่งในแชท</p>`}
-   <div class="bigcode">${esc(r.code)}</div><p class="mut">ใช้ได้ ${esc(r.expires_minutes)} นาที ครั้งเดียว · ผูกสำเร็จแล้ว อสม. จะได้ข้อความ "ผูกบัญชีสำเร็จ" และรายชื่อจะขึ้น ✅</p>`}
+   :`<p>${w}เพิ่มเพื่อนบัญชี LINE OA ของ รพ.สต. แล้วพิมพ์รหัสนี้ส่งในแชท</p>`}
+   <div class="bigcode">${esc(r.code)}</div><p class="mut">ใช้ได้ ${esc(r.expires_minutes)} นาที ครั้งเดียว · ผูกสำเร็จแล้ว${self?"คุณ":" อสม. "}จะได้ข้อความ "ผูกบัญชีสำเร็จ"${self?" ใน LINE":" และรายชื่อจะขึ้น ✅"}</p>`}
 function sosDrop(id){if(!sosQ.delete(+id))return;if(!sosQ.size)sosClose();else{const [i,c]=[...sosQ.entries()].pop();sosQ.delete(i);sosPopup(i,c)}}
 function sosClose(){sosQ.clear();const d=$("#sos");if(d?.open)d.close()}
 

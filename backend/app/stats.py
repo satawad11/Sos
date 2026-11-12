@@ -113,7 +113,7 @@ def caregiver_load(db: Session, role: str = "staff", now: datetime | None = None
     with_pat = [c for c in active if by[c.id]["n_patients"]]
     loads = [by[c.id]["n_patients"] for c in with_pat]
     summary = {"caregivers": len(cgs), "active": len(active), "line_bound": sum(bool(c.line_user_id) for c in active),
-               "with_patients": len(with_pat), "without_patients": len(active) - len(with_pat),
+               "with_patients": len(with_pat), "without_patients": sum(1 for c in active if not by[c.id]["n_patients"] and not c.user_id),
                "patients": len(live), "patients_covered": len(covered & set(live)), "patients_uncovered": len(set(live) - covered),
                "avg_per_caregiver": round(sum(loads) / len(loads), 1) if loads else 0, "max_per_caregiver": max(loads, default=0),
                "uncovered": [{"id": p.id, "full_name": p.full_name, "village": p.village} for p in live.values() if p.id not in covered]}
@@ -121,5 +121,6 @@ def caregiver_load(db: Session, role: str = "staff", now: datetime | None = None
     central, admins = [c for c in active if c.is_central], [c for c in active if c.id in sys_ids]
     summary["device_to_caregiver"] = bool(settings_store.get(db, "device_alert").get("to_caregiver", True))
     summary.update({"central": len(central), "central_line": sum(bool(c.line_user_id) for c in central),
-                    "system_admins": len(admins), "system_admins_line": sum(bool(c.line_user_id) for c in admins)})
+                    "system_admins": len(admins), "system_admins_line": sum(bool(c.line_user_id) for c in admins),
+                    "device_alert": sum(bool(c.alert_device) for c in active), "overdue": sum(bool(c.alert_overdue) for c in active)})
     return {"by_id": by, "summary": summary}

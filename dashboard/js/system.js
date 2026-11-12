@@ -123,16 +123,39 @@ function showBackupCodes(codes,first){
   $("#bcp").onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(txt).then(()=>toast("คัดลอกแล้ว"));
   $("#bdl").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/plain"}));a.download="sos-backup-codes.txt";a.click()};
   $("#bok").onchange=e=>{$("#bgo").disabled=!e.target.checked};$("#bgo").onclick=()=>{page="account";render()}}
+/* ---- LINE alerts for dashboard users: each person binds their own LINE and picks what to be told (backend app/routing.py) ---- */
+const LAC={off:["ไม่รับ","ยังเห็นเคสบนแดชบอร์ดและได้ยินเสียงเตือนตามปกติ"],overdue:["เฉพาะเคสที่ยังไม่มีคนรับเรื่อง","ส่งเมื่อเลยเวลารับเรื่องแล้วยังไม่มีใครกดรับ — รบกวนน้อยที่สุด"],all:["ทุกเคส ตั้งแต่กดปุ่มครั้งแรก","ได้รับพร้อม อสม. ของผู้ป่วย และปิดเคสใดก็ได้ผ่าน LINE (เจ้าหน้าที่ส่วนกลาง)"]};
+function lineAlertForm(st,p){const al=st.allowed,pr=st.prefs;
+  return `<div class="optl">${al.includes("cases")?`<div><b>🚨 แจ้งเหตุจากผู้ป่วย</b><div class="optl" style="margin:6px 0 0 4px">${Object.entries(LAC).map(([k,v])=>`<label><input type="radio" name="${p}c" value="${k}" ${pr.cases===k?"checked":""}> <span>${v[0]}<small>${v[1]}</small></span></label>`).join("")}</div></div>`:""}
+   ${al.includes("device")?`<label><input type="checkbox" id="${p}d" ${pr.device?"checked":""}> <span><b>🔋 ปัญหาของปุ่มผู้ป่วย</b><small>ปุ่มเงียบหาย · แบตต่ำ · ไฟบ้านดับ (ทุกเครื่อง)</small></span></label>`:""}
+   ${al.includes("system")?`<label><input type="checkbox" id="${p}s" ${pr.system?"checked":""}> <span><b>📡 ระบบ</b><small>เกตเวย์ขาดการเชื่อมต่อ · เซิร์ฟเวอร์ · การสำรองข้อมูล (เฉพาะผู้ดูแลระบบ)</small></span></label>`:""}</div>`}
+function lineAlertRead(st,p){const o={};if(st.allowed.includes("cases"))o.cases=document.querySelector(`input[name="${p}c"]:checked`)?.value||"off";
+  if(st.allowed.includes("device"))o.device=$("#"+p+"d").checked;if(st.allowed.includes("system"))o.system=$("#"+p+"s").checked;return o}
+const lineAlertOn=pr=>pr.system||pr.device||pr.cases!=="off";
+function lineAlertPills(l){const pr=l.prefs,a=[];if(pr.cases==="all")a.push('<span class="pill grn">ทุกเคส</span>');if(pr.cases==="overdue")a.push('<span class="pill grn">เคสที่ไม่มีคนรับ</span>');
+  if(pr.device)a.push('<span class="pill amb">ปุ่มผู้ป่วย</span>');if(pr.system)a.push('<span class="pill amb">ระบบ</span>');return a.join(" ")}
+function lineCard(st){
+  if(!st.allowed.length)return `<div class="card"><h3>💬 รับการแจ้งเตือนทาง LINE</h3><p class="mut">บัญชีแบบ "ดูอย่างเดียว" ไม่รับการแจ้งเตือนทาง LINE</p></div>`;
+  return `<div class="card"><h3>💬 รับการแจ้งเตือนทาง LINE</h3>
+    <div class="row">${st.bound?'<span class="ok">✅ ผูก LINE ของฉันแล้ว</span><button class="btn" id="lun">ยกเลิกผูก</button><button class="btn" id="lbd">ผูกใหม่ (เปลี่ยนเครื่อง/บัญชี)</button>':'<span class="bad">❌ ยังไม่ได้ผูก LINE</span><button class="btn p" id="lbd">ผูก LINE ของฉัน</button>'}</div>
+    ${!st.bound&&lineAlertOn(st.prefs)?'<div class="warn">เลือกรับการแจ้งเตือนไว้แล้ว แต่ยังไม่ได้ผูก LINE — จะยังไม่ได้รับข้อความ</div>':""}
+    <p class="mut" style="margin:10px 0 4px">เลือกเฉพาะเรื่องที่ต้องการ เพื่อไม่ให้ข้อความมากเกินไป (เปลี่ยนได้ทุกเมื่อ)</p>${lineAlertForm(st,"ml")}
+    <div class="row"><button class="btn p" id="lsv">บันทึกการแจ้งเตือน</button></div>
+    <p class="mut">ถ้าคุณถูกกำหนดเป็นผู้ดูแลของผู้ป่วยรายใดในหน้าผู้ป่วย จะได้รับแจ้งเหตุของรายนั้นเสมอ ไม่ขึ้นกับตัวเลือกนี้</p></div>`}
+function bindLineCard(st){
+  if($("#lbd"))$("#lbd").onclick=guard(async()=>{const r=await api("/me/line/bind-code",{method:"POST"});await dlg({icon:"integrations",title:"ผูก LINE ของฉัน",html:bindHTML(r,true),ok:"ผูกเสร็จแล้ว",cancel:false});loadAccount()});
+  if($("#lun"))$("#lun").onclick=guard(async()=>{if(!await ask("ยกเลิกการผูก LINE ของฉัน?\nจะไม่ได้รับการแจ้งเตือนทาง LINE จนกว่าจะผูกใหม่"))return;await api("/me/line/unbind",{method:"POST"});toast("ยกเลิกผูกแล้ว");loadAccount()});
+  if($("#lsv"))$("#lsv").onclick=guard(async()=>{await api("/me/line",{method:"PUT",body:lineAlertRead(st,"ml")});toast("บันทึกแล้ว");loadAccount()})}
 const loadAccount=guard(async()=>{
-  const me=await api("/me");if(page!=="account")return;const m=me.mfa;
+  const [me,lst]=await Promise.all([api("/me"),api("/me/line")]);if(page!=="account")return;const m=me.mfa;
   $("#main").innerHTML=`<div class="card"><h3>ข้อมูลบัญชี</h3><div class="row"><b>${esc(me.username)}</b><span class="mut">${esc(me.name||"")}</span><span class="tag">${esc({admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"}[me.role]||me.role)}</span></div>
-    <div class="row"><button class="btn" id="apw">🔑 เปลี่ยนรหัสผ่าน</button></div></div>
+    <div class="row"><button class="btn" id="apw">🔑 เปลี่ยนรหัสผ่าน</button></div></div>${lineCard(lst)}
    <div class="card"><h3>🔐 การยืนยันตัวตน 2 ขั้น</h3>
     ${m.enabled?`<p><span class="tag closed">เปิดใช้งาน</span> ตั้งแต่ ${fmt(m.enabled_at)} · รหัสสำรองเหลือ <b>${m.backup_left}</b> ชุด${m.backup_left<=3?' <b class="bad">— ควรสร้างใหม่</b>':""}</p>
       <div class="row"><input id="acode" inputmode="numeric" placeholder="รหัส 6 หลักจากแอป" maxlength="9" style="max-width:200px"><button class="btn" id="abc">สร้างรหัสสำรองใหม่</button></div>
       ${m.required?'<p class="mut">นโยบายของระบบบังคับใช้กับบัญชีนี้ — ปิดเองไม่ได้ (ถ้ามือถือหาย ให้ผู้ดูแลระบบอีกคนกด "รีเซ็ต 2FA")</p>':`<details><summary>ปิดการยืนยัน 2 ขั้น</summary><div class="row"><input id="dpw" type="password" placeholder="รหัสผ่าน" autocomplete="current-password"><input id="dcode" inputmode="numeric" placeholder="รหัส 6 หลัก" maxlength="9" style="max-width:160px"><button class="btn r" id="adis">ปิดใช้งาน</button></div></details>`}`
     :`<p class="mut">ยังไม่ได้เปิด${m.required?' — <b class="bad">ระบบกำหนดให้ต้องเปิด</b>':""} · เมื่อเปิดแล้ว การเข้าสู่ระบบต้องใช้รหัสผ่าน + รหัส 6 หลักจากแอปในมือถือ</p><button class="btn p" id="aen">เปิดใช้งาน</button>`}</div>${await appCards()}`;
-  bindAppCards();
+  bindAppCards();bindLineCard(lst);
   $("#apw").onclick=()=>pwScreen(false);
   if($("#aen"))$("#aen").onclick=()=>mfaSetup(false);
   if($("#abc"))$("#abc").onclick=guard(async()=>{const r=await api("/me/2fa/backup-codes",{method:"POST",body:{code:$("#acode").value}});showBackupCodes(r.backup_codes,false)});

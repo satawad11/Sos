@@ -105,6 +105,10 @@ class Caregiver(Base):
     # central staff (เจ้าหน้าที่ส่วนกลาง): gets every patient alert on LINE together with the patient's own caregiver, and may
     # close any case from LINE. Who gets SYSTEM alerts (the admins) is the system_alert.caregiver_ids setting, not this flag.
     is_central: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # a dashboard user's own LINE contact (app/routing.py): the sos_users.id it belongs to, and what that person asked for
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    alert_device: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)    # every button problem
+    alert_overdue: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)   # patient alerts nobody accepted in time
 
 
 class Assignment(Base):
