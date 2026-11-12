@@ -363,18 +363,47 @@ class CaregiverIn(BaseModel):
     role: str = "อสม."
     phone: str = ""
     active: bool = True
+    is_central: bool | None = None       # เจ้าหน้าที่ส่วนกลาง: every patient alert + may close any case from LINE
+    system_alert: bool | None = None     # ผู้ดูแลระบบ: gets the system alerts (stored in the system_alert setting)
+    # None = leave as it is. Both decide who is told what, so only an admin may change them.
 
 
-def cg_dict(c: Caregiver):
+def system_alert_ids(db: Session) -> list[int]:
+    return list(settings_store.get(db, "system_alert").get("caregiver_ids") or [])
+
+
+def cg_dict(c: Caregiver, sys_ids: list[int] | None = None, db: Session | None = None):
+    if sys_ids is None:
+        sys_ids = system_alert_ids(db) if db is not None else []
     return {"id": c.id, "full_name": c.full_name, "role": c.role, "phone": c.phone, "active": c.active,
-            "line_bound": bool(c.line_user_id)}
+            "line_bound": bool(c.line_user_id), "is_central": bool(c.is_central), "system_alert": c.id in sys_ids}
+
+
+def _cg_routing(db: Session, u, c: Caregiver, b: CaregiverIn) -> None:
+    """Apply the two "who is told what" switches. Admin only; a non-admin sending a change gets 403, sending None is fine."""
+    sys_ids = system_alert_ids(db)
+    want_c = bool(c.is_central) if b.is_central is None else b.is_central
+    want_s = (c.id in sys_ids) if b.system_alert is None else b.system_alert
+    if want_c == bool(c.is_central) and want_s == (c.id in sys_ids):
+        return
+    if u.role != "admin":
+        raise HTTPException(403, "เฉพาะผู้ดูแลระบบที่กำหนดผู้รับแจ้งเตือนระบบ/เจ้าหน้าที่ส่วนกลางได้")
+    if want_c != bool(c.is_central):
+        c.is_central = want_c
+        audit(db, u.username, "caregiver_central_on" if want_c else "caregiver_central_off", str(c.id))
+    if want_s != (c.id in sys_ids):
+        cur = settings_store.get(db, "system_alert")
+        ids = sorted(set(sys_ids) | {c.id}) if want_s else [i for i in sys_ids if i != c.id]
+        settings_store.put(db, "system_alert", {**cur, "caregiver_ids": ids}, u.username)
+        audit(db, u.username, "system_alert_recipient_on" if want_s else "system_alert_recipient_off", str(c.id))
 
 
 @router.get("/caregivers")
 def caregivers(db: Session = Depends(get_db), u=Depends(current_user)):
     from . import stats as st
     load = st.caregiver_load(db, u.role)["by_id"]
-    return [{**cg_dict(c), **load.get(c.id, {})} for c in db.query(Caregiver).order_by(Caregiver.id).all()]
+    sys_ids = system_alert_ids(db)
+    return [{**cg_dict(c, sys_ids), **load.get(c.id, {})} for c in db.query(Caregiver).order_by(Caregiver.id).all()]
 
 
 @router.get("/caregivers/summary")
@@ -394,18 +423,20 @@ def patient_statistics(pid: int, db: Session = Depends(get_db), u=Depends(curren
 
 @router.post("/caregivers")
 def add_cg(b: CaregiverIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
-    c = Caregiver(**b.model_dump()); db.add(c); db.flush()
+    c = Caregiver(**b.model_dump(exclude={"is_central", "system_alert"})); db.add(c); db.flush()
+    _cg_routing(db, u, c, b)
     audit(db, u.username, "caregiver_create", str(c.id)); db.commit()
-    return cg_dict(c)
+    return cg_dict(c, db=db)
 
 
 @router.put("/caregivers/{cid}")
 def edit_cg(cid: int, b: CaregiverIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
     c = db.get(Caregiver, cid)
     if not c: raise HTTPException(404)
-    for k, v in b.model_dump().items(): setattr(c, k, v)
+    _cg_routing(db, u, c, b)
+    for k, v in b.model_dump(exclude={"is_central", "system_alert"}).items(): setattr(c, k, v)
     audit(db, u.username, "caregiver_update", str(cid)); db.commit()
-    return cg_dict(c)
+    return cg_dict(c, db=db)
 
 
 @router.delete("/caregivers/{cid}")
@@ -418,6 +449,9 @@ def delete_cg(cid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
     db.query(BindCode).filter_by(caregiver_id=cid).delete()
     for g in db.query(Gateway).all():                     # drop him from per-gateway recipient lists too
         if g.alert_ids and cid in g.alert_ids: g.alert_ids = [x for x in g.alert_ids if x != cid] or None
+    if cid in system_alert_ids(db):
+        cur = settings_store.get(db, "system_alert")
+        settings_store.put(db, "system_alert", {**cur, "caregiver_ids": [i for i in cur["caregiver_ids"] if i != cid]}, u.username)
     name = c.full_name; db.delete(c)
     audit(db, u.username, "caregiver_delete", str(cid), name=name); db.commit()
     return {"ok": True}
@@ -452,4 +486,4 @@ def unbind(cid: int, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
     c = db.get(Caregiver, cid)
     if not c: raise HTTPException(404)
     c.line_user_id = ""; audit(db, u.username, "line_unbind", str(cid)); db.commit()
-    return cg_dict(c)
+    return cg_dict(c, db=db)

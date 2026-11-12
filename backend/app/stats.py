@@ -117,4 +117,9 @@ def caregiver_load(db: Session, role: str = "staff", now: datetime | None = None
                "patients": len(live), "patients_covered": len(covered & set(live)), "patients_uncovered": len(set(live) - covered),
                "avg_per_caregiver": round(sum(loads) / len(loads), 1) if loads else 0, "max_per_caregiver": max(loads, default=0),
                "uncovered": [{"id": p.id, "full_name": p.full_name, "village": p.village} for p in live.values() if p.id not in covered]}
+    sys_ids = set(settings_store.get(db, "system_alert").get("caregiver_ids") or [])
+    central, admins = [c for c in active if c.is_central], [c for c in active if c.id in sys_ids]
+    summary["device_to_caregiver"] = bool(settings_store.get(db, "device_alert").get("to_caregiver", True))
+    summary.update({"central": len(central), "central_line": sum(bool(c.line_user_id) for c in central),
+                    "system_admins": len(admins), "system_admins_line": sum(bool(c.line_user_id) for c in admins)})
     return {"by_id": by, "summary": summary}

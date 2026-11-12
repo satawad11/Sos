@@ -4,12 +4,14 @@ from __future__ import annotations
 from fastapi import APIRouter
 import httpx
 import re
+from datetime import datetime, timedelta
 from . import linecfg
 from .auth import admin_only, audit
 from .config import env
 from .db import get_db
 from .engine import aware
-from .models import BindCode, Caregiver, Case, utcnow
+from .line import CLOSE_LABEL, close_card
+from .models import BindCode, Caregiver, Case, CaseEvent, utcnow
 from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -80,6 +82,15 @@ def line_test_push(b: LineTestPushIn, db: Session = Depends(get_db), u=Depends(a
 
 
 # ---------------- LINE webhook ----------------
+NOTE_WINDOW = timedelta(minutes=10)
+_note_wait: dict[str, tuple[int, datetime]] = {}     # LINE user id -> (case just closed from LINE, until when a text counts as its note)
+
+
+def _may_close(case: Case, cg: Caregiver) -> bool:
+    """From LINE a case is closed by whoever accepted it, or by central staff (who may also close one nobody accepted)."""
+    return bool(cg.is_central) or (case.state == "accepted" and case.accepted_cg_id == cg.id)
+
+
 @router.post("/line/webhook")
 async def line_webhook(request: Request, db: Session = Depends(get_db), eng=Depends(get_engine)):
     from .line import verify_signature
@@ -91,6 +102,11 @@ async def line_webhook(request: Request, db: Session = Depends(get_db), eng=Depe
         uid = (ev.get("source") or {}).get("userId", "")
         tok = ev.get("replyToken", "")
         reply = (lambda t: notifier.reply_text(tok, t)) if notifier and tok else (lambda t: None)
+
+        def card(case, head, _tok=tok):
+            fn = getattr(notifier, "reply_messages", None) if notifier and _tok else None
+            if fn: fn(_tok, [close_card(case, head)])
+            elif notifier and _tok: notifier.reply_text(_tok, head)
         bound = db.query(Caregiver).filter_by(line_user_id=uid, active=True).first() if uid else None
         if ev.get("type") == "follow":
             reply(f"ยินดีต้อนรับกลับครับ บัญชีนี้ผูกกับ {bound.full_name} อยู่แล้ว ระบบจะส่งแจ้งเหตุมาที่แชทนี้" if bound else
@@ -99,6 +115,17 @@ async def line_webhook(request: Request, db: Session = Depends(get_db), eng=Depe
         elif ev.get("type") == "message" and (ev.get("message") or {}).get("type") == "text":
             code = "".join(ev["message"]["text"].split()).upper()          # tolerate spaces typed in the middle
             looks_like_code = len(code) == 8 and all(c in BIND_ALPHABET for c in code)
+            wait = _note_wait.get(uid)
+            if wait and bound and not looks_like_code:
+                _note_wait.pop(uid, None)
+                case = db.get(Case, wait[0]) if wait[1] > utcnow() else None
+                if case is not None:
+                    text = ev["message"]["text"].strip()[:500]
+                    case.note = (case.note + "\n" if case.note else "") + f"[LINE {bound.full_name}] {text}"
+                    db.add(CaseEvent(case_id=case.id, kind="note", actor=f"{bound.role} {bound.full_name}", detail={"via": "line", "note": text}))
+                    audit(db, f"line:{bound.id}", "case_note", str(case.id)); db.commit()
+                    reply(f"บันทึกในเคส #{case.id} แล้ว")
+                    continue
             bc = db.query(BindCode).filter_by(code=code, used=False).first() if looks_like_code else None
             if bc and aware(bc.expires_at) > utcnow():
                 cg = db.get(Caregiver, bc.caregiver_id)
@@ -123,9 +150,33 @@ async def line_webhook(request: Request, db: Session = Depends(get_db), eng=Depe
                 cid = int(data.split(":")[1])
                 case = db.get(Case, cid)
                 if case and case.state == "new":
-                    eng.accept(db, cid, f"{cg.role} {cg.full_name}")
+                    eng.accept(db, cid, f"{cg.role} {cg.full_name}", cg_id=cg.id)
                     audit(db, f"line:{cg.id}", "case_accept", str(cid)); db.commit()
-                    reply("รับเรื่องแล้ว กรุณาเดินทางไปดูผู้ป่วย")
+                    card(case, "รับเรื่องแล้ว กรุณาเดินทางไปดูผู้ป่วย")
+                elif case and case.state == "accepted":
+                    head = f"เคสนี้ถูกรับโดย {case.accepted_by or 'ผู้อื่น'} แล้ว"
+                    card(case, head) if _may_close(case, cg) else reply(head)      # central staff can still close it from here
                 elif case:
-                    reply(f"เคสนี้ถูกรับโดย {case.accepted_by or 'ผู้อื่น'} แล้ว" if case.state == "accepted" else "เคสนี้ปิดแล้ว")
+                    reply("เคสนี้ปิดแล้ว")
+            elif data.startswith("close:"):
+                cg = db.query(Caregiver).filter_by(line_user_id=uid, active=True).first() if uid else None
+                if not cg:
+                    reply("ไม่พบบัญชีของคุณในระบบ"); continue
+                try:
+                    _, cid, reason = data.split(":"); cid = int(cid)
+                except ValueError:
+                    continue
+                case = db.get(Case, cid)
+                if reason not in CLOSE_LABEL or case is None:
+                    continue
+                if case.state in ("closed", "cancelled"):
+                    reply(f"เคส #{cid} ปิดไปแล้ว"); continue
+                if not _may_close(case, cg):
+                    reply("ปิดเคสนี้ไม่ได้: ต้องเป็นผู้ที่กดรับเรื่อง หรือเจ้าหน้าที่ส่วนกลาง — ถ้ายังไม่มีใครรับเรื่อง กด \"รับเรื่อง\" ก่อน")
+                    continue
+                eng.close(db, cid, f"{cg.role} {cg.full_name}", reason)
+                audit(db, f"line:{cg.id}", "case_close", str(cid), reason=reason); db.commit()
+                _note_wait[uid] = (cid, utcnow() + NOTE_WINDOW)
+                reply(f"ปิดเคส #{cid} แล้ว ({CLOSE_LABEL[reason]}) ขอบคุณครับ\n"
+                      "ถ้าต้องการบันทึกเพิ่ม เช่น อาการหรือสิ่งที่ทำไป พิมพ์ส่งในแชทนี้ได้ภายใน 10 นาที")
     return {"ok": True}
