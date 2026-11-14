@@ -2,7 +2,7 @@
 Split out of api.py; shared helpers and the engine handle still live there."""
 from __future__ import annotations
 from fastapi import APIRouter
-from . import gateways as gwmod, geo, gwcmd, privacy, provision as prov, settings_store
+from . import gateways as gwmod, geo, gwcmd, netmon, privacy, provision as prov, settings_store
 from .auth import admin_only, audit, current_user, staff_or_admin
 from .db import get_db
 from .engine import aware
@@ -245,6 +245,25 @@ def _quality(rssi, snr):
     return "weak"
 
 
+def _link_history(db: Session, now) -> dict[str, dict[str, dict]]:
+    """Median radio readings by device and gateway for the previous seven days."""
+    import statistics
+    from .models import UplinkLog, UplinkReception
+    since = now - timedelta(days=7)
+    sf = {(r.dev_eui, r.f_cnt): r.sf for r in db.query(UplinkLog.dev_eui, UplinkLog.f_cnt, UplinkLog.sf).filter(UplinkLog.at >= since).all()}
+    acc: dict[tuple, list] = {}
+    for r in db.query(UplinkReception.dev_eui, UplinkReception.gateway_id, UplinkReception.f_cnt, UplinkReception.snr, UplinkReception.rssi).filter(UplinkReception.at >= since).all():
+        if r.gateway_id: acc.setdefault((r.dev_eui, r.gateway_id.lower()), []).append(r)
+    out: dict[str, dict[str, dict]] = {}
+    for (eui, gid), rows in acc.items():
+        margins = [m for m in (netmon.margin(r.snr, sf.get((eui, r.f_cnt))) for r in rows) if m is not None]
+        rss = [r.rssi for r in rows if r.rssi is not None]; sns = [r.snr for r in rows if r.snr is not None]
+        out.setdefault(eui, {})[gid] = {"n": len(rows), "margin": round(statistics.median(margins), 1) if margins else None,
+                                        "rssi": round(statistics.median(rss)) if rss else None,
+                                        "snr": round(statistics.median(sns), 1) if sns else None}
+    return out
+
+
 @router.get("/map")
 def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
     """Gateways, devices and which gateway heard each device last — for the dashboard map.
@@ -263,12 +282,13 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
         x = gw_dict(g, now, goff, n_dev, gcfg["gateway_move_m"], u.role, heard)
         loc = x["loc"]; pos = loc["registered"] or (loc["gps"] if loc["gps"] and loc["gps"]["fresh"] else None)
         src = "registered" if loc["registered"] else ("gps" if pos else None)
-        if pos: gpos[g.gateway_id] = (pos["lat"], pos["lon"])
+        if pos: gpos[g.gateway_id.lower()] = (pos["lat"], pos["lon"])
         gws.append({"gateway_id": g.gateway_id, "label": g.label, "status": x["status"], "offline": x["offline"], "reason": x["reason"],
                     "maint": x["maint"] is not None,
                     "last_seen": x["last_seen"], "devices": x["devices"], "lat": pos["lat"] if pos else None,
                     "lon": pos["lon"] if pos else None, "pos_src": src})
     dvs, links = [], []
+    hist = _link_history(db, now); rng: dict[str, int] = {}
     open_ = {c.patient_id: c for c in db.query(Case).filter(Case.state.in_(("new", "accepted")), Case.is_test.is_(False))
              .order_by(Case.id).all() if c.patient_id}
     for d in devs:
@@ -290,12 +310,24 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
                     "offline": offline, "last_seen": iso(d.last_seen), "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
                     "link_margin": sig.get("margin"), "loss": sig.get("loss"),
                     "gateway_id": d.last_gateway or None, "lat": lat, "lon": lon, "pos_src": src})
-        if d.last_gateway:
-            gp = gpos.get(d.last_gateway)
+        # Include each gateway that heard the button, not only the most recent one.
+        tlat, tlon = (lat, lon) if lat is not None else ((d.patient.lat, d.patient.lon) if d.patient and d.patient.lat is not None else (None, None))
+        seen = set()
+        for gid, lk in sorted(hist.get(d.dev_eui, {}).items(), key=lambda x: -x[1]["n"]):
+            gp = gpos.get(gid); seen.add(gid)
+            distance = round(geo.distance_m(tlat, tlon, gp[0], gp[1])) if tlat is not None and gp else None
+            quality = netmon.quality(lk["margin"])
+            links.append({"device_id": d.id, "gateway_id": gid, "rssi": lk["rssi"], "snr": lk["snr"], "link_margin": lk["margin"],
+                          "n": lk["n"], "quality": quality, "primary": gid == (d.last_gateway or "").lower(),
+                          "offline": offline, "distance_m": None if viewer else distance})
+            if distance is not None and lk["n"] >= 3 and lk["margin"] is not None and lk["margin"] >= 3:
+                rng[gid] = max(rng.get(gid, 0), distance)
+        if d.last_gateway and d.last_gateway.lower() not in seen:
+            gp = gpos.get(d.last_gateway.lower())
             dist = round(geo.distance_m(lat, lon, gp[0], gp[1])) if lat is not None and gp else None
             links.append({"device_id": d.id, "gateway_id": d.last_gateway, "rssi": d.last_rssi, "snr": d.last_snr, "quality": q,
                           "link_margin": sig.get("margin"), "loss": sig.get("loss"),
-                          "offline": offline, "distance_m": dist})
+                          "offline": offline, "distance_m": dist, "primary": True})
     # patients for the "pin a home" tool and homes that have no button yet (never for the read-only role)
     homes, no_loc = [], []
     if not viewer:
@@ -304,6 +336,7 @@ def map_data(db: Session = Depends(get_db), u=Depends(current_user)):
             row = {"id": p.id, "name": p.full_name, "village": p.village, "address": p.address, "phone": p.phone, "lat": p.lat, "lon": p.lon}
             if p.lat is None: no_loc.append(row)
             elif p.id not in with_dev: homes.append(row)
+    for g in gws: g["range_m"] = rng.get(g["gateway_id"].lower())
     return {"gateways": gws, "devices": dvs, "links": links, "restricted": viewer, "coverage_m": gcfg["coverage_m"],
             "homes": homes, "no_location": no_loc}
 
