@@ -34,12 +34,12 @@ const loadMap=guard(async()=>{
   window._mapData=d;mapRedraw();mapPinUI(d);
   $("#mcovkm").textContent=(d.coverage_m/1000).toLocaleString("th-TH",{maximumFractionDigits:1})+" กม.";
   $("#mupd").textContent="อัปเดต "+new Date().toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"});
-  const row=x=>{const g=gwById[x.gateway_id],lk=d.links.find(l=>l.device_id===x.id);
+  const row=x=>{const g=gwById[x.gateway_id],lk=d.links.find(l=>l.device_id===x.id&&l.primary)||d.links.find(l=>l.device_id===x.id);
     return `<tr><td>${esc(x.label||x.dev_eui)}</td><td>${d.restricted?"":esc(x.patient||"-")}</td><td>${g?esc(g.label||g.gateway_id):'<span class="mut">-</span>'}</td><td>${lk&&lk.quality?`<span style="color:${QCOL[lk.quality]}">● ${QTH[lk.quality]}</span>`:"-"}</td><td>${x.rssi??"-"} / ${x.snr??"-"}</td><td>${kmTxt(lk?.distance_m)}</td><td>${x.lat!=null?PSRC[x.pos_src]:'<span class="mut">ไม่มีพิกัด</span>'}</td><td>${x.offline?'<span class="bad">ออฟไลน์</span>':'<span class="ok">ปกติ</span>'}</td></tr>`};
   $("#maptb").innerHTML=`<div class="card"><h3>การเชื่อมต่ออุปกรณ์ → เกตเวย์</h3>${d.devices.length?`<table><tr><th>อุปกรณ์</th><th>ผู้ป่วย</th><th>เกตเวย์ที่ได้ยินล่าสุด</th><th>สัญญาณ</th><th>RSSI/SNR</th><th>ระยะ</th><th>ที่มาของพิกัด</th><th>สถานะ</th></tr>${d.devices.map(row).join("")}</table>`:'<p class="mut">ยังไม่มีอุปกรณ์</p>'}
    ${noPosGw.length?`<p class="warn" style="margin-top:10px">เกตเวย์ที่ยังไม่มีตำแหน่ง (ไม่แสดงบนแผนที่): ${noPosGw.map(g=>esc(g.label||g.gateway_id)).join(", ")} — ตั้งพิกัดที่เมนูเกตเวย์</p>`:""}
    ${!d.restricted&&noPosDev.length?`<p class="warn" style="margin-top:10px">อุปกรณ์ที่ไม่มีพิกัด (ไม่แสดงบนแผนที่): ${noPosDev.map(x=>esc(x.label||x.dev_eui)).join(", ")} — ใส่ละติจูด/ลองจิจูดที่หน้าผู้ป่วย หรือใช้ชุด GPS</p>`:""}
-    <p class="mut" style="font-size:13px">สีเส้นคำนวณจาก link margin และอัตราข้อความหายย้อนหลัง 20 ข้อความต่อปุ่ม; ถ้ายังไม่มีประวัติจะใช้ RSSI/SNR ล่าสุด · พิกัดอุปกรณ์ใช้ GPS ล่าสุดถ้ามี ไม่งั้นใช้ที่อยู่ที่ลงทะเบียน · ระยะเป็นเส้นตรง</p></div>`;
+    <p class="mut" style="font-size:13px">สีเส้นคำนวณจาก link margin ค่ากลาง 7 วันของทุกเกตเวย์ที่ได้ยินปุ่ม; เส้นทึบคือเกตเวย์หลัก เส้นประคือเกตเวย์สำรอง · วงประคือรัศมีวางแผน และวงเขียวคือระยะที่วัดได้จริงจากปุ่มที่ยังได้ยินชัด</p></div>`;
   if(!mapObj||mapObj._container!==$("#mapc"))return;
   clearInterval(timer);timer=setInterval(()=>{if(page==="map")loadMap();else clearInterval(timer)},30000)});
 function mapPts(){const d=window._mapData;return [...d.gateways,...d.devices,...(d.homes||[])].filter(x=>x.lat!=null).map(x=>[x.lat,x.lon])}
@@ -55,12 +55,12 @@ function mapFit(){const p=mapPts();if(p.length>1)mapObj.fitBounds(p,{padding:[40
 function mapRedraw(){
   const d=window._mapData,lg=mapObj._lg;lg.clearLayers();
   const gw=Object.fromEntries(d.gateways.map(g=>[g.gateway_id,g]));
-  if(mapOpt.cov&&d.coverage_m)d.gateways.filter(g=>g.lat!=null).forEach(g=>L.circle([g.lat,g.lon],{radius:d.coverage_m,color:g.offline?"#dc2626":"#1d4ed8",weight:1.5,fillOpacity:.05,dashArray:g.offline?"6 6":null,interactive:false}).addTo(lg));
+  if(mapOpt.cov&&d.coverage_m)d.gateways.filter(g=>g.lat!=null).forEach(g=>{L.circle([g.lat,g.lon],{radius:d.coverage_m,color:g.offline?"#dc2626":"#1d4ed8",weight:1.2,fillOpacity:.03,dashArray:"6 6",interactive:false}).addTo(lg);if(g.range_m)L.circle([g.lat,g.lon],{radius:g.range_m,color:"#16a34a",weight:2,fillOpacity:.06}).bindTooltip(`${esc(g.label||g.gateway_id)}: ระยะที่วัดได้จริง ${kmTxt(g.range_m)}`,{sticky:true}).addTo(lg)});
   const devs=d.devices.filter(x=>x.lat!=null&&(!mapOpt.onlyOn||!x.offline));
   if(mapOpt.links)d.links.forEach(l=>{const x=d.devices.find(v=>v.id===l.device_id),g=gw[l.gateway_id];if(!x||!g||x.lat==null||g.lat==null)return;if(mapOpt.onlyOn&&x.offline)return;
-    const col=QCOL[l.quality]||"#94a3b8";
-    L.polyline([[x.lat,x.lon],[g.lat,g.lon]],{color:col,weight:l.quality&&l.quality!=="unknown"?3:2,opacity:l.offline?.5:.85,dashArray:l.offline||!l.quality||l.quality==="unknown"?"6 8":null})
-     .bindTooltip(`${esc(x.label||x.dev_eui)} → ${esc(g.label||g.gateway_id)}<br>RSSI ${l.rssi??"-"} dBm · SNR ${l.snr??"-"} dB${l.link_margin!=null?` · margin ${l.link_margin} dB`:""}${l.loss!=null?` · หาย ${l.loss}%`:""}${l.quality?" · "+QTH[l.quality]:""}<br>ระยะ ${kmTxt(l.distance_m)}`,{sticky:true}).addTo(lg)});
+    const col=QCOL[l.quality]||"#94a3b8",secondary=l.primary===false,unknown=!l.quality||l.quality==="unknown";
+    L.polyline([[x.lat,x.lon],[g.lat,g.lon]],{color:col,weight:secondary?1.5:(unknown?2:3),opacity:l.offline?.5:(secondary?.55:.85),dashArray:l.offline||unknown?"6 8":(secondary?"2 5":null)})
+     .bindTooltip(`${esc(x.label||x.dev_eui)} → ${esc(g.label||g.gateway_id)}${secondary?" (เกตเวย์สำรอง)":""}${l.n?` · ค่ากลาง ${l.n} ข้อความ/7 วัน`:""}<br>RSSI ${l.rssi??"-"} dBm · SNR ${l.snr??"-"} dB${l.link_margin!=null?` · margin ${l.link_margin} dB`:""}${l.quality?" · "+QTH[l.quality]:""}<br>ระยะ ${kmTxt(l.distance_m)}`,{sticky:true}).addTo(lg)});
   d.gateways.filter(g=>g.lat!=null).forEach(g=>{
     const ic=L.divIcon({className:"",iconSize:[34,34],iconAnchor:[17,17],html:`<div class="mk mk-gw ${g.offline?"off":""}">📡</div>`});
     const m=L.marker([g.lat,g.lon],{icon:ic,zIndexOffset:500}).addTo(lg);

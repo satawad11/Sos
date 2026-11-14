@@ -2,11 +2,11 @@
 Split out of api.py; shared helpers and the engine handle still live there."""
 from __future__ import annotations
 from fastapi import APIRouter
-from . import provision as prov, updates as upd
+from . import gateways as gwmod, provision as prov, updates as upd
 from .auth import admin_only, audit, staff_or_admin
 from .config import env
 from .db import get_db
-from .models import Device, Gateway
+from .models import Device, Gateway, utcnow
 from fastapi import Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -145,7 +145,7 @@ def chirpstack_sync(db: Session = Depends(get_db), u=Depends(admin_only)):
         cmp_ = _cs_compare(db, cs)
     except prov.ProvisionError as e:
         raise HTTPException(502, str(e))
-    done = {"gateways_added": [], "devices_disabled": [], "devices_enabled": [], "errors": []}
+    done = {"gateways_added": [], "devices_disabled": [], "devices_enabled": [], "gateway_locations": [], "errors": []}
     for g in cmp_["gateways_missing_in_cs"]:
         gw = db.query(Gateway).filter_by(gateway_id=g["gateway_id"]).one()
         try:
@@ -160,7 +160,14 @@ def chirpstack_sync(db: Session = Depends(get_db), u=Depends(admin_only)):
             done["devices_disabled" if d.lifecycle == "retired" else "devices_enabled"].append(eui)
         except Exception as e:
             done["errors"].append(f"device {eui}: {str(e)[:120]}")
-    audit(db, u.username, "chirpstack_sync", "", gateways=len(done["gateways_added"]),
+    for gw in db.query(Gateway).filter(Gateway.enabled.isnot(False), Gateway.gps_lat.isnot(None)).all():
+        if not gw.gps_at or (utcnow() - gwmod._aware(gw.gps_at)).total_seconds() > gwmod.GPS_FRESH_S:
+            continue
+        try:
+            if getattr(cs, "set_gateway_location", None) and cs.set_gateway_location(gw.gateway_id, gw.gps_lat, gw.gps_lon): done["gateway_locations"].append(gw.gateway_id)
+        except Exception as e:
+            done["errors"].append(f"gateway {gw.gateway_id} location: {str(e)[:120]}")
+    audit(db, u.username, "chirpstack_sync", "", gateways=len(done["gateways_added"]), locations=len(done["gateway_locations"]),
           disabled=len(done["devices_disabled"]), enabled=len(done["devices_enabled"]), errors=len(done["errors"]))
     db.commit()
     return done
