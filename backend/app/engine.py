@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Protocol
 from sqlalchemy.orm import Session
-from . import codec, geo, settings_store
+from . import codec, geo, routing, settings_store
 from .hours import is_office_hours
 from .gateways import GatewayMonitor
 from .device_monitor import DeviceMonitor
@@ -457,6 +457,27 @@ class Engine:
             db.commit()
         return n
 
+    def _notify_overdue(self, db: Session, case: Case) -> int:
+        """Nobody accepted in time: tell the people who asked to hear about exactly that (app/routing.py), once per case,
+        skipping anyone this case was already sent to. Sent as a reminder card, so a failed send never moves the chain."""
+        if case.is_test or self.notifier is None:
+            return 0
+        told = {cid for (cid,) in db.query(Notification.caregiver_id).filter(Notification.case_id == case.id)}
+        n = 0
+        for cg in routing.overdue_recipients(db):
+            if cg.id in told:
+                continue
+            ok, detail = self.notifier.notify_case(db, case, cg, True)
+            if not cg.line_user_id:
+                ok, detail = False, "caregiver has no LINE binding"
+            db.add(Notification(case_id=case.id, caregiver_id=cg.id, detail=detail,
+                                status=detail if ok and detail == "queued" else "sent" if ok else "failed"))
+            self._event(db, case, "notified", caregiver=cg.full_name, step="overdue", ok=ok, detail=detail)
+            n += 1
+        if n:
+            db.commit()
+        return n
+
     def tick(self, db: Session, now: datetime | None = None) -> int:
         """Run periodically (every ~5 s). Returns number of cases touched."""
         now = now or utcnow()
@@ -467,6 +488,7 @@ class Engine:
             if not case.overdue and age >= esc["overdue_after_s"]:
                 case.overdue = True; n += 1
                 self._event(db, case, "overdue"); db.commit(); self._pub(case, "case_update")
+                self._notify_overdue(db, case)
             nxt = aware(case.next_escalation_at)
             if nxt and now >= nxt:
                 n += 1

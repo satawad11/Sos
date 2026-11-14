@@ -5,6 +5,7 @@ from fastapi import APIRouter
 import re
 import secrets
 from . import mfa, reports, settings_store
+from . import routing
 from .auth import admin_only, audit, current_user, hash_pw, password_problem, staff_or_admin
 from .db import get_db
 from .engine import aware
@@ -187,13 +188,36 @@ def user_dict(x: User) -> dict:
             "mfa": bool(x.totp_secret)}
 
 
+def user_line(db: Session, x: User) -> dict:
+    return {**user_dict(x), "line": routing.state(db, x)}
+
+
+class UserLineIn(BaseModel):
+    system: bool | None = None
+    device: bool | None = None
+    cases: str | None = None
+
+
+@router.put("/users/{uid}/line")
+def set_user_line(uid: int, b: UserLineIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    """An admin decides what another user is told on LINE (the user can still narrow it in "my account")."""
+    t = db.get(User, uid)
+    if not t: raise HTTPException(404)
+    try:
+        routing.set_prefs(db, t, b.model_dump(), u.username)
+    except routing.RoutingError as e:
+        raise HTTPException(422, str(e))
+    audit(db, u.username, "line_alerts_set", t.username, **{k: v for k, v in b.model_dump().items() if v is not None}); db.commit()
+    return user_line(db, t)
+
+
 def _other_active_admin(db: Session, uid: int) -> bool:
     return db.query(User).filter(User.role == "admin", User.active.is_(True), User.id != uid).count() > 0
 
 
 @router.get("/users")
 def users(db: Session = Depends(get_db), u=Depends(admin_only)):
-    return [user_dict(x) for x in db.query(User).order_by(User.id).all()]
+    return [user_line(db, x) for x in db.query(User).order_by(User.id).all()]
 
 
 @router.post("/users")
@@ -229,7 +253,9 @@ def patch_user(uid: int, b: UserPatch, db: Session = Depends(get_db), u=Depends(
     if b.role is not None and b.role != t.role: t.role = b.role; changed["role"] = b.role; t.token_ver = (t.token_ver or 0) + 1
     if b.active is not None and b.active != t.active:
         t.active = b.active; changed["active"] = b.active; t.token_ver = (t.token_ver or 0) + 1
-    if changed: audit(db, u.username, "user_update", t.username, **changed)
+    if changed:
+        audit(db, u.username, "user_update", t.username, **changed)
+        routing.sync_user(db, t, u.username)             # their LINE alerts follow the account (closed / lost a right / renamed)
     db.commit()
     return user_dict(t)
 
@@ -240,6 +266,7 @@ def delete_user(uid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
     if not t: raise HTTPException(404)
     if t.id == u.id: raise HTTPException(409, "ลบบัญชีตัวเองไม่ได้")
     if t.active: raise HTTPException(409, "ต้องปิดบัญชีก่อนจึงจะลบได้")
+    routing.sync_user(db, t, u.username, deleted=True)
     db.delete(t); audit(db, u.username, "user_delete", t.username); db.commit()
     return {"ok": True}
 

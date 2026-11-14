@@ -270,12 +270,13 @@ class GatewayMonitor:
                 out.append(c)
         return out
 
-    def send_system(self, db: Session, text: str, override: list | None = None, extra: list | None = None) -> list[dict]:
+    def send_system(self, db: Session, text: str, override: list | None = None, extra: list | None = None,
+                    to: list | None = None) -> list[dict]:
         """Push a plain-text LINE message to the system-alert recipients (the admins). Returns per-recipient results.
         extra = people who get this one message as well (a button problem also goes to that patient's own caregiver)."""
         res = []
         fn = getattr(self.notifier, "notify_system", None)
-        to = self.recipients(db, override)
+        to = list(to) if to is not None else self.recipients(db, override)      # to = an explicit list (button problems)
         for c in extra or []:
             if c is not None and c.active and c not in to:
                 to.append(c)
