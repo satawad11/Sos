@@ -137,7 +137,7 @@ function lineAlertPills(l){const pr=l.prefs,a=[];if(pr.cases==="all")a.push('<sp
 function lineCard(st){
   if(!st.allowed.length)return `<div class="card"><h3>💬 รับการแจ้งเตือนทาง LINE</h3><p class="mut">บัญชีแบบ "ดูอย่างเดียว" ไม่รับการแจ้งเตือนทาง LINE</p></div>`;
   return `<div class="card"><h3>💬 รับการแจ้งเตือนทาง LINE</h3>
-    <div class="row">${st.bound?'<span class="ok">✅ ผูก LINE ของฉันแล้ว</span><button class="btn" id="lun">ยกเลิกผูก</button><button class="btn" id="lbd">ผูกใหม่ (เปลี่ยนเครื่อง/บัญชี)</button>':'<span class="bad">❌ ยังไม่ได้ผูก LINE</span><button class="btn p" id="lbd">ผูก LINE ของฉัน</button>'}</div>
+    <div class="row">${st.bound?'<span class="ok">✅ ผูก LINE ของฉันแล้ว</span><button class="btn" id="ltest">ส่งข้อความทดสอบ</button><button class="btn" id="lun">ยกเลิกผูก</button><button class="btn" id="lbd">ผูกใหม่ (เปลี่ยนเครื่อง/บัญชี)</button>':'<span class="bad">❌ ยังไม่ได้ผูก LINE</span><button class="btn p" id="lbd">ผูก LINE ของฉัน</button>'}</div>
     ${!st.bound&&lineAlertOn(st.prefs)?'<div class="warn">เลือกรับการแจ้งเตือนไว้แล้ว แต่ยังไม่ได้ผูก LINE — จะยังไม่ได้รับข้อความ</div>':""}
     <p class="mut" style="margin:10px 0 4px">เลือกเฉพาะเรื่องที่ต้องการ เพื่อไม่ให้ข้อความมากเกินไป (เปลี่ยนได้ทุกเมื่อ)</p>${lineAlertForm(st,"ml")}
     <div class="row"><button class="btn p" id="lsv">บันทึกการแจ้งเตือน</button></div>
@@ -145,6 +145,7 @@ function lineCard(st){
 function bindLineCard(st){
   if($("#lbd"))$("#lbd").onclick=guard(async()=>{const r=await api("/me/line/bind-code",{method:"POST"});await dlg({icon:"integrations",title:"ผูก LINE ของฉัน",html:bindHTML(r,true),ok:"ผูกเสร็จแล้ว",cancel:false});loadAccount()});
   if($("#lun"))$("#lun").onclick=guard(async()=>{if(!await ask("ยกเลิกการผูก LINE ของฉัน?\nจะไม่ได้รับการแจ้งเตือนทาง LINE จนกว่าจะผูกใหม่"))return;await api("/me/line/unbind",{method:"POST"});toast("ยกเลิกผูกแล้ว");loadAccount()});
+  if($("#ltest"))$("#ltest").onclick=guard(async()=>{const r=await api("/me/line/test",{method:"POST"});toast(r.ok?"ส่งข้อความทดสอบแล้ว — ตรวจใน LINE":"ส่งไม่สำเร็จ: "+r.detail)});
   if($("#lsv"))$("#lsv").onclick=guard(async()=>{await api("/me/line",{method:"PUT",body:lineAlertRead(st,"ml")});toast("บันทึกแล้ว");loadAccount()})}
 const loadAccount=guard(async()=>{
   const [me,lst]=await Promise.all([api("/me"),api("/me/line")]);if(page!=="account")return;const m=me.mfa;

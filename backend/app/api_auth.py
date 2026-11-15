@@ -191,3 +191,15 @@ def my_line_unbind(db: Session = Depends(get_db), u: User = Depends(current_user
     if cg is not None:
         cg.line_user_id = ""; audit(db, u.username, "line_unbind", str(cg.id)); db.commit()
     return routing.state(db, u)
+
+
+@router.post("/me/line/test")
+def my_line_test(db: Session = Depends(get_db), u: User = Depends(current_user)):
+    """Let a dashboard user verify their own LINE binding without needing an admin."""
+    cg = routing.contact(db, u)
+    if cg is None or not cg.line_user_id:
+        raise HTTPException(409, "ยังไม่ได้ผูก LINE ของบัญชีนี้")
+    from .line import LineNotifier
+    ok, detail = LineNotifier().notify_system(db, cg, "✅ ทดสอบการแจ้งเตือน LINE ของคุณ — ถ้าเห็นข้อความนี้ การผูกบัญชีและการส่งแจ้งเตือนพร้อมใช้งาน")
+    audit(db, u.username, "my_line_test", str(cg.id), ok=ok); db.commit()
+    return {"ok": ok, "detail": "ส่งแล้ว" if ok else detail}

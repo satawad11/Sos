@@ -6,7 +6,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
-from . import backupinfo, health, privacy, reports, settings_store, telemetry
+from . import backupinfo, health, linecfg, privacy, reports, routing, settings_store, telemetry
 from . import selftest as stest
 from .api import _engine, PRIORITIES
 from .auth import admin_only, audit, current_user, staff_or_admin
@@ -197,9 +197,22 @@ def readiness(db: Session = Depends(get_db), u=Depends(current_user)):
     cgs = db.query(Caregiver).filter(Caregiver.active.is_(True)).all()
     used = {c.id for lst in asg.values() for c in lst}
     spare = db.query(Device).filter(Device.patient_id.is_(None), Device.lifecycle.in_(("ready", "active"))).count()
+    system_ids = set(settings_store.get(db, "system_alert").get("caregiver_ids") or [])
+    line_gaps = []
+    for c in cgs:
+        reasons = []
+        if c.id in used: reasons.append("ผู้ดูแลผู้ป่วย")
+        if c.id in system_ids: reasons.append("แจ้งเตือนระบบ")
+        if c.alert_device: reasons.append("ปัญหาปุ่ม")
+        if c.is_central: reasons.append("ทุกเคส")
+        if c.alert_overdue: reasons.append("เคสที่ไม่มีคนรับ")
+        if reasons and not c.line_user_id:
+            line_gaps.append({"id": c.id, "full_name": c.full_name, "user_id": c.user_id, "reasons": reasons})
+    line_gaps.sort(key=lambda x: (not x["user_id"], x["full_name"]))
     return {"checks": [{"key": k, "label": lbl, "critical": k in CRITICAL, "ok": sum(r["checks"][k] for r in rows), "total": total}
                        for k, lbl in CHECKS],
             "patients": rows, "total": total, "ready": sum(r["level"] == "grn" for r in rows),
             "at_risk": sum(r["level"] == "red" for r in rows),
             "caregivers_no_line": [{"id": c.id, "full_name": c.full_name, "in_use": c.id in used} for c in cgs if not c.line_user_id],
-            "spare_devices": spare}
+            "spare_devices": spare,
+            "line": {"ready": bool(linecfg.token() and linecfg.secret()), "gaps": line_gaps}}
