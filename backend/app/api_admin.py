@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 import re
 import secrets
-from . import mfa, reports, settings_store
+from . import engine as engine_mod, mfa, reports, settings_store
 from . import routing
 from .auth import admin_only, audit, current_user, hash_pw, password_problem, staff_or_admin
 from .db import get_db
@@ -393,7 +393,7 @@ def get_logo(slot: str, db: Session = Depends(get_db), u=Depends(current_user)):
 
 @router.get("/stats")
 def stats(db: Session = Depends(get_db), u=Depends(current_user)):
-    since = utcnow() - timedelta(days=30)
+    since = engine_mod.utcnow() - timedelta(days=30)
     cs = db.query(Case.state, Case.close_reason, Case.after_hours, Case.created_at, Case.accepted_at).filter(
         Case.created_at >= since, Case.is_test.is_(False)).all()
     acc = [(aware(c.accepted_at) - aware(c.created_at)).total_seconds() for c in cs if c.accepted_at]
@@ -405,7 +405,7 @@ def stats(db: Session = Depends(get_db), u=Depends(current_user)):
 
 def _device_health(db: Session) -> dict:
     """Active buttons by link state — the home page's "ปุ่มปกติ x/y" tile."""
-    now, off = utcnow(), settings_store.get(db, "offline")["device_offline_min"]
+    now, off = engine_mod.utcnow(), settings_store.get(db, "offline")["device_offline_min"]
     n = {"active": 0, "ok": 0, "late": 0, "offline": 0, "never": 0}
     for d in db.query(Device).filter(Device.lifecycle == "active").all():
         n["active"] += 1

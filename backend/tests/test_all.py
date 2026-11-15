@@ -1,4 +1,5 @@
 import base64, hashlib, hmac, json
+import pytest
 from datetime import datetime, timedelta, timezone
 from app import codec, settings_store
 from app.db import SessionLocal
