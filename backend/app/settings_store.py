@@ -72,6 +72,10 @@ def validate_device_cfg(value: dict, partial: bool, offline_min: int | None = No
         out[k] = v
     if not partial and set(out) != set(CFG_FIELDS):
         raise ValueError("all fields required: " + ", ".join(CFG_FIELDS))
+    # CONFIG reserves one byte for heartbeat in units of five minutes.  Rejecting non-aligned values means the value
+    # shown in the dashboard is always exactly the value the button has stored (rather than silently rounding it).
+    if "heartbeat_min" in out and out["heartbeat_min"] % 5:
+        raise ValueError("heartbeat_min must be a multiple of 5 minutes")
     if offline_min is not None and "heartbeat_min" in out and out["heartbeat_min"] * 1.5 > offline_min:
         raise ValueError(f"heartbeat_min too long for offline threshold ({offline_min} min): device would show offline")
     return out
