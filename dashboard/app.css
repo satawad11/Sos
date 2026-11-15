@@ -168,6 +168,7 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke
 .sw input:checked+i{background:var(--grn)}.sw input:checked+i:after{transform:translateX(18px)}.sw input:focus-visible+i{box-shadow:0 0 0 3px var(--pri2)}
 .savebar{position:sticky;bottom:12px;z-index:20;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--ink);color:var(--bg);border-radius:14px;padding:12px 16px;box-shadow:0 10px 40px #0004;margin-top:14px}
 .savebar[hidden]{display:none}.savebar b{font-weight:600}.savebar .btn{border-color:transparent}
+.impact{font-size:12px;opacity:.88;margin-top:3px}.notice{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:9px 11px;margin:8px 0 2px;background:var(--pri2);border-radius:10px;font-size:13px}.preset{display:flex;gap:8px;flex-wrap:wrap}.tw{overflow-x:auto}
 .hol{display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--bd)}.hol:first-of-type{border-top:0}.hol span:nth-child(2){flex:1}
 @media(max-width:640px){.sf{grid-template-columns:1fr}.pills{flex-wrap:nowrap;width:100%}}
 .warn.bad2{background:var(--red2);color:var(--red)}

@@ -142,6 +142,34 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
     return res
 
 
+class SettingRestore(BaseModel):
+    value: dict
+    source_at: str = ""
+
+
+@router.get("/settings/history")
+def setting_history(limit: int = 50, db: Session = Depends(get_db), u=Depends(admin_only)):
+    """Recent complete setting snapshots.  Values are admin-only and are safe to restore through the endpoint below."""
+    rows = (db.query(AuditLog)
+            .filter(AuditLog.action == "setting_update", AuditLog.target.in_(settings_store.DEFAULTS.keys()))
+            .order_by(AuditLog.id.desc()).limit(min(max(limit, 1), 200)).all())
+    out = []
+    for row in rows:
+        value = (row.detail or {}).get("value")
+        if isinstance(value, dict):
+            out.append({"at": iso(row.at), "actor": row.actor, "key": row.target, "value": value})
+    return out
+
+
+@router.post("/settings/{key}/restore")
+def restore_setting(key: str, body: SettingRestore, db: Session = Depends(get_db), u=Depends(admin_only)):
+    # Reuse the normal write path so restored values receive exactly the same validation and device-config side effects.
+    result = put_setting(key, body.value, db, u)
+    audit(db, u.username, "setting_restore", key, source_at=body.source_at)
+    db.commit()
+    return result
+
+
 class HolidayIn(BaseModel):
     day: str = Field(pattern=r"^\d{4}-\d\d-\d\d$")
     name: str = ""

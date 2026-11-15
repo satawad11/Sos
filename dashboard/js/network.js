@@ -168,7 +168,7 @@ const humanMin=m=>m>=1440&&m%1440===0?(m/1440)+" วัน":m>=60?(Math.floor(m/
 async function showLogo(sl){const box=$("#lg-"+sl);if(!box)return;const x=await fetch("/api/org/logo/"+sl,{headers:{authorization:"Bearer "+token}}).catch(()=>null);
   box.innerHTML=x&&x.ok?`<img src="${URL.createObjectURL(await x.blob())}" alt="">`:'<span class="mut">ไม่มี</span>'}
 const loadSettings=guard(async()=>{
-  const [s,hs,cgs]=await Promise.all([api("/settings"),api("/holidays"),api("/caregivers")]);
+  const [s,hs,cgs,history]=await Promise.all([api("/settings"),api("/holidays"),api("/caregivers"),role==="admin"?api("/settings/history?limit=40"):Promise.resolve([])]);
   if(page!=="settings")return;
   const adm=role==="admin",dis=adm?"":"disabled";
   const oh=s.office_hours,es=s.escalation,dd=s.device_defaults,of=s.offline,sa=s.system_alert,da=s.device_alert;
@@ -178,9 +178,11 @@ const loadSettings=guard(async()=>{
   const chips=(id,vals)=>adm?`<div class="chips" data-for="${id}">${vals.map(v=>`<button type="button" data-v="${v[0]}">${v[1]}</button>`).join("")}</div>`:"";
   const head=(ic,t,d)=>`<div class="chead"><div class="ci">${ico(ic)}</div><div><h3>${t}</h3><p>${d}</p></div></div>`;
   const active=cgs.filter(c=>c.active);
-  const SECS=[["hours","เวลาทำการ","clock"],["alert","การแจ้งเหตุ","send"],["notify","ผู้รับแจ้งเตือน","alert"],["device","อุปกรณ์และเครือข่าย","chip"],["org","หน่วยงาน / รายงาน","reports"],["security","ความปลอดภัย","key"]];
+  const SECS=[["hours","เวลาทำการ","clock"],["alert","การแจ้งเหตุ","send"],["notify","ผู้รับแจ้งเตือน","alert"],["device","อุปกรณ์และเครือข่าย","chip"],["org","หน่วยงาน / รายงาน","reports"],["security","ความปลอดภัย","key"],...(adm?[["history","ประวัติการตั้งค่า","reports"]]:[])];
   if(!SECS.some(x=>x[0]===setSec))setSec="hours";
   const holRows=h=>h.length?h.map(x=>`<div class="hol"><span>${x.day}</span><span>${esc(x.name)}</span>${adm?`<button class="btn" data-h="${x.id}">ลบ</button>`:""}</div>`).join(""):'<p class="mut">ยังไม่มีวันหยุดที่เพิ่มไว้</p>';
+  const HISTNAME={office_hours:"เวลาทำการ",escalation:"การแจ้งต่อ",system_alert:"ผู้รับแจ้งเตือน",device_alert:"แจ้งเตือนปุ่ม",device_defaults:"ค่าเริ่มต้นปุ่ม",offline:"ตรวจจับออฟไลน์",org:"หน่วยงาน",security:"ความปลอดภัย",privacy:"PDPA",geo:"แผนที่",self_test:"ทดสอบปุ่ม",monitoring:"เฝ้าระวังระบบ",telemetry:"เก็บข้อมูลสัญญาณ",frequent:"แจ้งกดบ่อย",message:"ข้อความ"};
+  const historyRows=history.length?history.map((h,i)=>`<tr><td>${fmt(h.at)}</td><td>${esc(HISTNAME[h.key]||h.key)}</td><td>${esc(h.actor)}</td><td><button class="btn sm" data-restore="${i}">ย้อนเป็นค่านี้</button></td></tr>`).join(""):'<tr><td colspan="4" class="mut">ยังไม่มีประวัติการเปลี่ยนค่า</td></tr>';
   $("#main").innerHTML=`${adm?"":'<div class="warn">เฉพาะผู้ดูแลระบบแก้ไขได้ (คุณดูได้อย่างเดียว)</div>'}
   <div class="pills" id="pills">${SECS.map(x=>`<button data-s="${x[0]}" class="${setSec===x[0]?"on":""}">${ico(x[2])}${x[1]}<i class="dot"></i></button>`).join("")}</div>
   <div id="sr">
@@ -199,6 +201,7 @@ const loadSettings=guard(async()=>{
   </div>
   <div class="sec" data-sec="notify" ${setSec==="notify"?"":"hidden"}>
    <div class="card">${head("alert","ผู้รับแจ้งเตือนระบบ (ผู้ดูแลระบบ)","คนที่ได้รับ LINE เรื่องเกตเวย์ เซิร์ฟเวอร์ และการสำรองข้อมูล · ปุ่มผู้ป่วยเงียบหาย/แบตต่ำ/ไฟดับ จะแจ้งคนกลุ่มนี้และ อสม. ลำดับ 1 ของผู้ป่วยรายนั้น · ตั้งได้ที่หน้า อสม./ผู้ดูแล เช่นกัน")}
+    <div class="notice"><b>ตั้งค่า LINE OA แยกจากหน้านี้</b><span> หน้านี้เลือกเพียงผู้รับและประเภทการแจ้งเตือน</span>${adm?` <button class="btn sm" id="goto-line">ไปตั้งค่า LINE OA</button>`:""}</div>
     ${fld("เลือกผู้รับ","ต้องผูก LINE แล้วจึงจะได้รับ · ถ้าไม่เลือกใครเลย ระบบจะแจ้ง “ผู้รับสุดท้าย” แทน",`<div class="row">${active.map(c=>`<label class="chip" title="${c.line_bound?"":"ยังไม่ผูก LINE"}"><input type="checkbox" class="sa" value="${c.id}" ${sa.caregiver_ids.includes(c.id)?"checked":""} ${dis}><span>${esc(c.full_name)}${c.line_bound?"":" ⚠"}</span></label>`).join("")||'<span class="mut">ยังไม่มี อสม./ผู้ดูแล — เพิ่มได้ที่เมนู อสม./ผู้ดูแล</span>'}</div>`)}
     ${fld("แจ้งเตือนเกตเวย์ทาง LINE","ปิด = ไม่ส่ง LINE เรื่องเกตเวย์ขาด/กลับมาเลย (ยังแสดงบนแดชบอร์ด) · ถ้าเสียแค่บางเครื่อง ให้ปิดที่หน้าเกตเวย์เครื่องนั้นแทน",`<label class="sw"><input type="checkbox" id="sgl" ${sa.gateway_line!==false?"checked":""} ${dis}><i></i><span id="sglt">${sa.gateway_line!==false?"เปิด":"ปิด"}</span></label>`)}
     ${fld("เตือนซ้ำทุก","ถ้าปัญหายังไม่หาย · ใส่ 0 = ไม่เตือนซ้ำ (ช่วงที่ใช้ได้ 10–1440 นาที)",`${num("sar",sa.repeat_min,0,1440,"นาที")}<div class="hint" id="sarh"></div>${chips("sar",[[0,"ไม่เตือนซ้ำ"],[30,"30 นาที"],[60,"1 ชม."],[120,"2 ชม."]])}`)}
@@ -213,6 +216,9 @@ const loadSettings=guard(async()=>{
     ${fld("เตือนเมื่อสัญญาณวิทยุอ่อนมาก","ปุ่มยังส่งได้แต่ใกล้หลุด (margin ต่ำกว่า 3 dB หรือข้อความหาย ≥30%) — แจ้งครั้งเดียวต่อเหตุการณ์ ตัดสินหลังได้รับอย่างน้อย 8 ข้อความ",`<label class="sw"><input type="checkbox" id="das" ${da.signal_alert??true?"checked":""} ${dis}><i></i><span>${da.signal_alert??true?"เปิด":"ปิด"}</span></label>`)}
   </div>
   <div class="sec" data-sec="device" ${setSec==="device"?"":"hidden"}>
+   <div class="card">${head("chip","ตั้งค่าลัดตามสถานการณ์","เลือกชุดค่าเริ่มต้น แล้วตรวจผลกระทบด้านล่างก่อนกดบันทึก — ยังไม่เปลี่ยนค่าในระบบจนกว่าจะบันทึก")}
+    <div class="preset"><button class="btn" data-preset="balanced">สมดุล (แนะนำ)</button><button class="btn" data-preset="fast">ตอบสนองไว</button><button class="btn" data-preset="battery">ประหยัดแบต</button></div>
+    <p class="hint">สมดุล: รายงานทุก 30 นาที · ตอบสนองไว: ทุก 15 นาที · ประหยัดแบต: ทุก 60 นาที</p></div>
    <div class="card">${head("chip","ค่าเริ่มต้นของปุ่มผู้ป่วย","ส่งลงปุ่มทุกเครื่องอัตโนมัติผ่านรอบ heartbeat · เฉพาะบางเครื่องตั้งแยกได้ที่เมนูอุปกรณ์")}
     ${fld("ปุ่มรายงานสถานะทุก","ถี่ขึ้น = รู้เร็วว่าเครื่องหาย แต่ใช้แบต/ช่องสัญญาณมากขึ้น (5–1275 นาที, แนะนำ 30)",num("hb",dd.heartbeat_min,5,1275,"นาที"))}
     ${fld("ถามผลตอบรับทุก","หลังกดปุ่ม เครื่องจะถามเซิร์ฟเวอร์ว่ามีคนรับเรื่องแล้วหรือยัง (5–120 วินาที, แนะนำ 10)",num("po",dd.poll_s,5,120,"วินาที"))}
@@ -237,8 +243,12 @@ const loadSettings=guard(async()=>{
     <p class="mut">ค่าเริ่มต้น: ปิด · เมื่อเปิด ผู้ใช้กลุ่มที่เลือกที่ยังไม่ได้ตั้งค่าจะต้องสแกน QR ตั้งค่าในการใช้งานครั้งถัดไป · ทุกคนเปิดใช้เองได้ที่ "บัญชี" แม้นโยบายปิดอยู่ · มือถือหาย: ผู้ดูแลระบบอีกคนกด "รีเซ็ต 2FA" ในหน้าผู้ใช้</p>
     ${adm?'<button class="btn p" id="s9">บันทึก</button>':""}</div>
   </div>
+  ${adm?`<div class="sec" data-sec="history" ${setSec==="history"?"":"hidden"}>
+   <div class="card">${head("reports","ประวัติการตั้งค่า","แสดงค่าที่เคยบันทึกล่าสุด 40 รายการ · การย้อนค่าจะผ่านการตรวจสอบความปลอดภัยเหมือนการตั้งค่าปกติ")}
+    <div class="tw"><table><thead><tr><th>เวลา</th><th>หมวด</th><th>ผู้เปลี่ยน</th><th></th></tr></thead><tbody>${historyRows}</tbody></table></div>
+   </div></div>`:""}
   </div>
-  ${adm?`<div class="savebar" id="sb" hidden><span><b id="sbn">0</b> หมวดที่เปลี่ยน: <span id="sbl"></span></span><span class="row" style="margin:0"><button class="btn" id="sbc">ยกเลิก</button><button class="btn p" id="sbs">บันทึกทั้งหมด</button></span></div>`:""}`;
+  ${adm?`<div class="savebar" id="sb" hidden><div><b id="sbn">0</b> หมวดที่เปลี่ยน: <span id="sbl"></span><div id="impact" class="impact"></div></div><span class="row" style="margin:0"><button class="btn" id="sbc">ยกเลิก</button><button class="btn p" id="sbs">บันทึกทั้งหมด</button></span></div>`:""}`;
   showLogo("left");showLogo("right");
   if(!adm){setDirty=()=>false;return}
   const put=(k,v)=>guard(async()=>{await api("/settings/"+k,{method:"PUT",body:v});toast("บันทึกแล้ว")})();
@@ -266,8 +276,10 @@ const loadSettings=guard(async()=>{
     $("#sarh").textContent=N("sar")===0?"ไม่เตือนซ้ำ":"= ทุก "+humanMin(N("sar"));
     $("#doh").textContent="= "+humanMin(N("do"))+(N("do")<N("hb")*2?` · ควรอย่างน้อย ${N("hb")*2} นาที (2 เท่าของรอบรายงาน)`:"");
     $("#daet").textContent=$("#dae").checked?"เปิด":"ปิด";$("#daqt").textContent=$("#daq").checked?"เปิด":"ปิด";$("#sglt").textContent=$("#sgl").checked?"เปิด":"ปิด"};
+  const impact=()=>{const sys=[...document.querySelectorAll(".sa:checked")].length,care=$("#dac").checked?" และ อสม. ประจำผู้ป่วย":"";
+    return `หลังบันทึก: ปุ่มเงียบ ${humanMin(N("do"))} · เกตเวย์เงียบ ${humanMin(N("go"))} · เตือนซ้ำ ${N("sar")?"ทุก "+humanMin(N("sar")):"ไม่เตือนซ้ำ"} · ${$("#dae").checked?`ปัญหาปุ่มส่งถึงผู้รับระบบ ${sys} คน${care}`:"ปิดการแจ้งปัญหาปุ่ม"}`};
   const refresh=()=>{hints();const ch=changed();$("#sb").hidden=!ch.length;$("#sbn").textContent=ch.length;$("#sbl").textContent=ch.map(k=>NAMES[k]).join(", ");
-    document.querySelectorAll("#pills button").forEach(b=>b.classList.toggle("dirty",ch.some(k=>SECOF[k]===b.dataset.s)))};
+    $("#impact").textContent=impact();document.querySelectorAll("#pills button").forEach(b=>b.classList.toggle("dirty",ch.some(k=>SECOF[k]===b.dataset.s)))};
   const validate=()=>{let bad=null;document.querySelectorAll("#sr input[type=number]").forEach(i=>{const box=i.closest(".inp");const v=i.value===""?NaN:+i.value;const ok=!isNaN(v)&&v>=+i.min&&v<=+i.max;box.classList.toggle("bad3",!ok);
       if(!ok&&!bad)bad={i,msg:`${i.closest(".sf").querySelector("label").textContent}: ต้องอยู่ระหว่าง ${i.min}–${i.max}`}});
     const r=N("sar");if(!bad&&r!==0&&r<10)bad={i:$("#sar"),msg:"เตือนซ้ำ: ใส่ 0 (ไม่เตือน) หรือ 10 นาทีขึ้นไป"};
@@ -275,6 +287,11 @@ const loadSettings=guard(async()=>{
   $("#sr").addEventListener("input",refresh);$("#sr").addEventListener("change",refresh);
   document.querySelectorAll("#pills button").forEach(b=>b.onclick=()=>{setSec=b.dataset.s;sessionStorage.setItem("sec",setSec);document.querySelectorAll("#pills button").forEach(x=>x.classList.toggle("on",x===b));document.querySelectorAll(".sec").forEach(x=>x.hidden=x.dataset.sec!==setSec)});
   document.querySelectorAll(".chips button").forEach(b=>b.onclick=()=>{const i=$("#"+b.parentNode.dataset.for);i.value=b.dataset.v;i.dispatchEvent(new Event("input",{bubbles:true}))});
+  document.querySelectorAll("[data-preset]").forEach(b=>b.onclick=()=>{const p={balanced:{hb:30,do:90,go:5,sar:60},fast:{hb:15,do:45,go:3,sar:30},battery:{hb:60,do:180,go:10,sar:120}}[b.dataset.preset];
+    Object.entries(p).forEach(([id,v])=>{$("#"+id).value=v});refresh();toast("เลือกชุดค่าแล้ว — ตรวจผลกระทบ แล้วกดบันทึกทั้งหมด")});
+  if($("#goto-line"))$("#goto-line").onclick=()=>{page="integrations";render()};
+  document.querySelectorAll("[data-restore]").forEach(b=>b.onclick=guard(async()=>{const h=history[+b.dataset.restore];if(!h||!await ask(`ย้อน “${HISTNAME[h.key]||h.key}” เป็นค่าที่บันทึกเมื่อ ${fmt(h.at)} โดย ${h.actor} หรือไม่?\n\nระบบจะตรวจสอบความถูกต้องก่อนบันทึก`))return;
+    await api(`/settings/${h.key}/restore`,{method:"POST",body:{value:h.value,source_at:h.at}});toast("ย้อนการตั้งค่าแล้ว");loadSettings()}));
   $("#sbc").onclick=()=>{setDirty=()=>false;loadSettings()};
   $("#sbs").onclick=guard(async()=>{const bad=validate();if(bad){const sec=bad.i.closest(".sec");if(sec&&sec.hidden)document.querySelector(`#pills [data-s="${sec.dataset.sec}"]`).click();bad.i.focus();throw new Error(bad.msg)}
     const c=get(),ks=changed();let done=0;
