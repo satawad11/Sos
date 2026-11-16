@@ -20,7 +20,10 @@ ACTIONS = {
     "logs": "ดู log ล่าสุด",
     "restart_services": "รีสตาร์ทบริการรับสัญญาณ (LoRa)",
     "reboot": "รีบูตเครื่อง",
+    "apply_config": "นำค่าตั้ง Gateway ไปใช้",
+    "update": "อัปเดตซอฟต์แวร์ Gateway",
 }
+USER_ACTIONS = {k: ACTIONS[k] for k in ("report_now", "logs", "restart_services", "reboot")}
 EXPIRE_S = 180
 _ID = re.compile(r"^[0-9a-f]{16}$")
 
@@ -33,15 +36,31 @@ def agent_key(gateway_id: str) -> str:
     return hmac.new(_master(), gateway_id.lower().encode(), hashlib.sha256).hexdigest()[:40]
 
 
-def sign(key: str, cmd_id: str, action: str, ts: int) -> str:
-    return hmac.new(key.encode(), f"{cmd_id}|{action}|{ts}".encode(), hashlib.sha256).hexdigest()
+def canonical_params(params: dict | None) -> str:
+    # jq (used by the Pi agent) serialises an integral JSON number as `2`, even if Python received it as `2.0`.
+    # Normalising here keeps signatures portable across both JSON implementations.
+    def norm(v):
+        if isinstance(v, float) and v.is_integer(): return int(v)
+        if isinstance(v, dict): return {k: norm(x) for k, x in v.items()}
+        if isinstance(v, list): return [norm(x) for x in v]
+        return v
+    return json.dumps(norm(params or {}), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def make_command(gateway_id: str, action: str, now: float | None = None) -> tuple[str, dict]:
+def sign(key: str, cmd_id: str, action: str, ts: int, params: dict | None = None) -> str:
+    suffix = "" if params is None else "|" + canonical_params(params)
+    return hmac.new(key.encode(), f"{cmd_id}|{action}|{ts}{suffix}".encode(), hashlib.sha256).hexdigest()
+
+
+def make_command(gateway_id: str, action: str, now: float | None = None, params: dict | None = None) -> tuple[str, dict]:
     if action not in ACTIONS:
         raise ValueError("unknown action")
     cid, ts = secrets.token_hex(8), int(now if now is not None else time.time())
-    return cid, {"id": cid, "action": action, "ts": ts, "sig": sign(agent_key(gateway_id), cid, action, ts)}
+    out = {"id": cid, "action": action, "ts": ts}
+    if params is not None:
+        out["params"] = params
+    out["sig"] = sign(agent_key(gateway_id), cid, action, ts, params)
+    return cid, out
 
 
 def cmd_topic(gateway_id: str, prefix: str | None = None) -> str:

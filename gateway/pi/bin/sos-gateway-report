@@ -7,7 +7,7 @@ CONF=/etc/sos-gateway.env; [ -f "$CONF" ] && . "$CONF"
 GATEWAY_ID="${GATEWAY_ID:-}"; TOPIC_PREFIX="${TOPIC_PREFIX:-as923}"
 export XDG_CONFIG_HOME="${SOS_PUB_CONF_DIR:-/etc/sos-gateway}"     # holds the 'mosquitto_pub' options file (host, TLS, credentials; mode 600)
 
-num()  { [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]] && echo "$1" || echo null; }
+num()  { [[ "${1:-}" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] && echo "$1" || echo null; }
 bool() { if "$@" >/dev/null 2>&1; then echo true; else echo false; fi; }
 
 uptime_s="$(num "$(cut -d. -f1 /proc/uptime 2>/dev/null)")"
@@ -20,6 +20,20 @@ mem_pct="$(num "$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{if(t>0)printf "%d
 load1="$(num "$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)")"
 radio_fail="$(num "$(cat /var/lib/sos-gateway/radio_fail 2>/dev/null || echo 0)")"
 ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+cfg="$(jq -c . /etc/sos-gateway-config.json 2>/dev/null || echo null)"
+ver() { "$1" --version 2>&1 | head -1 | grep -Eo '[0-9]+(\.[0-9]+){1,3}([+-][0-9A-Za-z.-]+)?' | head -1; }
+agent_ver="$(grep -E '^# VERSION=' /usr/local/bin/sos-gateway-agent 2>/dev/null | head -1 | cut -d= -f2)"
+report_ver="4"; conc_ver="$(ver /usr/local/bin/chirpstack-concentratord-sx1302)"; fwd_ver="$(ver /usr/local/bin/chirpstack-mqtt-forwarder)"
+bundle_ver="$(tr -dc '0-9A-Za-z._+:-' </etc/sos-gateway-version 2>/dev/null || true)"
+# MQTT is TLS-protected. Report the server-certificate lifetime so it can be renewed before monitoring is interrupted.
+tls_days=null
+if [ -n "${DOMAIN:-}" ] && command -v openssl >/dev/null 2>&1; then
+  tls_end="$(timeout 8 openssl s_client -connect "$DOMAIN:8883" -servername "$DOMAIN" </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+  if [ -n "$tls_end" ]; then
+    tls_epoch="$(date -d "$tls_end" +%s 2>/dev/null || true)"; now_epoch="$(date +%s)"
+    [[ "$tls_epoch" =~ ^[0-9]+$ ]] && tls_days="$(( (tls_epoch - now_epoch) / 86400 ))"
+  fi
+fi
 
 # Optional GPS (USB/UART module + gpsd, see docs/GPS-kit.md): report the fix so the dashboard can show the position and
 # warn if the gateway is moved. Without gpsd/gpspipe this block does nothing and the field is simply absent.
@@ -44,9 +58,12 @@ json="$(jq -cn \
   --argjson spi  "$(bool test -e /dev/spidev0.0)" \
   --argjson ntp  "$(bool bash -c 'timedatectl show -p NTPSynchronized --value | grep -q yes')" \
   --argjson agent "$(bool systemctl is-active --quiet sos-gateway-agent)" \
-  --arg ip "$ip" --arg sw "sos-gw-report 3" --argjson gps "$gps" \
+  --arg ip "$ip" --arg sw "sos-gw-report 4" --argjson gps "$gps" --argjson config "$cfg" \
+  --arg agent_ver "${agent_ver:-1}" --arg report_ver "$report_ver" --arg conc_ver "$conc_ver" --arg fwd_ver "$fwd_ver" --arg bundle_ver "$bundle_ver" --argjson tls_days "$tls_days" \
   '{uptime_s:$uptime_s, cpu_temp_c:$cpu_temp_c, throttled:$throttled, disk_pct:$disk_pct, mem_pct:$mem_pct, load1:$load1,
-    radio_fail:$radio_fail, services:{concentratord:$conc, forwarder:$fwd}, spi:$spi, ntp:$ntp, agent:$agent, ip:$ip, sw:$sw}
+    radio_fail:$radio_fail, services:{concentratord:$conc, forwarder:$fwd}, spi:$spi, ntp:$ntp, agent:$agent, ip:$ip, sw:$sw, tls_days:$tls_days,
+    versions:{agent:$agent_ver,report:$report_ver,concentratord:$conc_ver,forwarder:$fwd_ver,bundle:$bundle_ver}}
+    + (if $config != null then {config:$config} else {} end)
     + (if $gps != null then {gps:$gps} else {} end)')" || { echo "jq failed" >&2; exit 1; }
 
 if [ "${1:-}" = "--print" ]; then echo "$json"; exit 0; fi

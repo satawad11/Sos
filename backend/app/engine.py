@@ -138,6 +138,16 @@ class Engine:
             return "ignored"
         c.status = "ok" if res["ok"] else "failed"
         c.detail, c.output, c.done_at = res["detail"], res["output"], utcnow()
+        if c.action == "apply_config":
+            from .models import Gateway
+            g = db.query(Gateway).filter_by(gateway_id=gateway_id).first()
+            if g:
+                ver = int((c.payload or {}).get("version", 0))
+                if res["ok"]:
+                    g.config_applied_ver = max(g.config_applied_ver or 0, ver)
+                    g.config_status, g.config_error, g.config_applied_at = "applied", "", c.done_at
+                else:
+                    g.config_status, g.config_error = "failed", res["detail"][:240]
         db.commit()
         self.publish({"type": "gateway_cmd", "gateway_id": gateway_id, "action": c.action, "status": c.status})
         return c.status

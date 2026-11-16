@@ -242,6 +242,15 @@ class Gateway(Base):
     maint_end: Mapped[str | None] = mapped_column(String(8), nullable=True)  # online (ends when it is back) | time | manual
     maint_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     maint_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Desired configuration is deliberately limited to the safe fields understood by sos-gateway-agent.  Secrets,
+    # radio channels and the gateway id never travel through this mechanism.
+    config_desired: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    config_ver: Mapped[int] = mapped_column(Integer, default=0)
+    config_applied_ver: Mapped[int] = mapped_column(Integer, default=0)
+    config_status: Mapped[str] = mapped_column(String(12), default="idle")  # idle|pending|applied|failed
+    config_error: Mapped[str] = mapped_column(String(240), default="")
+    config_updated_at: Mapped[datetime | None] = _dt(nullable=True)
+    config_applied_at: Mapped[datetime | None] = _dt(nullable=True)
 
 
 class GatewayCommand(Base):
@@ -254,6 +263,7 @@ class GatewayCommand(Base):
     status: Mapped[str] = mapped_column(String(10), default="pending")     # pending | ok | failed | expired
     detail: Mapped[str] = mapped_column(String(240), default="")
     output: Mapped[str] = mapped_column(Text, default="")                  # e.g. log tail (sanitised, size-capped)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)       # validated arguments for internal actions
     requested_by: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = _dt(default=utcnow)
     done_at: Mapped[datetime | None] = _dt(nullable=True)

@@ -1,17 +1,20 @@
 """Buttons (devices), gateways and their remote commands, and the map.
 Split out of api.py; shared helpers and the engine handle still live there."""
 from __future__ import annotations
+import json, re
+from urllib.parse import urlparse
 from fastapi import APIRouter
 from . import gateways as gwmod, geo, gwcmd, netmon, privacy, provision as prov, settings_store
 from .auth import admin_only, audit, current_user, staff_or_admin
 from .db import get_db
 from .engine import aware
-from .models import Caregiver, Case, Device, Gateway, GatewayCommand, Patient, utcnow
+from .models import AuditLog, Caregiver, Case, Device, Gateway, GatewayCommand, Patient, utcnow
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from .api import EUI_RE, get_engine, iso
+from .config import env
 
 router = APIRouter(prefix="/api")
 
@@ -179,6 +182,11 @@ def gw_dict(g: Gateway, now, off: int, n_dev: dict, move_m: int = 200, role: str
             "devices": n_dev.get(g.gateway_id, 0), "devices_heard": (heard or {}).get(g.gateway_id, 0), "report": g.report or {}, "critical": crit, "warnings": warn, "loc": loc,
             "notes": g.notes or "", "offline_min": g.offline_min, "offline_min_effective": g.offline_min or off,
             "alert_ids": g.alert_ids, "alerts_muted": bool(g.alerts_muted), "agent": rep.get("agent") is True,
+            "gateway_config": {"desired": g.config_desired or {}, "version": g.config_ver or 0,
+                               "applied_version": g.config_applied_ver or 0, "status": g.config_status or "idle",
+                               "error": g.config_error or "", "updated_at": iso(g.config_updated_at),
+                               "applied_at": iso(g.config_applied_at), "reported": rep.get("config") or {}},
+            "versions": rep.get("versions") or {},
             "maint": {"since": iso(g.maint_since), "until": iso(g.maint_until), "end": g.maint_end or "online",
                       "reason": g.maint_reason or "", "by": g.maint_by or ""} if g.alerts_muted else None}
 
@@ -206,6 +214,18 @@ def gateway_impact(gid: int, db: Session = Depends(get_db), u=Depends(staff_or_a
                      "patient": {"id": p.id, "full_name": p.full_name, "phone": p.phone, "village": p.village} if p else None})
     rows.sort(key=lambda r: (not r["only_here"], r["label"]))
     return {"gateway_id": g.gateway_id, "total": len(rows), "only_here": sum(r["only_here"] for r in rows), "devices": rows}
+
+
+@router.get("/gateways/{gid}/timeline")
+def gateway_timeline(gid: int, limit: int = 40, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    """Concise, privacy-safe history for field troubleshooting: outages, maintenance and signed commands."""
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    actions = ("gateway_offline", "gateway_online", "gateway_offline_repeat", "gateway_maint_on", "gateway_maint_change",
+               "gateway_maint_off", "gateway_maint_overdue", "gateway_command", "gateway_update")
+    rows = (db.query(AuditLog).filter(AuditLog.target == g.gateway_id, AuditLog.action.in_(actions))
+            .order_by(AuditLog.id.desc()).limit(min(max(limit, 1), 100)).all())
+    return [{"at": iso(r.at), "actor": r.actor, "action": r.action, "detail": r.detail or {}} for r in rows]
 
 
 class LocationIn(BaseModel):
@@ -476,7 +496,28 @@ def _expire_commands(db: Session, gateway_id: str | None = None):
     for c in q.all():
         if (now - aware(c.created_at)).total_seconds() > gwcmd.EXPIRE_S:
             c.status, c.detail, c.done_at = "expired", "ไม่มีคำตอบจากเกตเวย์ (ออฟไลน์ หรือยังไม่ได้เปิดตัวช่วยควบคุม)", now; n += 1
+            if c.action == "apply_config":
+                g = db.query(Gateway).filter_by(gateway_id=c.gateway_id).first()
+                if g and g.config_status == "pending": g.config_status, g.config_error = "failed", c.detail
     if n: db.commit()
+
+
+def _queue_gateway_command(db: Session, g: Gateway, action: str, actor: str, params: dict | None = None) -> GatewayCommand:
+    if (g.report or {}).get("agent") is not True:
+        raise HTTPException(409, "เกตเวย์นี้ยังไม่ได้ติดตั้ง/เปิด sos-gateway-agent (ดูคู่มือ docs/GATEWAY-REMOTE.md)")
+    _expire_commands(db, g.gateway_id)
+    if db.query(GatewayCommand).filter_by(gateway_id=g.gateway_id, status="pending").first():
+        raise HTTPException(409, "มีคำสั่งที่ยังรอคำตอบอยู่ รอสักครู่")
+    eng = get_engine()
+    if eng.gw_cmd_publish is None or not eng.mqtt_ok(): raise HTTPException(503, "ระบบยังเชื่อมต่อ MQTT ไม่ได้")
+    cid, message = gwcmd.make_command(g.gateway_id, action, params=params)
+    c = GatewayCommand(cmd_id=cid, gateway_id=g.gateway_id, action=action, requested_by=actor, payload=params)
+    db.add(c); db.flush()
+    if not eng.gw_cmd_publish(g.gateway_id, message):
+        db.rollback(); raise HTTPException(503, "ส่งคำสั่งไม่สำเร็จ (MQTT)")
+    audit(db, actor, "gateway_command", g.gateway_id, cmd=action, cmd_id=cid)
+    db.commit()
+    return c
 
 
 class GwCommandIn(BaseModel):
@@ -489,29 +530,79 @@ def gateway_commands(gid: int, db: Session = Depends(get_db), u=Depends(admin_on
     if not g: raise HTTPException(404)
     _expire_commands(db, g.gateway_id)
     rows = db.query(GatewayCommand).filter_by(gateway_id=g.gateway_id).order_by(GatewayCommand.id.desc()).limit(10).all()
-    return {"actions": gwcmd.ACTIONS, "agent": (g.report or {}).get("agent") is True, "commands": [_cmd_dict(c) for c in rows]}
+    return {"actions": gwcmd.USER_ACTIONS, "agent": (g.report or {}).get("agent") is True, "commands": [_cmd_dict(c) for c in rows]}
 
 
 @router.post("/gateways/{gid}/commands")
 def gateway_command(gid: int, b: GwCommandIn, db: Session = Depends(get_db), u=Depends(admin_only)):
     g = db.get(Gateway, gid)
     if not g: raise HTTPException(404)
-    if b.action not in gwcmd.ACTIONS: raise HTTPException(422, "unknown action")
-    if (g.report or {}).get("agent") is not True:
-        raise HTTPException(409, "เกตเวย์นี้ยังไม่ได้ติดตั้ง/เปิด sos-gateway-agent (ดูคู่มือ docs/GATEWAY-REMOTE.md)")
-    _expire_commands(db, g.gateway_id)
-    if db.query(GatewayCommand).filter_by(gateway_id=g.gateway_id, status="pending").first():
-        raise HTTPException(409, "มีคำสั่งที่ยังรอคำตอบอยู่ รอสักครู่")
-    eng = get_engine()
-    if eng.gw_cmd_publish is None or not eng.mqtt_ok(): raise HTTPException(503, "ระบบยังเชื่อมต่อ MQTT ไม่ได้")
-    cid, payload = gwcmd.make_command(g.gateway_id, b.action)
-    c = GatewayCommand(cmd_id=cid, gateway_id=g.gateway_id, action=b.action, requested_by=u.username)
-    db.add(c); db.flush()
-    if not eng.gw_cmd_publish(g.gateway_id, payload):
-        db.rollback(); raise HTTPException(503, "ส่งคำสั่งไม่สำเร็จ (MQTT)")
-    audit(db, u.username, "gateway_command", g.gateway_id, cmd=b.action, cmd_id=cid)
-    db.commit()
-    return _cmd_dict(c)
+    if b.action not in gwcmd.USER_ACTIONS: raise HTTPException(422, "unknown action")
+    return _cmd_dict(_queue_gateway_command(db, g, b.action, u.username))
+
+
+class GatewayConfigIn(BaseModel):
+    antenna_gain: float = Field(ge=0, le=30)
+    log_level: str = Field(pattern="^(TRACE|DEBUG|INFO|WARN|ERROR)$")
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    report_interval_s: int = Field(ge=30, le=3600)
+
+
+def _releases() -> list[dict]:
+    try: rows = json.loads(env.gateway_releases_json or "[]")
+    except ValueError: return []
+    out = []
+    for x in rows if isinstance(rows, list) else []:
+        if not isinstance(x, dict): continue
+        version, url, sha = x.get("version"), x.get("url"), x.get("sha256")
+        p = urlparse(url) if isinstance(url, str) else None
+        if (isinstance(version, str) and re.fullmatch(r"[0-9A-Za-z._+:-]{1,48}", version) and p and p.scheme == "https" and p.hostname
+                and isinstance(sha, str) and len(sha) == 64 and all(c in "0123456789abcdefABCDEF" for c in sha)):
+            out.append({"version": version, "url": url, "sha256": sha.lower()})
+    return out
+
+
+@router.get("/gateways/{gid}/config")
+def gateway_config(gid: int, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    reported = (g.report or {}).get("config") or {}
+    desired = g.config_desired or {"antenna_gain": reported.get("antenna_gain", 2), "log_level": reported.get("log_level", "INFO"),
+                                   "latitude": reported.get("latitude", g.lat or 0), "longitude": reported.get("longitude", g.lon or 0),
+                                   "report_interval_s": reported.get("report_interval_s", 60)}
+    return {"desired": desired, "reported": reported, "version": g.config_ver or 0,
+            "applied_version": g.config_applied_ver or 0, "status": g.config_status or "idle",
+            "error": g.config_error or "", "updated_at": iso(g.config_updated_at), "applied_at": iso(g.config_applied_at),
+            "versions": (g.report or {}).get("versions") or {}, "releases": _releases()}
+
+
+@router.put("/gateways/{gid}/config")
+def gateway_config_update(gid: int, b: GatewayConfigIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    cfg = b.model_dump()
+    if not geo.valid_latlon(cfg["latitude"], cfg["longitude"]): raise HTTPException(422, "latitude/longitude must be valid and not 0,0")
+    if g.config_desired == cfg and g.config_status == "applied": return {"ok": True, "changed": False, "version": g.config_ver}
+    g.config_ver = (g.config_ver or 0) + 1
+    g.config_desired, g.config_status, g.config_error, g.config_updated_at = cfg, "pending", "", utcnow()
+    params = {"version": g.config_ver, **cfg}
+    c = _queue_gateway_command(db, g, "apply_config", u.username, params)
+    return {"ok": True, "changed": True, "version": g.config_ver, "command": _cmd_dict(c)}
+
+
+class GatewayUpdateIn(BaseModel):
+    version: str = Field(pattern=r"^[0-9A-Za-z._+:-]{1,48}$")
+
+
+@router.post("/gateways/{gid}/update")
+def gateway_update(gid: int, b: GatewayUpdateIn, db: Session = Depends(get_db), u=Depends(admin_only)):
+    g = db.get(Gateway, gid)
+    if not g: raise HTTPException(404)
+    rel = next((x for x in _releases() if x["version"] == b.version), None)
+    if not rel: raise HTTPException(422, "รุ่นนี้ไม่ได้อยู่ในรายการ release ที่เซิร์ฟเวอร์อนุมัติ")
+    c = _queue_gateway_command(db, g, "update", u.username, rel)
+    return {"ok": True, "command": _cmd_dict(c)}
 
 
 @router.get("/gateways/{gid}/agent-key")

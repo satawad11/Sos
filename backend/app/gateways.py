@@ -26,7 +26,7 @@ log = logging.getLogger("sos.gateways")
 GW_RE = re.compile(r"^[0-9a-f]{16}$")
 DEGRADED_GRACE_S = 180          # radio path reported dead this long => counts as DOWN
 STARTUP_GRACE_S = 120           # after (re)connecting to MQTT wait for fresh reports before judging anyone
-MAX_REPORT_BYTES = 2048
+MAX_REPORT_BYTES = 4096
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -55,6 +55,9 @@ def sanitize_report(d) -> dict | None:
         v = _num(d.get(key), lo, hi, cast)
         if v is not None:
             out[key] = round(v, 1) if cast is float else v
+    tls_days = _num(d.get("tls_days"), -365, 3650, int)
+    if tls_days is not None:
+        out["tls_days"] = tls_days
     for key in ("spi", "ntp", "agent"):
         v = _flag(d.get(key))
         if v is not None:
@@ -69,6 +72,24 @@ def sanitize_report(d) -> dict | None:
         v = d.get(key)
         if isinstance(v, str) and re.fullmatch(r"[0-9A-Za-z .:_/+-]{1,40}", v):
             out[key] = v
+    versions = d.get("versions")
+    if isinstance(versions, dict):
+        clean = {}
+        for key in ("agent", "report", "concentratord", "forwarder", "bundle"):
+            v = versions.get(key)
+            if isinstance(v, str) and re.fullmatch(r"[0-9A-Za-z._+:-]{1,48}", v): clean[key] = v
+        if clean: out["versions"] = clean
+    cfg = d.get("config")
+    if isinstance(cfg, dict):
+        clean = {}
+        for key, lo, hi, cast in (("version", 0, 2 ** 31 - 1, int), ("antenna_gain", 0, 30, float),
+                                  ("latitude", -90, 90, float), ("longitude", -180, 180, float),
+                                  ("report_interval_s", 30, 3600, int)):
+            v = _num(cfg.get(key), lo, hi, cast)
+            if v is not None: clean[key] = v
+        lv = cfg.get("log_level")
+        if lv in ("TRACE", "DEBUG", "INFO", "WARN", "ERROR"): clean["log_level"] = lv
+        if clean: out["config"] = clean
     gp = d.get("gps")
     if isinstance(gp, dict):
         lat, lon = gp.get("lat"), gp.get("lon")
@@ -110,6 +131,8 @@ def warnings(rep: dict | None) -> list[str]:
     if rep.get("disk_pct", 0) >= 90: out.append(f"การ์ดเต็ม {rep['disk_pct']}%")
     if rep.get("mem_pct", 0) >= 90: out.append(f"หน่วยความจำเต็ม {rep['mem_pct']}%")
     if rep.get("ntp") is False: out.append("เวลายังไม่ซิงก์ (NTP)")
+    if rep.get("tls_days") is not None and rep["tls_days"] < 14:
+        out.append("ใบรับรอง MQTT หมดอายุ" if rep["tls_days"] < 0 else f"ใบรับรอง MQTT เหลือ {rep['tls_days']} วัน")
     return out
 
 
@@ -186,6 +209,12 @@ class GatewayMonitor:
         g = self._get(db, gid)
         g.last_seen = g.last_report_at = now
         g.report = rep
+        reported_cfg = rep.get("config") or {}
+        rv = reported_cfg.get("version")
+        if isinstance(rv, int) and rv >= (g.config_applied_ver or 0):
+            g.config_applied_ver = rv
+            if rv == (g.config_ver or 0):
+                g.config_status, g.config_error, g.config_applied_at = "applied", "", now
         gp = rep.get("gps")
         if gp and gp.get("fix") and gp.get("sats", 4) >= 4:        # ignore 2-3 satellite "fixes": they can be hundreds of metres off
             g.gps_lat, g.gps_lon, g.gps_at, g.gps_sats = gp["lat"], gp["lon"], now, gp.get("sats")

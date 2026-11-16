@@ -39,7 +39,8 @@ def test_empty_database_is_created_at_head():
     _wipe()
     assert appdb.migrate() == "created"
     insp = inspect(engine)
-    assert all(insp.has_table(t) for t in NEW_TABLES) and _version() == "0002"
+    assert all(insp.has_table(t) for t in NEW_TABLES) and _version() == "0003"
+    assert {"config_desired", "config_ver", "config_applied_ver", "config_status"} <= {c["name"] for c in insp.get_columns("sos_gateways")}
     assert appdb.migrate() == "upgraded"          # second start: nothing to do, no error
 
 
@@ -47,7 +48,7 @@ def test_legacy_database_is_adopted_and_upgraded():
     _legacy()
     assert appdb.migrate() == "adopted"
     insp = inspect(engine)
-    assert all(insp.has_table(t) for t in NEW_TABLES) and _version() == "0002"
+    assert all(insp.has_table(t) for t in NEW_TABLES) and _version() == "0003"
     assert "ix_sos_cases_state" in {i["name"] for i in insp.get_indexes("sos_cases")}
     assert "ix_sos_audit_log_action" in {i["name"] for i in insp.get_indexes("sos_audit_log")}
     with SessionLocal() as db:

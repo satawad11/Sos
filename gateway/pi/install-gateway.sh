@@ -105,6 +105,10 @@ sed -e "s|@GATEWAY_ID@|$GATEWAY_ID|g" -e "s|@DOMAIN@|$DOMAIN|g" -e "s|@MQTT_PASS
 install -m644 "$CA_FILE" /etc/chirpstack-mqtt-forwarder/ca.crt
 chmod 600 /etc/chirpstack-mqtt-forwarder/chirpstack-mqtt-forwarder.toml
 printf 'DOMAIN=%s\nGATEWAY_ID=%s\nTOPIC_PREFIX=as923\n' "$DOMAIN" "$GATEWAY_ID" > /etc/sos-gateway.env
+printf '{"version":0,"antenna_gain":%s,"log_level":"INFO","latitude":%s,"longitude":%s,"report_interval_s":60}\n' \
+  "$ANTENNA_GAIN" "$LAT" "$LON" >/etc/sos-gateway-config.json
+chmod 600 /etc/sos-gateway-config.json
+[ -f /etc/sos-gateway-version ] || printf 'initial\n' >/etc/sos-gateway-version
 # credentials for the health reporter (mosquitto_pub reads $XDG_CONFIG_HOME/mosquitto_pub); root-only, keeps the password out of `ps`
 install -d -m700 /etc/sos-gateway
 # one option per line: mosquitto_pub does NOT accept several options on one line (verified against a real broker)

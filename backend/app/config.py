@@ -25,6 +25,9 @@ class Env(BaseSettings):
     bootstrap_admin_user: str = "admin"
     bootstrap_admin_password: str = ""
     update_dir: str = "/update"   # shared with the host updater (infra/update ↔ /update); see docs/UPDATE.md
+    # JSON list of approved gateway bundles. Example:
+    # [{"version":"1.2.0","url":"https://github.com/org/repo/releases/download/gw-1.2.0/gateway.tar.gz","sha256":"..."}]
+    gateway_releases_json: str = "[]"
 
 
 env = Env()

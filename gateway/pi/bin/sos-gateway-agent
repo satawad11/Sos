@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
+# VERSION=2
 # SOS gateway remote-action agent. Listens on  <prefix>/gateway/<id>/sos/cmd  for commands from the VPS backend and answers on
 # <prefix>/gateway/<id>/sos/cmd-result. Run by systemd (sos-gateway-agent.service) as root.
 #
 # SAFETY (read before changing anything here):
-#   * a FIXED whitelist of 4 actions; the message never supplies a command line, path or argument -> nothing to inject
+#   * a fixed action whitelist. Structured parameters exist only for apply_config/update and are range/schema checked;
+#     no message field is ever evaluated as a command line.
 #   * every command must carry  sig = HMAC-SHA256(AGENT_KEY, "<id>|<action>|<ts>");  wrong/missing signature -> ignored
 #   * commands older (or newer) than SOS_AGENT_MAX_AGE seconds (default 120) are ignored; ids already seen are ignored (replay)
 #   * the key is per gateway (copy it from the dashboard: Gateways -> this gateway -> "Remote control"); keep /etc/sos-gateway.env mode 600
@@ -27,13 +29,78 @@ reply() {   # reply <id> <ok:true|false> <detail> [output]
 act() { if [ "$DRYRUN" = 1 ]; then echo "DRYRUN $*"; return 0; fi; "$@"; }     # the ONLY place that touches the system
 redact() { sed -E 's/((pass(word)?|secret|token|key)[=:] *)[^ ]+/\1***/Ig'; }
 
+apply_config() {
+  local p="$1" ver gain level lat lon interval cfg tmp backup timer_dir timer_file timer_backup
+  ver="$(jq -r '.version' <<<"$p")"; gain="$(jq -r '.antenna_gain' <<<"$p")"; level="$(jq -r '.log_level' <<<"$p")"
+  lat="$(jq -r '.latitude' <<<"$p")"; lon="$(jq -r '.longitude' <<<"$p")"; interval="$(jq -r '.report_interval_s' <<<"$p")"
+  jq -e '((keys|sort) == ["antenna_gain","latitude","log_level","longitude","report_interval_s","version"]) and
+    (.version|type=="number" and floor==. and .>=1 and .<=2147483647) and
+    (.antenna_gain|type=="number" and .>=0 and .<=30) and
+    (.log_level|IN("TRACE","DEBUG","INFO","WARN","ERROR")) and
+    (.latitude|type=="number" and .>=-90 and .<=90) and (.longitude|type=="number" and .>=-180 and .<=180) and
+    ((.latitude != 0) or (.longitude != 0)) and
+    (.report_interval_s|type=="number" and floor==. and .>=30 and .<=3600)' <<<"$p" >/dev/null || return 2
+  cfg=/etc/chirpstack-concentratord/concentratord.toml; [ -f "$cfg" ] || return 3
+  tmp="$(mktemp)"; backup="$(mktemp)"; cp "$cfg" "$backup"
+  sed -E -e "s/^[[:space:]]*log_level=.*/  log_level=\"$level\"/" \
+    -e "s/^[[:space:]]*antenna_gain=.*/  antenna_gain=$gain/" \
+    -e "s/^[[:space:]]*latitude=.*/    latitude=$lat/" \
+    -e "s/^[[:space:]]*longitude=.*/    longitude=$lon/" "$cfg" >"$tmp" || { rm -f "$tmp" "$backup"; return 4; }
+  python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$tmp" >/dev/null 2>&1 || { rm -f "$tmp" "$backup"; return 5; }
+  timer_dir=/etc/systemd/system/sos-gateway-report.timer.d; timer_file="$timer_dir/override.conf"; mkdir -p "$timer_dir"
+  timer_backup="$(mktemp)"; [ -f "$timer_file" ] && cp "$timer_file" "$timer_backup" || : >"$timer_backup"
+  install -m 644 "$tmp" "$cfg"
+  printf '[Timer]\nOnUnitActiveSec=\nOnUnitActiveSec=%ss\n' "$interval" >"$timer_file"
+  systemctl daemon-reload
+  if systemctl restart chirpstack-concentratord && sleep 3 && systemctl is-active --quiet chirpstack-concentratord \
+      && systemctl restart chirpstack-mqtt-forwarder && systemctl restart sos-gateway-report.timer; then
+    jq -n --argjson version "$ver" --argjson antenna_gain "$gain" --arg log_level "$level" --argjson latitude "$lat" \
+      --argjson longitude "$lon" --argjson report_interval_s "$interval" \
+      '{version:$version,antenna_gain:$antenna_gain,log_level:$log_level,latitude:$latitude,longitude:$longitude,report_interval_s:$report_interval_s}' \
+      >/etc/sos-gateway-config.json
+    chmod 600 /etc/sos-gateway-config.json; rm -f "$tmp" "$backup" "$timer_backup"; return 0
+  fi
+  install -m 644 "$backup" "$cfg"
+  if [ -s "$timer_backup" ]; then install -m 644 "$timer_backup" "$timer_file"; else rm -f "$timer_file"; fi
+  systemctl daemon-reload; systemctl restart chirpstack-concentratord chirpstack-mqtt-forwarder sos-gateway-report.timer || true
+  rm -f "$tmp" "$backup" "$timer_backup"; return 6
+}
+
+update_gateway() {
+  local p version url sha work archive root f backup old_version
+  jq -e '((keys|sort) == ["sha256","url","version"]) and (.version|type=="string" and test("^[0-9A-Za-z._+:-]{1,48}$")) and
+    (.url|type=="string" and test("^https://")) and (.sha256|type=="string" and test("^[0-9a-f]{64}$"))' <<<"$p" >/dev/null || return 2
+  version="$(jq -r '.version' <<<"$p")"; url="$(jq -r '.url' <<<"$p")"; sha="$(jq -r '.sha256' <<<"$p")"
+  work="$(mktemp -d)"; archive="$work/gateway.tar.gz"; root="$work/root"; backup="$work/backup"; mkdir -p "$root" "$backup"
+  old_version="$(cat /etc/sos-gateway-version 2>/dev/null || true)"
+  curl -fsSL --proto '=https' --proto-redir '=https' --max-time 120 -o "$archive" "$url" || { rm -rf "$work"; return 3; }
+  [ "$(sha256sum "$archive" | awk '{print $1}')" = "$sha" ] || { rm -rf "$work"; return 4; }
+  tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))' && { rm -rf "$work"; return 5; }
+  tar -xzf "$archive" -C "$root" || { rm -rf "$work"; return 5; }
+  for f in sos-gateway-agent sos-gateway-report sos-gateway-health; do
+    [ -f "$root/bin/$f" ] && [ ! -L "$root/bin/$f" ] || { rm -rf "$work"; return 6; }
+    bash -n "$root/bin/$f" || { rm -rf "$work"; return 6; }
+    cp "/usr/local/bin/$f" "$backup/$f"
+  done
+  for f in sos-gateway-agent sos-gateway-report sos-gateway-health; do install -m 755 "$root/bin/$f" "/usr/local/bin/$f"; done
+  printf '%s\n' "$version" >/etc/sos-gateway-version
+  if /usr/local/bin/sos-gateway-report --print >/dev/null && systemctl restart sos-gateway-health.timer sos-gateway-report.timer; then
+    rm -rf "$work"; return 0
+  fi
+  for f in sos-gateway-agent sos-gateway-report sos-gateway-health; do install -m 755 "$backup/$f" "/usr/local/bin/$f"; done
+  printf '%s\n' "$old_version" >/etc/sos-gateway-version
+  rm -rf "$work"; return 7
+}
+
 handle() {
-  local line="$1" id action ts sig now age exp
+  local line="$1" id action ts sig now age exp params has_params signed rc
   [ "${#line}" -le 1000 ] || { log "oversized message ignored"; return; }
   read -r id action ts sig < <(printf '%s' "$line" | jq -r '[(.id|strings), (.action|strings), (.ts|numbers|floor|tostring), (.sig|strings)] | @tsv' 2>/dev/null) || true
   [[ "${id:-}" =~ ^[0-9a-f]{16}$ && "${ts:-}" =~ ^[0-9]{9,12}$ && "${sig:-}" =~ ^[0-9a-f]{64}$ ]] || { log "malformed command ignored"; return; }
-  case "$action" in report_now|logs|restart_services|reboot) ;; *) log "unknown action ignored"; return ;; esac
-  exp="$(printf '%s|%s|%s' "$id" "$action" "$ts" | openssl dgst -sha256 -hmac "$AGENT_KEY" -r | cut -d' ' -f1)"
+  case "$action" in report_now|logs|restart_services|reboot|apply_config|update) ;; *) log "unknown action ignored"; return ;; esac
+  has_params="$(jq -r 'has("params")' <<<"$line" 2>/dev/null)"; params="$(jq -cS '.params // {}' <<<"$line" 2>/dev/null)" || return
+  signed="$id|$action|$ts"; [ "$has_params" = true ] && signed="$signed|$params"
+  exp="$(printf '%s' "$signed" | openssl dgst -sha256 -hmac "$AGENT_KEY" -r | cut -d' ' -f1)"
   [ "$exp" = "$sig" ] || { log "BAD SIGNATURE ($action) ignored"; return; }
   now="$(date +%s)"; age=$(( now - ts )); [ "$age" -lt 0 ] && age=$(( -age ))
   [ "$age" -le "$MAX_AGE" ] || { log "stale command ($age s) ignored — is the clock (chrony) in sync?"; return; }
@@ -53,6 +120,17 @@ handle() {
     reboot)
       reply "$id" true "จะรีบูตใน 5 วินาที (ปุ่มผู้ป่วยจะส่งไม่ได้ประมาณ 1–2 นาที)"
       act systemd-run --on-active=5s --unit="sos-agent-reboot-$id" systemctl reboot >/dev/null 2>&1 ;;
+    apply_config)
+      if [ "$DRYRUN" = 1 ]; then reply "$id" true "DRYRUN: ตรวจค่าแล้ว" "$params"
+      else apply_config "$params"; rc=$?; [ "$rc" = 0 ] && reply "$id" true "นำค่าตั้งไปใช้แล้ว" || reply "$id" false "ใช้ค่าไม่สำเร็จ ย้อนกลับค่าเดิมแล้ว (code $rc)"; fi ;;
+    update)
+      if [ "$DRYRUN" = 1 ]; then reply "$id" true "DRYRUN: ตรวจ release แล้ว" "$(jq -r .version <<<"$params")"
+      else update_gateway "$params"; rc=$?
+        if [ "$rc" = 0 ]; then
+          reply "$id" true "อัปเดตแล้ว" "$(jq -r .version <<<"$params")"
+          systemd-run --on-active=3s --unit="sos-agent-restart-$id" systemctl restart sos-gateway-agent >/dev/null 2>&1 || true
+        else reply "$id" false "อัปเดตไม่สำเร็จ/ย้อนกลับแล้ว (code $rc)"; fi
+      fi ;;
   esac
 }
 
