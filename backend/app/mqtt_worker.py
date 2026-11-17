@@ -123,6 +123,15 @@ class MqttWorker:
             return
         with SessionLocal() as db:
             try:
+                if fport == 5:
+                    from .models import AuditLog, Device
+                    if len(data) == 5 and data[0] == 1:
+                        dev = db.query(Device).filter_by(dev_eui=dev_eui).first()
+                        if dev:
+                            db.add(AuditLog(actor="device", action="device_diagnostic", target=dev_eui,
+                                detail={"reset_reason":data[1],"config_ver":data[2],"heap_kb":data[3],"battery":data[4]}))
+                            db.commit()
+                    return
                 if fport == codec.FPORT_LOC:
                     log.info("location %s -> %s", dev_eui, self.engine.handle_location(db, dev_eui, data, meta))
                     return

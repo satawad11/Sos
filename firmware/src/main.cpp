@@ -5,6 +5,8 @@
 #include <RadioLib.h>
 #include <U8g2lib.h>
 #include <Wire.h>
+#include <esp_task_wdt.h>
+#include <esp_system.h>
 #include "config.h"
 #if SOS_GPS
 #include "gps_nmea.h"
@@ -110,7 +112,14 @@ uint8_t readBatteryPct(bool* charging = nullptr) {
   float pct = (v - 3.3f) / (4.15f - 3.3f) * 100.0f;
   return (uint8_t)constrain((int)pct, 0, 100);
 }
-bool mainsOk() { return digitalRead(PIN_MAINS) == HIGH; }
+bool mainsOk() {
+  static bool stable=digitalRead(PIN_MAINS)==HIGH, candidate=stable;
+  static uint32_t since=0;
+  bool raw=digitalRead(PIN_MAINS)==HIGH;
+  if(raw!=candidate){candidate=raw;since=millis();}
+  if(millis()-since>=3000)stable=candidate;
+  return stable;
+}
 
 void buzz(bool on) { digitalWrite(PIN_BUZZER, on && g_cfg.buzzer > 0 ? HIGH : LOW); }
 
@@ -180,7 +189,7 @@ void uiTask(void*) {
         case UI_JOIN_FAIL: l1 = "NO NETWORK"; l2 = "retrying"; break;
         case UI_READY: l1 = "READY"; l2 = "hold red button"; break;
         case UI_SENDING: l1 = "SENDING..."; l2 = "keep calm"; break;
-        case UI_SENT_WAIT: l1 = "SENT"; l2 = "waiting staff"; break;
+        case UI_SENT_WAIT: l1 = "NETWORK RECEIVED"; l2 = "waiting staff"; break;
         case UI_FAIL: l1 = "NOT SENT!"; l2 = "CALL 1669"; break;
         case UI_ACCEPTED: l1 = "STAFF ACCEPTED"; l2 = "help is coming"; break;
         case UI_CLOSED: l1 = "CASE CLOSED"; l2 = ""; break;
@@ -257,9 +266,13 @@ void applyDownlink(const uint8_t* d, size_t n, uint8_t port, uint8_t alertId, in
   else if (port == FPORT_ACK_L2 && n == 3 && d[0] == ((PROTO_VER << 4) | T_ACK_L2) && d[1] == alertId && ackResult)
     *ackResult = d[2];
   else if (port == FPORT_CONFIG && n == 6 && d[0] == ((PROTO_VER << 4) | T_CONFIG)) {
+    if (d[2] == 0 || d[3] < 5 || d[3] > 120 || d[4] > 3 || d[5] < 5 || d[5] > 50) {
+      Serial.println("[config] rejected invalid values"); return;
+    }
     g_cfg.ver = d[1]; g_cfg.heartbeat_min = max<uint16_t>(5, d[2] * 5); g_cfg.poll_s = constrain(d[3], 5, 120);
     g_cfg.buzzer = min<uint8_t>(d[4], 3); g_cfg.hold_ms = constrain(d[5] * 100, 500, 5000);
     saveConfig();
+    Serial.printf("[config] applied ver=%u hb=%u poll=%u buzzer=%u hold=%u\n", g_cfg.ver, g_cfg.heartbeat_min, g_cfg.poll_s, g_cfg.buzzer, g_cfg.hold_ms);
   }
 }
 
@@ -303,6 +316,12 @@ void serialCommands() {
     if (c != '\n' && c != '\r') { if (line.length() < 200) line += c; continue; }
     line.trim(); String cmd = line; line = ""; if (!cmd.length()) continue;
     if (cmd == "PING") Serial.println("PONG");
+    else if (cmd == "DIAG") {
+      Serial.printf("DIAG reset=%d heap=%u battery=%u mains=%d joined=%d cfg=%u hb=%u poll=%u pending=%u\n",
+        (int)esp_reset_reason(),(unsigned)ESP.getFreeHeap(),readBatteryPct(),mainsOk(),g_joined,g_cfg.ver,
+        g_cfg.heartbeat_min,g_cfg.poll_s,prefs.getUChar("pending",0));
+      digitalWrite(PIN_LED_RED,HIGH);digitalWrite(PIN_LED_GREEN,HIGH);buzz(true);delay(150);buzz(false);
+    }
     else if (cmd == "INFO") {
       Serial.printf("INFO fw=%d.%d provisioned=%d deveui=%016llx cfg_ver=%u\n", FW_MAJOR, FW_MINOR,
                     g_provisioned, (unsigned long long)g_devEui, g_cfg.ver);
@@ -365,7 +384,7 @@ const char* radioErr(int16_t s) {
   }
 }
 
-void endAlert(UiMode m) { phase = P_IDLE; setUi(m); doneAt = millis(); }
+void endAlert(UiMode m) { phase = P_IDLE; if(m==UI_CLOSED || m==UI_FALSE_ALARM || m==UI_CANCELLED) prefs.remove("pending"); setUi(m); doneAt = millis(); }
 
 void doAlertStep() {
   uint32_t now = millis();
@@ -378,6 +397,7 @@ void doAlertStep() {
     tries++;
     if (conf) {                                   // L1: server acknowledged the confirmed uplink
       l1Ok = true; nextPoll = millis() + 3000; setUi(UI_SENT_WAIT);
+      prefs.putBool("delivered", true);
 #if SOS_GPS
       sendLocIfAny(curAlert);
 #endif
@@ -415,7 +435,7 @@ void doAlertStep() {
   }
   switch (ack) {
     case 1:                                        // accepted: keep polling (slower) so staff messages can arrive
-      if (!g_accepted) { g_accepted = true; acceptedAt = millis(); ackShown = 1; if (g_ui != UI_MSG) setUi(UI_ACCEPTED); }
+      if (!g_accepted) { g_accepted = true; prefs.putBool("accepted", true); acceptedAt = millis(); ackShown = 1; if (g_ui != UI_MSG) setUi(UI_ACCEPTED); }
       break;
     case 2: ackShown = 2; endAlert(UI_CLOSED); break;
     case 3: ackShown = 3; endAlert(UI_FALSE_ALARM); break;
@@ -428,6 +448,7 @@ void startAlert() {
   curAlert = nextAlertId(); phase = P_ALERT; l1Ok = false; tries = 0; pollCount = 0;
   ackShown = 0; g_msgSeen = 0; g_accepted = false; g_repress = false; g_releasedSinceAlert = false;
   alertStart = millis(); nextTry = 0; setUi(UI_SENDING);
+  prefs.putBool("delivered", false); prefs.putBool("accepted", false); prefs.putUChar("pending", curAlert);
 #if SOS_GPS
   g_locSent = false; g_locTries = 0;
 #endif
@@ -453,11 +474,23 @@ void doHeartbeat() {
   uint8_t down[32]; size_t dl = 0; bool conf; int ack = 0;
   int16_t s = sendFrame(T_HEARTBEAT, 0, FPORT_HEARTBEAT, false, 0, down, &dl, &conf);
   if (s > 0 && dl > 0) applyDownlink(down, dl, g_downPort, 0, &ack);
+  static bool diagnosticSent=false;
+  if(!diagnosticSent && s>=0){
+    uint8_t diag[5]={1,(uint8_t)esp_reset_reason(),g_cfg.ver,(uint8_t)min<uint32_t>(255,ESP.getFreeHeap()/1024),readBatteryPct()};
+    LoRaWANEvent_t up,dn;size_t n=0;uint8_t rx[32];
+    int16_t result=node.sendReceive(diag,sizeof diag,5,rx,&n,false,&up,&dn);
+    diagnosticSent=result>=0;
+    if(result>0 && n)applyDownlink(rx,n,dn.fPort,0,&ack);
+  }
   nextHeartbeat = millis() + (uint32_t)g_cfg.heartbeat_min * 60000UL;
 }
 
 void setup() {
   Serial.begin(115200);
+  Serial.printf("[boot] reset_reason=%d\n", (int)esp_reset_reason());
+  // Radio join/receive calls can block; allow two minutes before recovering a stuck main task.
+  esp_task_wdt_init(120, true);
+  esp_task_wdt_add(nullptr);
   setUi(UI_BOOT);
   xTaskCreatePinnedToCore(uiTask, "ui", 6144, nullptr, 2, nullptr, 0);
   loadStorage();
@@ -481,6 +514,7 @@ void setup() {
 }
 
 void loop() {
+  esp_task_wdt_reset();
   serialCommands();
 #if SOS_GPS
   gpsPoll();
@@ -490,7 +524,13 @@ void loop() {
   static uint32_t nextJoin = 0, joinDelay = (uint32_t)JOIN_RETRY_MIN_MS;
   if (!g_joined) {
     if (millis() >= nextJoin) {
-      if (joinNetwork()) { setUi(UI_READY); joinDelay = JOIN_RETRY_MIN_MS; nextHeartbeat = millis() + 2000; }
+      if (joinNetwork()) {
+        setUi(UI_READY); joinDelay = JOIN_RETRY_MIN_MS; nextHeartbeat = millis() + 2000;
+        uint8_t pending=prefs.getUChar("pending",0);
+        if(pending){curAlert=pending;phase=P_ALERT;l1Ok=prefs.getBool("delivered",false);g_accepted=prefs.getBool("accepted",false);
+          ackShown=g_accepted?1:0;alertStart=acceptedAt=millis();nextTry=nextPoll=millis()+2000;
+          setUi(g_accepted?UI_ACCEPTED:l1Ok?UI_SENT_WAIT:UI_SENDING);Serial.printf("[recover] alert=%u accepted=%d\n",curAlert,g_accepted);}
+      }
       else { setUi(UI_JOIN_FAIL); nextJoin = millis() + joinDelay; joinDelay = min<uint32_t>(joinDelay * 2, JOIN_RETRY_MAX_MS); }
     }
     // Even with no network, a button hold still shows feedback so the patient knows to call 1669
