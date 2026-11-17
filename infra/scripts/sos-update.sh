@@ -72,7 +72,7 @@ deploy() {    # $1 = previous commit (to diff which bind-mounted configs changed
 # to the dashboard's USB updater; docs/FIRMWARE-UPDATE.md). Best effort: never fails a check or an update.
 fw_sync() {
   if ! g fetch -q origin "+refs/heads/firmware-bin:refs/remotes/origin/firmware-bin" >>"$LOG" 2>&1; then
-    log "firmware: no firmware-bin branch on GitHub yet"; return 0; fi
+    log "firmware: fetch failed — check GitHub access/network in the preceding log"; return 1; fi
   local t; t="$(mktemp -d "$UPD/.fw.XXXXXX")"
   if g archive origin/firmware-bin | tar -x -C "$t" && [ -f "$t/manifest.json" ]; then
     chmod -R a+rX "$t"; rm -rf "$UPD/firmware.old"
@@ -80,7 +80,7 @@ fw_sync() {
     mv "$t" "$UPD/firmware" && rm -rf "$UPD/firmware.old"
     log "firmware: $(python3 -c 'import json,sys;m=json.load(open(sys.argv[1]));print(m["commit"],", ".join(b["env"]+" "+b["version"] for b in m["builds"]))' "$UPD/firmware/manifest.json" 2>&1)"
   else
-    rm -rf "$t"; log "firmware: could not unpack origin/firmware-bin"
+    rm -rf "$t"; log "firmware: could not unpack origin/firmware-bin"; return 1
   fi
   return 0
 }
@@ -88,7 +88,7 @@ fw_sync() {
 do_check() {
   st checking "กำลังตรวจหาเวอร์ชันใหม่จาก GitHub…"
   fetch || return 1
-  fw_sync
+  fw_sync || { st failed "ดึงไฟล์เฟิร์มแวร์ไม่สำเร็จ — ดู log ด้านล่าง" checked=1 finished=1; return 1; }
   local n; n="$(g rev-list --count "HEAD..origin/$BRANCH" 2>/dev/null || echo 0)"
   if [ "$n" -gt 0 ]; then st idle "มีเวอร์ชันใหม่ $n รายการ" checked=1; else st idle "เป็นเวอร์ชันล่าสุดแล้ว" checked=1; fi
   log "check done: $n new commit(s)"
@@ -154,7 +154,7 @@ print(c("id"),c("action"),c("by"))' "$REQ" 2>/dev/null || echo "- - -")
     case "$REQ_ACTION" in
       check)  st checking "กำลังตรวจหาเวอร์ชันใหม่…" request="$REQ_ID" by="$REQ_BY" action=check; do_check ;;
       update) st updating "รับคำขออัปเดตแล้ว…" request="$REQ_ID" by="$REQ_BY" action=update; do_update ;;
-      firmware) log "firmware sync requested by $REQ_BY"; fw_sync ;;
+      firmware) log "firmware sync requested by $REQ_BY"; if fw_sync; then st idle "ดึงไฟล์เฟิร์มแวร์แล้ว" finished=1; else st failed "ดึงไฟล์เฟิร์มแวร์ไม่สำเร็จ — ดู log ด้านล่าง" finished=1; fi ;;
       *)      log "ignored bad request"; st idle "คำขอไม่ถูกต้อง" ;;
     esac ;;
   *) echo "usage: $0 handle|check|update"; exit 2 ;;
