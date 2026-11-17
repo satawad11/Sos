@@ -156,6 +156,28 @@ def device_inspection(did: int, db: Session = Depends(get_db), u=Depends(staff_o
             "config": settings_store.effective_device_cfg(db, d)}
 
 
+class InspectionIn(BaseModel):
+    checks: list[bool] = Field(min_length=3, max_length=3)
+    note: str = Field(default="", max_length=1000)
+
+
+@router.post("/devices/{did}/inspection")
+def save_inspection(did: int, body: InspectionIn, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    snapshot = device_inspection(did, db, u)
+    audit(db, u.username, "device_inspection", snapshot["dev_eui"], snapshot=snapshot,
+          hardware_checks=body.checks, note=body.note, passed=snapshot["ready"] and all(body.checks))
+    db.commit()
+    return {"ok": True, "passed": snapshot["ready"] and all(body.checks)}
+
+
+@router.get("/devices/{did}/inspections")
+def inspection_history(did: int, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    d = db.get(Device, did)
+    if not d: raise HTTPException(404)
+    rows = db.query(AuditLog).filter_by(action="device_inspection", target=d.dev_eui).order_by(AuditLog.id.desc()).limit(30).all()
+    return [{"at": iso(r.at), "actor": r.actor, **r.detail} for r in rows]
+
+
 def bump_ver(d: Device) -> None:
     d.config_ver = (d.config_ver % 255) + 1
     d.config_changed_at = utcnow()

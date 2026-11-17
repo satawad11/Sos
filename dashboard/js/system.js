@@ -162,6 +162,7 @@ const loadAccount=guard(async()=>{
   const sessionCard=document.createElement("div");sessionCard.className="card";
   sessionCard.innerHTML=`<h3>การเข้าสู่ระบบ</h3><p class="mut">แสดงเซสชันที่เข้าใช้งานแล้วหลังอัปเดตระบบ</p>${sessions.map(s=>`<div class="row"><span>${s.current?"เครื่องนี้":"เซสชันอื่น"} · เริ่ม ${fmt(new Date(s.created*1000).toISOString())} · หมดอายุ ${fmt(new Date(s.exp*1000).toISOString())}</span><button class="btn" data-revoke="${esc(s.id)}">ออกจากระบบ</button></div>`).join("")}`;
   $("#main").append(sessionCard);
+  sessionCard.querySelectorAll("[data-revoke]").forEach(b=>{const s=sessions.find(x=>x.id===b.dataset.revoke),info=document.createElement("small");info.className="mut";info.textContent=s?.device||"ยังไม่ทราบอุปกรณ์";b.before(info)});
   sessionCard.querySelectorAll("[data-revoke]").forEach(b=>b.onclick=guard(async()=>{await api("/me/sessions/"+b.dataset.revoke,{method:"DELETE"});if(sessions.find(s=>s.id===b.dataset.revoke)?.current)logout();else loadAccount()}));
   $("#apw").onclick=()=>pwScreen(false);
   if($("#aen"))$("#aen").onclick=()=>mfaSetup(false);

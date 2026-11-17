@@ -92,7 +92,12 @@ const loadDevices=guard(async()=>{
     const r=await api(`/devices/${b.dataset.dh}/inspection`);
     const qr=await fetch(`/api/provision/${r.dev_eui}/label.svg`,{headers:{Authorization:"Bearer "+token}});
     if(qr.ok){const url=URL.createObjectURL(await qr.blob()),a=document.createElement("a");a.href=url;a.download="label-"+r.dev_eui+".svg";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-    await dlg({title:"ตรวจรับอุปกรณ์ "+r.label,html:`<p><code>${esc(r.dev_eui)}</code> · ${fmt(r.checked_at)}</p>${Object.entries(r.checks).map(([k,v])=>`<p>${v?"✅":"⚠️"} ${esc(k)}</p>`).join("")}<h4>ทดสอบหน้างานก่อนเปิดใช้งาน</h4>${r.hardware_checks.map(x=>`<p><label><input type="checkbox"> ${esc(x)}</label></p>`).join("")}<p class="mut">รายการหน้างานเป็นการตรวจด้วยเจ้าหน้าที่ ยังไม่ใช่ผลยืนยันอัตโนมัติ</p>`,ok:"ปิด",cancel:false});
+    const history=await api(`/devices/${b.dataset.dh}/inspections`),checks=[false,false,false];let note="";
+    const capture=e=>{if(e.target.matches("[data-inspect]"))checks[+e.target.dataset.inspect]=e.target.checked;if(e.target.id==="inspection-note")note=e.target.value};
+    document.addEventListener("change",capture);document.addEventListener("input",capture);
+    let save;try{save=await dlg({title:"ตรวจรับอุปกรณ์ "+r.label,html:`<p><code>${esc(r.dev_eui)}</code> · ${fmt(r.checked_at)}</p>${Object.entries(r.checks).map(([k,v])=>`<p>${v?"✅":"⚠️"} ${esc(k)}</p>`).join("")}<h4>ทดสอบหน้างานก่อนเปิดใช้งาน</h4>${r.hardware_checks.map((x,i)=>`<p><label><input type="checkbox" data-inspect="${i}"> ${esc(x)}</label></p>`).join("")}<textarea id="inspection-note" maxlength="1000" placeholder="ผลตรวจ / งานซ่อม / ข้อสังเกต"></textarea><h4>ประวัติการตรวจ</h4>${history.map(x=>`<p>${fmt(x.at)} · ${esc(x.actor)} · ${x.passed?"ผ่าน":"ยังไม่ผ่าน"} · ${esc(x.note||"")}</p>`).join("")||"ยังไม่มีประวัติ"}`,ok:"บันทึกผลตรวจ"})}finally{document.removeEventListener("change",capture);document.removeEventListener("input",capture)}
+    if(!save)return;
+    const result=await api(`/devices/${b.dataset.dh}/inspection`,{method:"POST",body:{checks,note}});r.hardware_results=checks;r.note=note;r.passed=result.passed;toast("บันทึกผลตรวจแล้ว");
     const blob=new Blob([JSON.stringify(r,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="inspection-"+r.dev_eui+".json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   })});
   document.querySelectorAll("button[data-id]").forEach(b=>b.onclick=guard(async()=>{const d=ds.find(x=>x.id==b.dataset.id);devEdit=true;

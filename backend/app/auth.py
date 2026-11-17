@@ -91,6 +91,12 @@ def current_user(request: Request, authorization: str = Header(default=""), db: 
     if not authorization.startswith("Bearer "):
         raise HTTPException(401, "missing token")
     u = user_from_token(db, authorization[7:])
+    sid = getattr(u, "_session_id", None)
+    if sid and not (u.sessions or {}).get(sid, {}).get("device"):
+        sessions = dict(u.sessions or {})
+        sessions[sid] = {**sessions[sid], "device": request.headers.get("user-agent", "ไม่ทราบอุปกรณ์")[:200]}
+        u.sessions = sessions
+        db.commit()
     if u.must_change and request.url.path not in MUST_CHANGE_OK:
         raise HTTPException(403, "password change required")
     from . import mfa
