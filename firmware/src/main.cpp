@@ -170,6 +170,14 @@ void uiTask(void*) {
       case UI_TEST_FAIL: red = pat(now, 100, 100); bz = (t < 1000) && pat(t, 100, 100); break;
       case UI_MSG: green = g_accepted; red = !g_accepted; bz = (t < 900) && pat(t, 150, 150); break;   // 3 beeps
     }
+    // Battery indication never overrides an emergency or staff message. Two short beeps at 10%, three at 5%.
+    if(g_ui==UI_READY && !g_uiMains && g_uiBattery!=255 && g_uiBattery<=10){
+      const bool critical=g_uiBattery<=5;
+      red=pat(now,100,critical?1900:4900);
+      const uint32_t cycle=critical?300000UL:900000UL;
+      uint32_t bt=now%cycle;
+      bz=bt<(critical?600UL:400UL) && (bt%200)<80;
+    }
     // holding to cancel: alternate red/green, tick every second, countdown on the OLED (drawn below)
     bool cancelHold = g_cancelArmed && g_buttonDown && now - g_buttonDownAt > 300;
     if (cancelHold) { uint32_t h = now - g_buttonDownAt; red = (h / 250) % 2; green = !red; bz = (h % 1000) < 60; }
@@ -482,7 +490,9 @@ void doHeartbeat() {
     diagnosticSent=result>=0;
     if(result>0 && n)applyDownlink(rx,n,dn.fPort,0,&ack);
   }
-  nextHeartbeat = millis() + (uint32_t)g_cfg.heartbeat_min * 60000UL;
+  uint16_t interval=g_cfg.heartbeat_min;
+  if(g_uiBattery!=255 && !g_uiMains)interval=min<uint16_t>(interval,g_uiBattery<=10?2:5);
+  nextHeartbeat = millis() + (uint32_t)interval * 60000UL;
 }
 
 void setup() {
@@ -567,6 +577,18 @@ void loop() {
 
   if (phase == P_ALERT) { doAlertStep(); delay(10); return; }
 
+  // Sample locally every 15 s. Event-driven reports are rate-limited to one per minute.
+  static uint32_t sampled=0,lastPowerReport=0;
+  static uint8_t lastBattery=255;static bool lastMains=true;
+  if(millis()-sampled>=15000UL){
+    sampled=millis();uint8_t battery=readBatteryPct();bool mains=mainsOk();
+    g_uiBattery=battery;g_uiMains=mains;
+    bool crossed=battery!=255 && lastBattery!=255 && ((lastBattery>10 && battery<=10)||(lastBattery>5 && battery<=5));
+    bool changed=battery!=255 && lastBattery!=255 && abs((int)battery-(int)lastBattery)>=3;
+    if((crossed||changed||mains!=lastMains) && millis()-lastPowerReport>=60000UL){
+      doHeartbeat();lastPowerReport=millis();lastBattery=battery;lastMains=mains;
+    }else if(lastBattery==255){lastBattery=battery;lastMains=mains;}
+  }
   if (millis() >= nextHeartbeat) doHeartbeat();
   delay(20);
 }

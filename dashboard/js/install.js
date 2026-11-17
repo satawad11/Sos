@@ -59,6 +59,9 @@ async function fwCard(box,ds){
   if(!m?.available){box.innerHTML=`<h3>อัปเดตเฟิร์มแวร์ผ่าน USB</h3><div class="warn">ยังไม่มีไฟล์เฟิร์มแวร์บนเซิร์ฟเวอร์ — ไฟล์จะมาเองหลัง GitHub build เสร็จ แล้วกด "ตรวจหาเวอร์ชันใหม่" หรือ "อัปเดตระบบ" ที่หน้าอัปเดตระบบ${role==="admin"?' หรือกดปุ่มด้านล่าง':""}</div>${role==="admin"?'<button class="btn" id="fwsync">ดึงไฟล์เฟิร์มแวร์จาก GitHub</button>':""}`;
     $("#fwsync")&&($("#fwsync").onclick=guard(async()=>{await api("/system/update",{method:"POST",body:{action:"firmware"}});toast("ส่งคำขอแล้ว รอประมาณ 10 วินาทีแล้วเปิดหน้านี้ใหม่","info")}));return}
   const vs=[...new Set(m.builds.map(b=>b.version))];
+  const refreshFirmware=document.createElement("button");refreshFirmware.className="btn";refreshFirmware.textContent="ดึงเฟิร์มแวร์ล่าสุดจาก GitHub";
+  refreshFirmware.onclick=guard(async()=>{await api("/system/update",{method:"POST",body:{action:"firmware"}});toast("ส่งคำขอดึงไฟล์แล้ว รอสักครู่แล้วเปิดหน้านี้ใหม่")});
+  if(role==="admin")setTimeout(()=>{if(document.body.contains(box))box.append(refreshFirmware)},0);
   box.innerHTML=`<h3>อัปเดตเฟิร์มแวร์ผ่าน USB</h3>
    <p class="mut">เฟิร์มแวร์ล่าสุด <b>${esc(vs.join(", "))}</b> · build ${esc(m.commit)} เมื่อ ${fmt(m.built_at)} · อัปเดตเฉพาะโปรแกรม คีย์ LoRaWAN และการตั้งค่าในเครื่องยังอยู่ ไม่ต้องติดตั้งใหม่</p>
    ${ok?"":'<div class="warn">เบราว์เซอร์นี้ไม่รองรับ Web Serial — ใช้ Chrome หรือ Edge บนคอมพิวเตอร์</div>'}
