@@ -157,6 +157,12 @@ const loadAccount=guard(async()=>{
       ${m.required?'<p class="mut">นโยบายของระบบบังคับใช้กับบัญชีนี้ — ปิดเองไม่ได้ (ถ้ามือถือหาย ให้ผู้ดูแลระบบอีกคนกด "รีเซ็ต 2FA")</p>':`<details><summary>ปิดการยืนยัน 2 ขั้น</summary><div class="row"><input id="dpw" type="password" placeholder="รหัสผ่าน" autocomplete="current-password"><input id="dcode" inputmode="numeric" placeholder="รหัส 6 หลัก" maxlength="9" style="max-width:160px"><button class="btn r" id="adis">ปิดใช้งาน</button></div></details>`}`
     :`<p class="mut">ยังไม่ได้เปิด${m.required?' — <b class="bad">ระบบกำหนดให้ต้องเปิด</b>':""} · เมื่อเปิดแล้ว การเข้าสู่ระบบต้องใช้รหัสผ่าน + รหัส 6 หลักจากแอปในมือถือ</p><button class="btn p" id="aen">เปิดใช้งาน</button>`}</div>${await appCards()}`;
   bindAppCards();bindLineCard(lst);
+  const sessions=await api("/me/sessions");
+  if(page!=="account")return;
+  const sessionCard=document.createElement("div");sessionCard.className="card";
+  sessionCard.innerHTML=`<h3>การเข้าสู่ระบบ</h3><p class="mut">แสดงเซสชันที่เข้าใช้งานแล้วหลังอัปเดตระบบ</p>${sessions.map(s=>`<div class="row"><span>${s.current?"เครื่องนี้":"เซสชันอื่น"} · เริ่ม ${fmt(new Date(s.created*1000).toISOString())} · หมดอายุ ${fmt(new Date(s.exp*1000).toISOString())}</span><button class="btn" data-revoke="${esc(s.id)}">ออกจากระบบ</button></div>`).join("")}`;
+  $("#main").append(sessionCard);
+  sessionCard.querySelectorAll("[data-revoke]").forEach(b=>b.onclick=guard(async()=>{await api("/me/sessions/"+b.dataset.revoke,{method:"DELETE"});if(sessions.find(s=>s.id===b.dataset.revoke)?.current)logout();else loadAccount()}));
   $("#apw").onclick=()=>pwScreen(false);
   if($("#aen"))$("#aen").onclick=()=>mfaSetup(false);
   if($("#abc"))$("#abc").onclick=guard(async()=>{const r=await api("/me/2fa/backup-codes",{method:"POST",body:{code:$("#acode").value}});showBackupCodes(r.backup_codes,false)});

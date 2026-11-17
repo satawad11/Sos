@@ -90,6 +90,8 @@ const loadDevices=guard(async()=>{
   document.querySelectorAll("[data-dh]").forEach(b=>b.onclick=()=>deviceHistory(ds.find(x=>x.id==b.dataset.dh),30));
   if(canEdit())document.querySelectorAll("[data-dh]").forEach(b=>{const btn=document.createElement("button");btn.className="btn";btn.textContent="ตรวจรับ / QR";b.after(btn);btn.onclick=guard(async()=>{
     const r=await api(`/devices/${b.dataset.dh}/inspection`);
+    const qr=await fetch(`/api/provision/${r.dev_eui}/label.svg`,{headers:{Authorization:"Bearer "+token}});
+    if(qr.ok){const url=URL.createObjectURL(await qr.blob()),a=document.createElement("a");a.href=url;a.download="label-"+r.dev_eui+".svg";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
     await dlg({title:"ตรวจรับอุปกรณ์ "+r.label,html:`<p><code>${esc(r.dev_eui)}</code> · ${fmt(r.checked_at)}</p>${Object.entries(r.checks).map(([k,v])=>`<p>${v?"✅":"⚠️"} ${esc(k)}</p>`).join("")}<h4>ทดสอบหน้างานก่อนเปิดใช้งาน</h4>${r.hardware_checks.map(x=>`<p><label><input type="checkbox"> ${esc(x)}</label></p>`).join("")}<p class="mut">รายการหน้างานเป็นการตรวจด้วยเจ้าหน้าที่ ยังไม่ใช่ผลยืนยันอัตโนมัติ</p>`,ok:"ปิด",cancel:false});
     const blob=new Blob([JSON.stringify(r,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="inspection-"+r.dev_eui+".json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   })});

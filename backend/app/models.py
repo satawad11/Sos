@@ -26,6 +26,7 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(128), default="")
     role: Mapped[str] = mapped_column(String(16), default="staff")  # admin | staff | viewer
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sessions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = _dt(nullable=True)
     must_change: Mapped[bool] = mapped_column(Boolean, default=False)      # temp/initial password: must set a new one first

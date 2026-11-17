@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-import bcrypt, jwt
+import bcrypt, jwt, hashlib, secrets
 from fastapi import Depends, HTTPException, Header, Query, Request
 from sqlalchemy.orm import Session
 from .config import env
@@ -35,7 +35,7 @@ def password_problem(pw: str, username: str = "") -> str | None:
 
 def make_token(u: User, mfa: bool = False) -> str:
     exp = datetime.now(timezone.utc) + timedelta(hours=env.jwt_hours)
-    return jwt.encode({"sub": u.username, "role": u.role, "tv": u.token_ver or 0, "mfa": bool(mfa), "exp": exp},
+    return jwt.encode({"sub": u.username, "role": u.role, "tv": u.token_ver or 0, "sid": secrets.token_hex(16), "mfa": bool(mfa), "exp": exp},
                       env.jwt_secret, algorithm="HS256")
 
 
@@ -69,6 +69,17 @@ def user_from_token(db: Session, token: str) -> User:
     if data.get("tv", 0) != (u.token_ver or 0):
         raise HTTPException(401, "session revoked, please log in again")   # password changed/reset, role changed, user disabled
     u._mfa_ok = bool(data.get("mfa"))
+    sid = hashlib.sha256(token.encode()).hexdigest()
+    sessions = dict(u.sessions or {})
+    if sessions.get(sid, {}).get("revoked"):
+        raise HTTPException(401, "session revoked")
+    if sid not in sessions:
+        now = datetime.now(timezone.utc).timestamp()
+        sessions = {k: v for k, v in sessions.items() if v.get("exp", 0) > now}
+        sessions[sid] = {"exp": data["exp"], "created": now}
+        u.sessions = sessions
+        db.commit()
+    u._session_id = sid
     return u
 
 

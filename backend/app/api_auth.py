@@ -17,6 +17,23 @@ from .api import get_engine, iso
 router = APIRouter(prefix="/api")
 
 
+@router.get("/me/sessions")
+def my_sessions(db: Session = Depends(get_db), u=Depends(current_user)):
+    return [{"id": k, **v, "current": k == u._session_id} for k, v in (u.sessions or {}).items()
+            if not v.get("revoked") and v.get("exp", 0) > utcnow().timestamp()]
+
+
+@router.delete("/me/sessions/{sid}")
+def revoke_session(sid: str, db: Session = Depends(get_db), u=Depends(current_user)):
+    sessions = dict(u.sessions or {})
+    if sid not in sessions: raise HTTPException(404)
+    sessions[sid] = {**sessions[sid], "revoked": True}
+    u.sessions = sessions
+    audit(db, u.username, "session_revoke")
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/me/logout-all")
 def logout_all(db: Session = Depends(get_db), u=Depends(current_user)):
     """Revoke every issued login token, including the current browser."""
