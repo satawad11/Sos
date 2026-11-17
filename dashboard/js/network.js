@@ -88,6 +88,11 @@ const loadDevices=guard(async()=>{
     ...(role==="admin"?[{label:"ลบ",cls:"r",confirm:n=>`ลบอุปกรณ์ ${n} เครื่อง (และลบใน ChirpStack ถ้าตั้งค่าไว้)?\nเครื่องที่เคยมีเคสจะถูกข้าม`,run:i=>api("/devices/"+i,{method:"DELETE"})}]:[])]});
   if($("#nda"))$("#nda").onclick=guard(async()=>{await api("/devices",{method:"POST",body:{dev_eui:$("#ndu").value.trim(),label:$("#ndl").value,lifecycle:"ready",patient_id:null}});toast("เพิ่มแล้ว");loadDevices()});
   document.querySelectorAll("[data-dh]").forEach(b=>b.onclick=()=>deviceHistory(ds.find(x=>x.id==b.dataset.dh),30));
+  if(canEdit())document.querySelectorAll("[data-dh]").forEach(b=>{const btn=document.createElement("button");btn.className="btn";btn.textContent="ตรวจรับ / QR";b.after(btn);btn.onclick=guard(async()=>{
+    const r=await api(`/devices/${b.dataset.dh}/inspection`);
+    await dlg({title:"ตรวจรับอุปกรณ์ "+r.label,html:`<p><code>${esc(r.dev_eui)}</code> · ${fmt(r.checked_at)}</p>${Object.entries(r.checks).map(([k,v])=>`<p>${v?"✅":"⚠️"} ${esc(k)}</p>`).join("")}<h4>ทดสอบหน้างานก่อนเปิดใช้งาน</h4>${r.hardware_checks.map(x=>`<p><label><input type="checkbox"> ${esc(x)}</label></p>`).join("")}<p class="mut">รายการหน้างานเป็นการตรวจด้วยเจ้าหน้าที่ ยังไม่ใช่ผลยืนยันอัตโนมัติ</p>`,ok:"ปิด",cancel:false});
+    const blob=new Blob([JSON.stringify(r,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="inspection-"+r.dev_eui+".json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  })});
   document.querySelectorAll("button[data-id]").forEach(b=>b.onclick=guard(async()=>{const d=ds.find(x=>x.id==b.dataset.id);devEdit=true;
     const dd=(await api("/settings")).device_defaults;
     const CF=[["heartbeat_min","Heartbeat (นาที)",5,1275,"เครื่องรายงานสถานะทุกกี่นาที (เพิ่มทีละ 5 นาที; ยิ่งถี่ยิ่งกินแบต)",5],["poll_s","Poll (วินาที)",5,120,"ช่วงถามผลรับเรื่องระหว่างมีเหตุ",1],["buzzer","เสียงบัซเซอร์ (0-3)",0,3,"0=ปิด 1=เบา 2=ปกติ 3=ดัง",1],["hold_ms","กดปุ่มค้าง (ms)",500,5000,"ต้องกดค้างนานเท่าไรจึงนับเป็นการแจ้งเหตุ",100]];

@@ -16,6 +16,15 @@ from .api import get_engine, iso
 
 router = APIRouter(prefix="/api")
 
+
+@router.post("/me/logout-all")
+def logout_all(db: Session = Depends(get_db), u=Depends(current_user)):
+    """Revoke every issued login token, including the current browser."""
+    u.token_ver = (u.token_ver or 0) + 1
+    audit(db, u.username, "logout_all")
+    db.commit()
+    return {"ok": True}
+
 # ---------------- auth ----------------
 class LoginIn(BaseModel):
     username: str

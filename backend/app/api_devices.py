@@ -141,6 +141,21 @@ class DeviceConfigIn(BaseModel):
     override: dict | None = None      # {} or None = back to the shared defaults
 
 
+@router.get("/devices/{did}/inspection")
+def device_inspection(did: int, db: Session = Depends(get_db), u=Depends(staff_or_admin)):
+    d = db.get(Device, did)
+    if not d: raise HTTPException(404)
+    checks = {"ผูกผู้ป่วย": bool(d.patient_id), "เคยรับข้อมูลจากปุ่ม": d.last_seen is not None,
+              "ทราบเวอร์ชันเฟิร์มแวร์": bool(d.fw_version),
+              "ปุ่มยืนยันค่าตั้งล่าสุด": d.reported_config_ver == d.config_ver,
+              "ทราบระดับแบตเตอรี่": d.battery is not None and d.battery != 255,
+              "มีเกตเวย์รับสัญญาณ": bool(d.last_gateway)}
+    return {"dev_eui": d.dev_eui, "label": d.label, "checked_at": iso(utcnow()),
+            "checks": checks, "ready": all(checks.values()),
+            "hardware_checks": ["กดทดสอบและตรวจ LINE", "รับเรื่องและตรวจข้อความกลับบนจอ", "ถอดไฟบ้านและตรวจแบตสำรอง"],
+            "config": settings_store.effective_device_cfg(db, d)}
+
+
 def bump_ver(d: Device) -> None:
     d.config_ver = (d.config_ver % 255) + 1
     d.config_changed_at = utcnow()

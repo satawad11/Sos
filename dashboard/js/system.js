@@ -150,7 +150,7 @@ function bindLineCard(st){
 const loadAccount=guard(async()=>{
   const [me,lst]=await Promise.all([api("/me"),api("/me/line")]);if(page!=="account")return;const m=me.mfa;
   $("#main").innerHTML=`<div class="card"><h3>ข้อมูลบัญชี</h3><div class="row"><b>${esc(me.username)}</b><span class="mut">${esc(me.name||"")}</span><span class="tag">${esc({admin:"ผู้ดูแลระบบ",staff:"เจ้าหน้าที่",viewer:"ดูอย่างเดียว"}[me.role]||me.role)}</span></div>
-    <div class="row"><button class="btn" id="apw">🔑 เปลี่ยนรหัสผ่าน</button></div></div>${lineCard(lst)}
+    <div class="row"><button class="btn" id="apw">🔑 เปลี่ยนรหัสผ่าน</button><button class="btn" onclick="guard(async()=>{if(await ask('ออกจากระบบทุกเครื่อง รวมเครื่องนี้หรือไม่?')){await api('/me/logout-all',{method:'POST'});logout()}})()">ออกจากระบบทุกเครื่อง</button></div></div>${lineCard(lst)}
    <div class="card"><h3>🔐 การยืนยันตัวตน 2 ขั้น</h3>
     ${m.enabled?`<p><span class="tag closed">เปิดใช้งาน</span> ตั้งแต่ ${fmt(m.enabled_at)} · รหัสสำรองเหลือ <b>${m.backup_left}</b> ชุด${m.backup_left<=3?' <b class="bad">— ควรสร้างใหม่</b>':""}</p>
       <div class="row"><input id="acode" inputmode="numeric" placeholder="รหัส 6 หลักจากแอป" maxlength="9" style="max-width:200px"><button class="btn" id="abc">สร้างรหัสสำรองใหม่</button></div>

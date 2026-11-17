@@ -118,7 +118,7 @@ class Engine:
         elif up.msg_type == codec.T_HEARTBEAT:
             pass
         # CONFIG sync (any uplink reports config_ver)
-        if up.config_ver != (dev.config_ver & 0xFF) and up.msg_type in (codec.T_HEARTBEAT, codec.T_POLL):
+        if up.config_ver != (dev.config_ver & 0xFF) and up.msg_type == codec.T_HEARTBEAT:
             self._send_config(db, dev)
         db.commit()
         # every uplink: screens update the device's link badge / last-seen at once (after commit, like case events)

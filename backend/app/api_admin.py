@@ -86,6 +86,12 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), u=Depends(
             raise HTTPException(422, "device_offline_min and gateway_offline_min must be integers")
         if not 3 <= g_ <= 240: raise HTTPException(422, "gateway_offline_min must be 3-240 (gateways report every minute)")
         if not 10 <= d_ <= 10080: raise HTTPException(422, "device_offline_min must be 10-10080")
+        defaults = settings_store.get(db, "device_defaults")
+        longest = max([defaults["heartbeat_min"]] + [
+            settings_store.effective_device_cfg(db, d)["heartbeat_min"]
+            for d in db.query(Device).filter(Device.lifecycle.in_(("ready", "active"))).all()])
+        if d_ < longest * 1.5:
+            raise HTTPException(422, f"เวลาออฟไลน์ต้องไม่น้อยกว่า {longest * 1.5:g} นาที ตามรอบรายงานของปุ่มที่ใช้งาน")
         value = {"device_offline_min": d_, "gateway_offline_min": g_}
     if key == "system_alert":
         ids, rep = value.get("caregiver_ids"), value.get("repeat_min", 60)
