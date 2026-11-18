@@ -12,6 +12,7 @@ function loadLeaflet(){
 const QCOL={good:"#16a34a",fair:"#d97706",weak:"#ea580c",bad:"#dc2626",unknown:"#94a3b8"},QTH={good:"ดีมาก",fair:"พอใช้",weak:"อ่อน",bad:"แย่มาก",unknown:"ไม่ทราบ"};
 const PSRC={gps:"GPS (ล่าสุด)",home:"ที่อยู่ที่ลงทะเบียน",gps_old:"GPS (เก่ากว่ากำหนด)"};
 const kmTxt=m=>m==null?"-":m>=1000?(m/1000).toFixed(2)+" กม.":m+" ม.";
+const mapDeviceName=x=>x.patient||x.label||x.dev_eui;
 const mapOpt={links:true,names:true,onlyOn:false,cov:true};let mapObj=null,mapFitted=false;
 const loadMap=guard(async()=>{
   const [d]=await Promise.all([api("/map"),loadLeaflet()]);
@@ -71,7 +72,7 @@ function mapRedraw(){
       :L.divIcon({className:"",iconSize:[22,22],iconAnchor:[11,11],html:`<div class="mk mk-dv ${x.offline?"off":""}" style="background:${col}"></div>`});
     const m=L.marker([x.lat,x.lon],{icon:ic,zIndexOffset:cs?1000:300}).addTo(lg);
     m.bindPopup(`<b>${esc(x.label||x.dev_eui)}</b>${x.patient?`<br>${esc(x.patient)}`:""}<br>${x.offline?'<span class="bad">ออฟไลน์</span>':'<span class="ok">ออนไลน์</span>'} · แบต ${x.battery??"-"}% · ไฟบ้าน ${x.mains_ok===false?"ดับ":"ปกติ"}<br>สัญญาณ ${x.quality?QTH[x.quality]+" ("+(x.rssi??"-")+" dBm)":"-"}${x.gateway_id&&gw[x.gateway_id]?` → ${esc(gw[x.gateway_id].label||x.gateway_id)}`:""}${cs?`<div style="margin:6px 0"><span class="tag ${cs.state}">${ST[cs.state]}</span> เคส #${cs.id} · ${ago(cs.created_at)}${cs.overdue?' <b class="bad">เกินเวลา</b>':""}</div>`:"<br>"}<span class="mut">พิกัดจาก${PSRC[x.pos_src]}${x.address?" · "+esc(x.address):""}</span>${mapActions(x.phone,x.lat,x.lon,cs)}`);
-    if(mapOpt.names)m.bindTooltip(esc(x.label||x.dev_eui),{permanent:true,direction:"bottom",offset:[0,12],className:"mk-tip"})});
+    if(mapOpt.names)m.bindTooltip(esc(mapDeviceName(x)),{permanent:true,direction:"bottom",offset:[0,12],className:"mk-tip"})});
   if(!mapOpt.onlyOn)(d.homes||[]).forEach(p=>{L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",iconSize:[30,30],iconAnchor:[15,28],popupAnchor:[0,-26],html:'<div class="pin blu"><span></span></div>'}),zIndexOffset:200}).addTo(lg)
     .bindPopup(`<b>${esc(p.name)}</b><br><span class="mut">${esc(p.address||"")} ${esc(p.village||"")}</span><br>ยังไม่ได้ผูกปุ่ม${mapActions(p.phone,p.lat,p.lon,null)}`)});
   if(!mapFitted){mapFitted=true;mapFit()}}
