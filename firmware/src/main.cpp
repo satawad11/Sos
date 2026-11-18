@@ -299,15 +299,29 @@ bool joinNetwork() {
   // ORDER MATTERS: beginOTAA() resets the nonce state, and setBufferNonces() only accepts a buffer whose key checksum
   // matches the keys given to beginOTAA(). Restoring first (fw <= 0.2) silently discarded the saved counter on every
   // boot -> DevNonce restarted at 1 -> ChirpStack ignored the already-used DevNonces -> "NO NETWORK" after a reboot.
-  int16_t init = node.beginOTAA(g_joinEui, g_devEui, g_appKey, g_appKey);
+  int16_t init = node.beginOTAA(g_joinEui, g_devEui, nullptr, g_appKey);
   if(init != RADIOLIB_ERR_NONE){g_joinError=init;Serial.printf("[join] beginOTAA failed %d\n",init);return false;}
   uint8_t nonces[RADIOLIB_LORAWAN_NONCES_BUF_SIZE];
   if (prefs.getBytesLength("nonces") == RADIOLIB_LORAWAN_NONCES_BUF_SIZE) {
     prefs.getBytes("nonces", nonces, sizeof nonces);
     int16_t r = node.setBufferNonces(nonces);                // keeps the DevNonce counter across reboots
+    if(r == RADIOLIB_ERR_NONCES_DISCARDED){
+      // Validate the old 1.1-format credentials before migrating the counters to 1.0.4.
+      node.beginOTAA(g_joinEui,g_devEui,g_appKey,g_appKey);
+      int16_t old=node.setBufferNonces(nonces);
+      node.beginOTAA(g_joinEui,g_devEui,nullptr,g_appKey);
+      if(old==RADIOLIB_ERR_NONE){
+        uint8_t* migrated=node.getBufferNonces();
+        memcpy(migrated+RADIOLIB_LORAWAN_NONCES_DEV_NONCE,nonces+RADIOLIB_LORAWAN_NONCES_DEV_NONCE,5);
+        r=node.setBufferNonces(node.getBufferNonces());
+        if(r==RADIOLIB_ERR_NONE)prefs.putBytes("nonces",node.getBufferNonces(),sizeof nonces);
+        Serial.printf("[join] migrated counters to LoRaWAN 1.0.4: %d\n",r);
+      }
+    }
     if (r != RADIOLIB_ERR_NONE) Serial.printf("[join] saved nonces not used (%d)\n", r);
   }
-  int16_t s = node.activateOTAA(UPLINK_DR);
+  Serial.printf("[join] OTAA 1.0.4 eui=%016llx DR=%u AS923\n",(unsigned long long)g_devEui,UPLINK_DR);
+  int16_t s = node.activateOTAA(); // retain the RadioLib default join policy used by working firmware 0.7
   g_joinError = s;
   if (s == RADIOLIB_LORAWAN_NEW_SESSION || s == RADIOLIB_LORAWAN_SESSION_RESTORED) {
     prefs.putBytes("nonces", node.getBufferNonces(), RADIOLIB_LORAWAN_NONCES_BUF_SIZE);
