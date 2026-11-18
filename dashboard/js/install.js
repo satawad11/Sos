@@ -91,7 +91,9 @@ async function fwRun(m,ds,pick){
     set("usb","ok",before.fw?`${cur?esc(cur.label)+" · ":""}เวอร์ชัน ${before.fw}${before.eui?" · "+before.eui:""}${before.eui&&!cur?" (ไม่พบในรายการอุปกรณ์)":""}`:"เครื่องไม่ตอบ (อาจยังไม่มีเฟิร์มแวร์) — อัปเดตต่อได้");
     // 2/3 — chip decides which images fit; the image must match the manifest byte for byte
     set("chip","run");step="chip";
-    const esp=await import("./vendor/esptool/esptool-0.7.1.js");
+    let esp;
+    try{esp=await import("/vendor/esptool/esptool-0.7.1.js")}
+    catch(e){throw new Error("โหลดเครื่องมืออัปเดตไม่สำเร็จ — รีเฟรชหน้าเว็บและตรวจว่าเซิร์ฟเวอร์ให้บริการ /vendor/esptool/esptool-0.7.1.js ได้")}
     transport=new esp.Transport(port,true);
     const loader=new esp.ESPLoader({transport,baudrate:460800,romBaudrate:115200,terminal:{clean(){},writeLine(){},write(){}}});
     const desc=await loader.main("default_reset");const chip=loader.chip.CHIP_NAME;
