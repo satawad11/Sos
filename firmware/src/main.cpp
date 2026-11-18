@@ -26,6 +26,7 @@ uint64_t g_devEui = 0, g_joinEui = 0;
 uint8_t  g_appKey[16];
 bool     g_provisioned = false;
 Config   g_cfg;
+volatile int16_t g_joinError = 0;
 uint8_t  g_alertId = 0;
 
 static bool hexToBytes(const String& s, uint8_t* out, size_t n) {
@@ -194,7 +195,7 @@ void uiTask(void*) {
         case UI_BOOT: l1 = "SOS DEVICE"; l2 = "starting"; break;
         case UI_NOT_PROVISIONED: l1 = "NOT SETUP"; l2 = "run provision"; break;
         case UI_JOINING: l1 = "CONNECTING"; l2 = "please wait"; break;
-        case UI_JOIN_FAIL: l1 = "NO NETWORK"; l2 = "retrying"; break;
+        case UI_JOIN_FAIL: l1 = "NO NETWORK"; snprintf(mb2,sizeof mb2,"retry err %d",(int)g_joinError);l2=mb2;break;
         case UI_READY: l1 = "READY"; l2 = "hold red button"; break;
         case UI_SENDING: l1 = "SENDING..."; l2 = "keep calm"; break;
         case UI_SENT_WAIT: l1 = "NETWORK RECEIVED"; l2 = "waiting staff"; break;
@@ -232,6 +233,7 @@ void uiTask(void*) {
 
 // ---------------------------------------------------------------- LoRaWAN
 bool g_joined = false;
+bool g_radioReady = false;
 
 uint8_t flagsNow(bool test = false) {
   bool chg = false; uint8_t pct = readBatteryPct(&chg);
@@ -297,14 +299,16 @@ bool joinNetwork() {
   // ORDER MATTERS: beginOTAA() resets the nonce state, and setBufferNonces() only accepts a buffer whose key checksum
   // matches the keys given to beginOTAA(). Restoring first (fw <= 0.2) silently discarded the saved counter on every
   // boot -> DevNonce restarted at 1 -> ChirpStack ignored the already-used DevNonces -> "NO NETWORK" after a reboot.
-  node.beginOTAA(g_joinEui, g_devEui, g_appKey, g_appKey);   // LoRaWAN 1.0.x: NwkKey = AppKey
+  int16_t init = node.beginOTAA(g_joinEui, g_devEui, g_appKey, g_appKey);
+  if(init != RADIOLIB_ERR_NONE){g_joinError=init;Serial.printf("[join] beginOTAA failed %d\n",init);return false;}
   uint8_t nonces[RADIOLIB_LORAWAN_NONCES_BUF_SIZE];
   if (prefs.getBytesLength("nonces") == RADIOLIB_LORAWAN_NONCES_BUF_SIZE) {
     prefs.getBytes("nonces", nonces, sizeof nonces);
     int16_t r = node.setBufferNonces(nonces);                // keeps the DevNonce counter across reboots
     if (r != RADIOLIB_ERR_NONE) Serial.printf("[join] saved nonces not used (%d)\n", r);
   }
-  int16_t s = node.activateOTAA();
+  int16_t s = node.activateOTAA(UPLINK_DR);
+  g_joinError = s;
   if (s == RADIOLIB_LORAWAN_NEW_SESSION || s == RADIOLIB_LORAWAN_SESSION_RESTORED) {
     prefs.putBytes("nonces", node.getBufferNonces(), RADIOLIB_LORAWAN_NONCES_BUF_SIZE);
     applyLinkPolicy();
@@ -516,7 +520,8 @@ void setup() {
 #else
   int16_t s = radio.begin(923.2, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 1.8);
 #endif
-  if (s != RADIOLIB_ERR_NONE) { Serial.printf("[radio] begin failed %d\n", s); setUi(UI_JOIN_FAIL); return; }
+  if (s != RADIOLIB_ERR_NONE) { g_joinError=s;Serial.printf("[radio] begin failed %d\n", s); setUi(UI_JOIN_FAIL); return; }
+  g_radioReady=true;
 #ifndef SOS_BOARD_V2
   radio.setDio2AsRfSwitch(true);                   // V3 switches the RF path via DIO2
 #endif
@@ -530,6 +535,7 @@ void loop() {
   gpsPoll();
 #endif
   if (!g_provisioned) { delay(50); return; }
+  if (!g_radioReady) { delay(50); return; }
 
   static uint32_t nextJoin = 0, joinDelay = (uint32_t)JOIN_RETRY_MIN_MS;
   if (!g_joined) {
