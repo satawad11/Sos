@@ -216,6 +216,9 @@ def test_api_case_flow(env_, monkeypatch):
     assert r.json()["state"] == "accepted"
     r = client.post("/api/cases/1/close", json={"reason": "resolved", "note": "ok"}, headers=h)
     assert r.json()["state"] == "closed"
+    # /api/stats counts "the last 30 days" from its own clock: pin it to the same day as the case, or this
+    # test starts failing 30 days after NOON_TUE (it did on 2026-11-12)
+    monkeypatch.setattr("app.api_admin.utcnow", lambda: NOON_TUE + timedelta(hours=1))
     assert client.get("/api/stats", headers=h).json()["cases_30d"] == 1
     acts = [a["action"] for a in client.get("/api/audit", headers=h).json()]
     assert "case_accept" in acts and "case_close" in acts
