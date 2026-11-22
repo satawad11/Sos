@@ -1,0 +1,39 @@
+{
+ "commit": "472c3e220936",
+ "built_at": "2026-11-22T16:01:36+00:00",
+ "builds": [
+  {
+   "env": "heltec_v2",
+   "chip": "ESP32",
+   "label": "Heltec V2 (ESP32 + SX1276)",
+   "version": "0.11",
+   "file": "heltec_v2.bin",
+   "offset": 65536,
+   "size": 368816,
+   "sha256": "c842432fc13068165f73dc19fa8ada311a93f9b3b60f808f3202628bfeca26a0",
+   "md5": "987f128a51193ea4c5248683efc0e4fd"
+  },
+  {
+   "env": "heltec_v3",
+   "chip": "ESP32-S3",
+   "label": "Heltec V3 (ESP32-S3 + SX1262)",
+   "version": "0.11",
+   "file": "heltec_v3.bin",
+   "offset": 65536,
+   "size": 356736,
+   "sha256": "0a109ac15b937ee7d01099a67ca3a497e11ecd1a6ba8519701451ca33d924d6c",
+   "md5": "300b6e6734404a169a947055c95394e8"
+  },
+  {
+   "env": "heltec_v3_gps",
+   "chip": "ESP32-S3",
+   "label": "Heltec V3 + GPS",
+   "version": "0.11",
+   "file": "heltec_v3_gps.bin",
+   "offset": 65536,
+   "size": 380512,
+   "sha256": "73809859e942edfa96671e3241e8c77069f145a1d70446a3bf3ac07e840838ee",
+   "md5": "d818f00bcecb70ea393ee736d9c78efb"
+  }
+ ]
+}
