@@ -560,3 +560,44 @@ table{border-spacing:0}.tw{border:1px solid var(--bd);border-radius:12px;backgro
 @media(max-width:1023px){.top{gap:8px;padding-inline:12px}#side{background:var(--card);box-shadow:12px 0 36px #11182720}.shell.nav-open .scrim{backdrop-filter:blur(2px)}}
 @media(max-width:640px){main{padding:14px 12px calc(18px + env(safe-area-inset-bottom))}.top{gap:6px;padding-inline:10px}.top .phr{gap:5px}.top .hchip{padding:5px 8px;font-size:12px}.top .hchip.tm{display:none}.top .btn{min-width:40px;min-height:40px}.ptw .pt{font-size:17px}.card{padding:15px;border-radius:13px;margin-bottom:12px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.kpi{min-width:0;padding:11px;gap:8px}.kpi .kl{font-size:12px;line-height:1.35}.kpi .kv{font-size:22px;overflow-wrap:anywhere}.kpi .ks{font-size:11.5px;line-height:1.4}.ac{padding:13px;border-radius:12px}.tw{margin-inline:-2px}.tw>table{min-width:600px}.tw td,.tw th{padding:9px 10px}.lst-bar{align-items:stretch}.lst-bar .sp{display:none}.lst-bar select,.lst-bar input{min-height:42px}.row>.btn{min-height:44px}}
 @media(prefers-reduced-motion:reduce){.top,.ac,.btn{scroll-behavior:auto;transition:none}}
+
+/* SOS LoRa command center */
+:root {
+  --bg:#f7f5f0; --ink:#102638; --mut:#586671; --bd:#e1e0da;
+  --pri:#176d63; --pri3:var(--pri); --pri2:#e0f1ec; --pine:#0b2335;
+  --brass:#98712f; --brass2:#e8c477; --red:#ba2538;
+}
+html[data-theme=dark] {
+  --bg:#101b25; --card:#182936; --ink:#eef4f5; --mut:#abbcc6; --bd:#344550;
+  --soft:#203440; --line:#465762; --pri:#298076; --pri2:#20433f;
+}
+#side {
+  --mut:#adc0cc; --ink:#f7fafc; --bd:#344a5a; --soft:#203b4e; --line:#4a6070;
+  background:#0b2335; color:var(--ink);
+}
+#side .sbrand b {font-size:23px; letter-spacing:.01em}
+#side nav button, #side nav button svg.i {color:#d6e2e8}
+#side nav button.on {background:#263e50; color:white; box-shadow:inset 4px 0 #e8c477}
+#side nav button.on svg.i {color:#e8c477}
+.top .pt {border-inline-start:4px solid #b69250; padding-inline-start:10px}
+.case-search input {width:clamp(190px,18vw,310px)}
+.card,.kpi {box-shadow:0 2px 7px #1322350a}
+.kpis {background:none; border:0; gap:10px; overflow:visible}
+.kpi,.kpi.red {border:1px solid var(--bd); border-radius:12px; padding:14px; box-shadow:0 2px 7px #1322350a}
+.kpi.red {border-top:3px solid var(--red)}
+.case-banner {padding:12px 18px; margin-bottom:14px; border:1px solid var(--red); border-radius:10px; background:var(--red2); color:var(--red); font-weight:700}
+.clinical-grid {display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:16px; align-items:start}
+.clinical-grid h3 {border-bottom:1px solid var(--bd); padding-bottom:10px}
+.clinical-queue {display:grid; gap:10px}
+.clinical-queue .ac .row {justify-content:flex-end}
+.clinical-queue .ac .btn {flex:0 1 auto; min-width:84px}
+.gateway-row {display:flex; justify-content:space-between; align-items:center; gap:12px; padding:9px 0}
+.gateway-row + .gateway-row {border-top:1px solid var(--bd)}
+.response-chart {display:block; width:100%; color:var(--pri)}
+.response-chart path {fill:none}
+.response-chart .grid {stroke:var(--bd); stroke-dasharray:4 3}
+.response-chart .trend,.response-chart circle {stroke:currentColor; stroke-width:2.5}
+.response-chart circle {fill:var(--card)}
+.response-chart text {fill:var(--mut); font-size:11px}
+@media(max-width:1200px){.case-search{display:none}}
+@media(max-width:800px){.clinical-grid{grid-template-columns:1fr;gap:0}}

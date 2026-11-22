@@ -247,7 +247,7 @@ function render(){
   const ngrp=(g,i)=>{const open=!navC.has(g[0]);return `<div class="ngw"><button type="button" class="ng" data-g="${esc(g[0])}" aria-expanded="${open}" aria-controls="ng${i}"><span>${g[0]}</span>${g[0]===curG?.[0]?"":`<em>${g[1].length}</em>`}${ico("chev")}</button><div class="ngi" id="ng${i}" ${open?"":"hidden"}>${g[1].map(navb).join("")}</div></div>`};
   const bc=`<nav class="bc" aria-label="ตำแหน่งหน้า"><ol><li><button type="button" data-bp="cases">หน้าหลัก</button></li>${curG?`<li class="bcg">${curG[0]}</li>`:""}<li id="bccur" aria-current="page"><span>${title}</span></li></ol></nav>`;
   $("#app").innerHTML=`<div class="shell" id="shell">
-   <aside id="side" aria-label="เมนู"><div class="sbrand">${LOGO(34)}<div><b>ระบบแจ้งเหตุฉุกเฉิน</b><span>ปุ่มแจ้งเหตุผู้ป่วยติดบ้าน</span></div></div>
+   <aside id="side" aria-label="เมนู"><div class="sbrand">${LOGO(40)}<div><b>SOS LoRa</b><span>ศูนย์แจ้งเหตุฉุกเฉิน</span></div></div>
     <nav>${groups.map(ngrp).join("")}</nav>
     <div class="me"><div class="who"><span class="av">${esc((sessionStorage.getItem("nm")||"?").trim().charAt(0).toUpperCase())}</span><div><b>${esc(sessionStorage.getItem("nm")||"")}</b><span>${RN[role]||role}</span></div></div><div class="row"><button class="btn" id="pw">บัญชี</button><button class="btn" id="out">ออกจากระบบ</button></div></div></aside>
    <header class="top"><button class="ham" id="ham" aria-label="เปิดเมนู">${ico("menu")}</button><div class="ptw">${bc}<h1 class="pt" id="ptitle">${title}</h1></div>
@@ -263,6 +263,20 @@ function render(){
     const c=new Set(JSON.parse(lsGet("navc")||"[]"));open?c.delete(b.dataset.g):c.add(b.dataset.g);lsSet("navc",JSON.stringify([...c]))});
   // sub-views (case detail, edit forms) add a last breadcrumb item via crumb(); it goes away when #main no longer shows a "back" view
   new MutationObserver(()=>{if(!$("#main #back"))crumb(null)}).observe($("#main"),{childList:true});
+  if(page==="cases"){
+    const search=document.createElement("form");
+    search.className="case-search";
+    search.setAttribute("role","search");
+    search.innerHTML='<input type="search" aria-label="ค้นหาประวัติเคส" placeholder="ค้นหาผู้ป่วย ปุ่ม หรือเลขเคส">';
+    search.onsubmit=e=>{
+      e.preventDefault();
+      CH.q=search.elements[0].value.trim();
+      CH.offset=0;
+      caseOpen=0;
+      caseHistory();
+    };
+    $(".phr").before(search);
+  }
   ncInit();ncSeed();thmInit();fwLatest();
   $("#ham").onclick=()=>$("#shell").classList.add("nav-open");$("#scrim").onclick=()=>$("#shell").classList.remove("nav-open");
   $("#out").onclick=logout;$("#pw").onclick=()=>{page="account";render()};$("#snd").onclick=sndClick;sndUI();
@@ -280,7 +294,7 @@ function thmInit(){const b=$("#thm");if(!b)return;const d=isDark();b.innerHTML=i
     document.querySelector('meta[name=theme-color]')?.setAttribute("content",t==="dark"?"#12141c":"#4c5fd5");thmInit()}}
 function crumb(label){const p=$("#bccur"),pt=$("#ptitle");if(!p)return;const base=(p.dataset.base??=p.querySelector("span").textContent);
   document.querySelectorAll(".bc .bcx").forEach(e=>e.remove());
-  if(label==null){p.innerHTML=`<span>${esc(base)}</span>`;p.setAttribute("aria-current","page");if(pt)pt.textContent=base;return}
+  if(label==null){p.innerHTML=`<span>${esc(base)}</span>`;p.setAttribute("aria-current","page");if(pt)pt.textContent=page==="cases"?"ภาพรวมศูนย์แจ้งเหตุ":base;return}
   p.removeAttribute("aria-current");p.innerHTML=`<button type="button">${esc(base)}</button>`;p.querySelector("button").onclick=()=>{setDirty=()=>false;render();scrollTo(0,0)};
   p.insertAdjacentHTML("afterend",`<li class="bcx" aria-current="page"><span>${esc(label)}</span></li>`);if(pt)pt.textContent=label}
 let devEdit=false;

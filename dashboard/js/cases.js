@@ -64,6 +64,36 @@ function aiWire(root){
     b.onclick=guard(async()=>{b.disabled=true;b.textContent="✨ AI กำลังวิเคราะห์…";
       try{const r=await api("/ai/diagnose",{method:"POST",body:{scope,id:id?+id:null}});AIOUT[k]=r;show(k,r)}finally{b.disabled=false;b.textContent=old}})})}
 
+function responseTrend(cases, now = new Date()) {
+  const dayKey = date => date.toLocaleDateString("en-CA", {timeZone:"Asia/Bangkok"});
+  const days = Array.from({length:7}, (_, i) => {
+    const date = new Date(now.getTime() - (6-i)*86400000);
+    return {key:dayKey(date), label:date.toLocaleDateString("th-TH",{day:"numeric",month:"short",timeZone:"Asia/Bangkok"}), samples:[]};
+  });
+  for (const item of cases) {
+    if (!item.accepted_at || item.is_test) continue;
+    const created = new Date(item.created_at);
+    const seconds = (new Date(item.accepted_at)-created)/1000;
+    const day = days.find(d => d.key === dayKey(created));
+    if (day && seconds >= 0) day.samples.push(seconds);
+  }
+  const means = days.map(d => d.samples.length ? d.samples.reduce((a,b)=>a+b,0)/d.samples.length : null);
+  if (means.every(v => v === null)) return '<p class="mut">ยังไม่มีเคสที่รับเรื่องในช่วง 7 วันนี้</p>';
+  const peak = Math.max(60, Math.ceil(Math.max(...means)/60)*60);
+  let path = "";
+  const marks = days.map((day,i) => {
+    const x = 36+i*58, value = means[i];
+    let point = "";
+    if (value !== null) {
+      const y = 100-80*value/peak;
+      path += (i && means[i-1] !== null ? "L" : "M")+x+" "+y+" ";
+      point = `<circle cx="${x}" cy="${y}" r="4"><title>${day.label} · ${Math.round(value)} วินาที</title></circle>`;
+    }
+    return point+`<text x="${x}" y="121" text-anchor="middle">${day.label}</text>`;
+  }).join("");
+  return `<svg class="response-chart" viewBox="0 0 416 133" role="img" aria-label="เวลารับเรื่องเฉลี่ยรายวัน หน่วยนาที: ${days.map((d,i)=>d.label+' '+(means[i]===null?'ไม่มีข้อมูล':Math.round(means[i])+' วินาที')).join(', ')}"><path class="grid" d="M30 20H395 M30 60H395 M30 100H395"/><text x="2" y="24">${peak/60}</text><text x="2" y="102">0</text><path class="trend" d="${path}"/>${marks}</svg>`;
+}
+
 const loadCases=guard(async()=>{caseOpen=0;
   const [open,recent,st,gw]=await Promise.all([api("/cases?state=new,accepted"),api("/cases?limit=50"),api("/stats"),api("/gateways")]);
   if(page!=="cases")return;
@@ -78,9 +108,17 @@ const loadCases=guard(async()=>{caseOpen=0;
   $("#main").innerHTML=`${gwBad.length?`<div class="warn" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">⚠️ เกตเวย์ขาดการเชื่อมต่อ: ${gwBad.map(g=>esc(g.label||g.gateway_id)+(g.reason==="radio"?" (ตัวรับสัญญาณ LoRa เสีย)":"")).join(", ")} — ปุ่มของผู้ป่วยในระยะนี้อาจส่งไม่ถึง · <a href="#" id="gwgo">ดูรายละเอียด</a></div>`:""}${gwFix.length?`<div class="gm-on">🔧 เกตเวย์อยู่ระหว่างซ่อมบำรุง: ${gwFix.map(g=>esc(g.label||g.gateway_id)+(g.offline?" (ออฟไลน์)":"")).join(", ")} — ปุ่มที่ใช้เกตเวย์นี้อย่างเดียวอาจส่งเหตุไม่ถึง</div>`:""}${gwWarn.length&&!gwBad.length?`<div class="warn">เกตเวย์มีข้อควรตรวจ: ${gwWarn.map(g=>esc(g.label||g.gateway_id)+" — "+esc(g.critical.concat(g.warnings).join(", ")||"ตรวจสอบ")).join(" · ")}</div>`:""}
   <div class="kpis">${kpi("🚨","รอรับเรื่อง",nNew,nNew?"ต้องดำเนินการทันที":"ไม่มีเคสรอ",nNew?"red":"grn")}${kpi("🩺","กำลังดูแล",nAcc,"รับเรื่องแล้ว ยังไม่ปิด","amb")}${kpi("📈","เคส 30 วัน",st.cases_30d,`ผิดพลาด ${st.false_alarm} · นอกเวลา ${st.after_hours}`,"ind")}${kpi("⏱️","รับเรื่องเฉลี่ย",dur(st.avg_accept_s),"ตั้งแต่กดปุ่มถึงมีคนรับ","")}${kpi("📡","เกตเวย์ออนไลน์",gw.length?`${gwOn}/${gw.length}`:"0",!gw.length?"ยังไม่มีเกตเวย์":gwBad.length?"มีเกตเวย์ขาดการเชื่อมต่อ":"ทำงานปกติ",gwBad.length?"red":gw.length?"grn":"","gateways")}${(()=>{const h=st.devices||{active:0};if(!h.active)return kpi("🔘","ปุ่มส่งสัญญาณปกติ","0","ยังไม่มีปุ่มที่ใช้งาน","","devices");
     const bad=h.offline+h.never;return kpi("🔘","ปุ่มส่งสัญญาณปกติ",`${h.ok}/${h.active}`,bad?`ขาดการติดต่อ ${bad} เครื่อง${h.late?` · เลยรอบ ${h.late}`:""}`:h.late?`เลยรอบ ${h.late} เครื่อง — รอรอบถัดไป`:"ส่งตามรอบทุกเครื่อง",bad?"red":h.late?"amb":"grn","devices")})()}</div>
-  <div class="card ${nNew?"alarm":""}"><h3>เคสที่ยังเปิดอยู่ (${open.length})</h3>${open.length?`<div class="acs">${open.map(card).join("")}</div>`:`<div class="empty"><div class="big">✅</div><h4>ทุกบ้านปลอดภัย</h4><p class="mut">ไม่มีเคสค้าง — ระบบจะแจ้งเตือนพร้อมเสียงทันทีเมื่อมีการกดปุ่ม${audioOn?"":" (เปิดเสียงเตือนที่มุมขวาบน)"}</p></div>`}</div>
+  <div class="clinical-grid"><section class="card"><h3>เคสที่ต้องดำเนินการ · ${open.length}</h3>${open.length?`<div class="clinical-queue">${[...open].sort((a,b)=>Number(b.state==="new")-Number(a.state==="new")).map(card).join("")}</div>`:`<div class="empty"><div class="big">✅</div><h4>ไม่มีเคสค้าง</h4></div>`}</section>
+  <div><section class="card"><h3>ประสิทธิภาพการตอบสนอง</h3><p class="mut">เวลารับเรื่องเฉลี่ย (นาที) · 7 วัน จาก 50 เคสล่าสุด</p>${responseTrend(recent)}</section>
+  <section class="card"><h3>สถานะเครือข่าย</h3>${gw.map(g=>`<div class="gateway-row"><b>${esc(g.label||g.gateway_id)}</b><span class="pill ${g.maint?"amb":g.offline?"red":g.status==="warning"?"amb":"grn"}">${g.maint?"ซ่อมบำรุง":g.offline?"ออฟไลน์":g.status==="warning"?"ควรตรวจสอบ":"ออนไลน์"}</span></div>`).join("")||'<p class="mut">ยังไม่มีเกตเวย์</p>'}</section></div></div>
   <div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">เคสล่าสุด (50 รายการ)</h3><button class="btn" id="chist">🔎 ค้นหาประวัติเคสทั้งหมด</button></div>${recent.length?`<table><tr><th>#</th><th>ผู้ป่วย</th><th>สถานะ</th><th>เวลา</th><th>ผู้รับเรื่อง</th><th></th></tr>${recent.map(row).join("")}</table>`:'<p class="mut">ยังไม่มีเคส</p>'}</div>`;
   lister("cases",$("#main").lastElementChild,{noun:"เคส"});
+  if(nNew){
+    const banner=document.createElement("div");
+    banner.className="case-banner";
+    banner.textContent=`มีเคสรอรับเรื่อง ${nNew} เคส`;
+    $("#main .kpis").before(banner);
+  }
   document.querySelectorAll("[data-a=view]").forEach(b=>b.onclick=()=>showCase(b.dataset.id));
   if($("#chist"))$("#chist").onclick=()=>caseHistory();
   document.querySelectorAll(".kpi[data-go]").forEach(k=>{const go=()=>{page=k.dataset.go;render();scrollTo(0,0)};k.onclick=go;k.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go()}}});
