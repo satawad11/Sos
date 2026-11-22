@@ -65,6 +65,16 @@ def case_dict(c: Case, events=False, role: str = "staff"):
     return d
 
 
+@router.get("/cases/open")
+def open_cases(pending_only: bool = False, db: Session = Depends(get_db), u=Depends(current_user)):
+    """The operational queue must include outstanding cases regardless of history page size."""
+    states = ("new",) if pending_only else ("new", "accepted")
+    rows = (db.query(Case).options(joinedload(Case.device), joinedload(Case.patient))
+            .filter(Case.state.in_(states), Case.is_test.is_(False))
+            .order_by(Case.id.desc()).all())
+    return [case_dict(c, role=u.role) for c in rows]
+
+
 @router.get("/cases")
 def list_cases(response: Response, state: str | None = None, include_test: bool = False, limit: int = 100, offset: int = Query(default=0, ge=0),
                frm: str | None = Query(default=None, alias="from"), to: str | None = None, patient_id: int | None = None,

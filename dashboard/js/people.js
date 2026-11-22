@@ -64,7 +64,8 @@ const loadPatients=guard(async()=>{
     $("#back").onclick=()=>render();$("#sv").onclick=guard(async()=>{const ids=[1,2,3].map(i=>$("#s"+i).value).filter(Boolean).map(Number);await api(`/patients/${p.id}/assignments`,{method:"PUT",body:{caregiver_ids:ids}});toast("บันทึกแล้ว");render()})})});
 
 // ---------------------------------------------------------------- case history (server-side search + paging)
-let CH={from:"",to:"",state:"",reason:"",village:"",q:"",offset:0};const CH_PAGE=50;
+function historyFilters(q=""){return {from:"",to:"",state:"",reason:"",village:"",q,offset:0}}
+let CH=historyFilters();const CH_PAGE=50;
 async function apiList(path){const r=await fetch("/api"+path,{headers:{authorization:"Bearer "+token}});if(!r.ok){let m=r.status;try{m=(await r.json()).detail||m}catch(e){}throw new Error(m)}return {rows:await r.json(),total:+r.headers.get("X-Total-Count")||0}}
 const caseHistory=guard(async()=>{devEdit=true;
   const vs=[...new Set((await api("/patients")).map(p=>p.village).filter(Boolean))].sort();
@@ -86,7 +87,7 @@ const caseHistory=guard(async()=>{devEdit=true;
     if($("#hp"))$("#hp").onclick=()=>{CH.offset=Math.max(0,CH.offset-CH_PAGE);run()};if($("#hn"))$("#hn").onclick=()=>{CH.offset+=CH_PAGE;run()}});
   const read=()=>{CH={from:$("#hf").value,to:$("#ht").value,state:$("#hs").value,reason:$("#hr").value,village:$("#hv").value,q:$("#hq").value.trim(),offset:0}};
   $("#hgo").onclick=()=>{read();run()};$("#hq").onkeydown=e=>{if(e.key==="Enter"){read();run()}};
-  $("#hcl").onclick=()=>{CH={from:"",to:"",state:"",reason:"",village:"",q:"",offset:0};caseHistory()};
+  $("#hcl").onclick=()=>{CH=historyFilters();caseHistory()};
   $("#back").onclick=()=>{devEdit=false;render()};run()});
 
 // ---------------------------------------------------------------- bulk import from CSV

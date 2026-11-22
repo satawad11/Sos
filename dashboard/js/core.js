@@ -89,7 +89,7 @@ function devNotify(m){const is=m.issue||"",k=Object.keys(DVI).find(k=>is.startsW
     at:new Date().toISOString(),read:ok&&old?old.read:false,go:{page:"devices"}});
   NC.set(a);ncBadge();if($("#ncp")&&!$("#ncp").hidden)ncDraw()}
 async function ncSeed(){if(ncSeed.done)return;ncSeed.done=true;   // open cases that arrived while nobody was signed in
-  try{const cs=await api("/cases?state=new");alarmSet(cs.filter(c=>!c.is_test).map(c=>c.id));cs.filter(c=>!c.is_test).forEach(c=>notify({id:`c${c.id}n`,kind:"sos",title:`เคสฉุกเฉินใหม่ #${c.id}`,body:c.patient?`${c.patient.full_name} · ${c.patient.address||""}`:"",go:{case:c.id},at:c.created_at}))}catch(e){}}
+  try{const cs=await api("/cases/open?pending_only=true");alarmSet(cs.filter(c=>!c.is_test).map(c=>c.id));cs.filter(c=>!c.is_test).forEach(c=>notify({id:`c${c.id}n`,kind:"sos",title:`เคสฉุกเฉินใหม่ #${c.id}`,body:c.patient?`${c.patient.full_name} · ${c.patient.address||""}`:"",go:{case:c.id},at:c.created_at}))}catch(e){}}
 
 // emergency popup: one modal that lists every new case not yet handled in this browser
 const sosQ=new Map();
@@ -152,7 +152,7 @@ function devSeen(m){clearTimeout(devSeen.t);
   if(page==="devices"&&!devEdit){seenFlash=m.device_id;devSeen.t=setTimeout(()=>{if(page==="devices"&&!devEdit)loadDevices()},600)}
   else if(page==="cases"&&!caseOpen)devSeen.t=setTimeout(()=>{if(page==="cases"&&!caseOpen)loadCases()},1500)}
 async function liveResync(){
-  try{const cs=await api("/cases?state=new");alarmSet(cs.filter(c=>!c.is_test).map(c=>c.id))}catch(e){}
+  try{const cs=await api("/cases/open?pending_only=true");alarmSet(cs.filter(c=>!c.is_test).map(c=>c.id))}catch(e){}
   if(page==="cases"&&!caseOpen&&!devEdit)loadCases();else if(page==="map")loadMap?.();else if(!devEdit&&page==="devices")loadDevices();else if(!devEdit&&page==="gateways")loadGateways()}
 
 // ---------------------------------------------------------------- alarm sound
@@ -209,9 +209,15 @@ let wsUp=false;
 const nowTH=()=>new Date().toLocaleString("th-TH",{weekday:"short",day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
 function setConn(up){wsUp=up;const c=$("#conn");if(c)c.innerHTML=`<span class="sdot ${up?"on":"off"}"></span>${up?"เชื่อมต่อสด":"ขาดการเชื่อมต่อ — กำลังลองใหม่"}`}
 setInterval(()=>{const c=$("#clk");if(c)c.textContent=nowTH()},20000);
-const dur=s=>s==null?"-":s<60?Math.round(s)+"<small>วินาที</small>":Math.floor(s/60)+":"+String(Math.round(s%60)).padStart(2,"0")+"<small>นาที</small>";
+function dur(value){
+  if(value==null)return "-";
+  const seconds=Math.round(value);
+  if(seconds<60)return seconds+"<small>วินาที</small>";
+  return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")+"<small>นาที</small>";
+}
 
 function render(){
+  if(page==="cases"){devEdit=false;caseOpen=0}
   if(token&&sessionStorage.getItem("mc")==="1"){pwScreen(true);return}
   if(token&&sessionStorage.getItem("ms")==="1"){mfaSetup(true);return}
   if(!token){
@@ -270,8 +276,7 @@ function render(){
     search.innerHTML='<input type="search" aria-label="ค้นหาประวัติเคส" placeholder="ค้นหาผู้ป่วย ปุ่ม หรือเลขเคส">';
     search.onsubmit=e=>{
       e.preventDefault();
-      CH.q=search.elements[0].value.trim();
-      CH.offset=0;
+      CH=historyFilters(search.elements[0].value.trim());
       caseOpen=0;
       caseHistory();
     };
